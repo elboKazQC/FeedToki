@@ -40,13 +40,12 @@ type StatsUI = {
 type CategoryFilter = 'all' | 'sain' | 'ok' | 'cheat';
 
 const STORAGE_KEY = 'feedtoki_entries_v1';
-const POINTS_KEY = 'feedtoki_points_v2'; // v2 pour reset
+const POINTS_KEY = 'feedtoki_points_v2';
 const TARGETS_KEY = 'feedtoki_targets_v1';
-const DAILY_POINTS = 3; // Points quotidiens fixes
-const MAX_POINTS = 12; // Cap d'accumulation strict
-const INITIAL_POINTS = 2; // Débutants commencent avec peu
+const DAILY_POINTS = 3;
+const MAX_POINTS = 12;
+const INITIAL_POINTS = 2;
 
-// Map score 0-100 to UI label/level (1..3) for existing visuals
 function mapScore7ToStatsUI(score: number): StatsUI {
   let label = 'À améliorer 🐉';
   let level: 1 | 2 | 3 = 1;
@@ -76,20 +75,18 @@ function scoreToCategory(score: number): MealEntry['category'] {
 }
 
 function computeFoodPoints(fi: FoodItem): number {
-  // Heuristic: calories + carbs + transformation level; sugar/ultra tags add a bit; healthy items return 0.
   const cat = scoreToCategory(fi.baseScore);
-    if (typeof fi.points === 'number') return fi.points;
-    if (cat === 'sain') return 0;
+  if (typeof fi.points === 'number') return fi.points;
+  if (cat === 'sain') return 0;
   const cal = fi.calories_kcal ?? 200;
   const carbs = fi.carbs_g ?? 0;
   const sugarBoost = fi.tags.includes('sucre') ? 1.5 : 0;
   const ultraBoost = fi.tags.includes('ultra_transforme') ? 1.5 : 0;
-  const basePenalty = Math.max(0, (100 - fi.baseScore) / 20); // up to ~5
+  const basePenalty = Math.max(0, (100 - fi.baseScore) / 20);
   const raw = cal / 150 + carbs / 50 + sugarBoost + ultraBoost + basePenalty;
   return Math.max(0, Math.round(raw));
 }
 
-// ---- Composant principal ----
 export default function App() {
   const [screen, setScreen] = useState<'home' | 'add'>('home');
   const [entries, setEntries] = useState<MealEntry[]>([]);
@@ -98,7 +95,6 @@ export default function App() {
   const [lastClaimDate, setLastClaimDate] = useState<string>('');
   const [targets, setTargets] = useState(DEFAULT_TARGETS);
 
-  // Charger les entrées au démarrage
   useEffect(() => {
     const load = async () => {
       try {
@@ -126,7 +122,6 @@ export default function App() {
     load();
   }, []);
 
-  // Notifications (permission + planification)
   useEffect(() => {
     const setupNotifications = async () => {
       try {
@@ -142,7 +137,6 @@ export default function App() {
     setupNotifications();
   }, []);
 
-  // Charger les objectifs nutritionnels personnalisés
   useEffect(() => {
     const loadTargets = async () => {
       try {
@@ -154,7 +148,6 @@ export default function App() {
               protein_g: Number(parsed.protein_g) || DEFAULT_TARGETS.protein_g,
               carbs_g: Number(parsed.carbs_g) || DEFAULT_TARGETS.carbs_g,
               calories_kcal: Number(parsed.calories_kcal) || DEFAULT_TARGETS.calories_kcal,
-              dairy_servings: Number(parsed.dairy_servings) || DEFAULT_TARGETS.dairy_servings,
             });
           }
         }
@@ -165,7 +158,6 @@ export default function App() {
     loadTargets();
   }, []);
 
-  // Calculer streak et stats avant de les utiliser
   const dayFeeds = useMemo(() => buildDayFeeds(entries), [entries]);
   const score7 = computeScore7Jours(entries);
   const stats = mapScore7ToStatsUI(score7.score);
@@ -174,7 +166,6 @@ export default function App() {
   const recommendations = getCanadaGuideRecommendations(entries);
   const todayTotals = computeDailyTotals(entries, new Date().toISOString());
 
-  // Points: charger et créditer quotidiennement
   useEffect(() => {
     const loadPoints = async () => {
       const today = new Date().toISOString().slice(0, 10);
@@ -203,7 +194,6 @@ export default function App() {
     loadPoints();
   }, []);
 
-  // Sauvegarder à chaque changement
   useEffect(() => {
     const save = async () => {
       try {
@@ -275,7 +265,6 @@ export default function App() {
   );
 }
 
-// ---- Écran d'accueil ----
 function HomeScreen({
   entries,
   onPressAdd,
@@ -304,7 +293,6 @@ function HomeScreen({
     protein_g: targets.protein_g.toString(),
     carbs_g: targets.carbs_g.toString(),
     calories_kcal: targets.calories_kcal.toString(),
-    dairy_servings: targets.dairy_servings.toString(),
   });
 
   useEffect(() => {
@@ -312,7 +300,6 @@ function HomeScreen({
       protein_g: targets.protein_g.toString(),
       carbs_g: targets.carbs_g.toString(),
       calories_kcal: targets.calories_kcal.toString(),
-      dairy_servings: targets.dairy_servings.toString(),
     });
   }, [targets]);
 
@@ -321,7 +308,6 @@ function HomeScreen({
       protein_g: Number(draftTargets.protein_g) || targets.protein_g,
       carbs_g: Number(draftTargets.carbs_g) || targets.carbs_g,
       calories_kcal: Number(draftTargets.calories_kcal) || targets.calories_kcal,
-      dairy_servings: Number(draftTargets.dairy_servings) || targets.dairy_servings,
     };
     await onSaveTargets(next);
     setIsEditingTargets(false);
@@ -386,7 +372,6 @@ function HomeScreen({
         <NutritionBar label="Protéines" value={todayTotals.protein_g} unit="g" pct={percentageOfTarget(todayTotals.protein_g, targets.protein_g)} color="#22c55e" />
         <NutritionBar label="Glucides" value={todayTotals.carbs_g} unit="g" pct={percentageOfTarget(todayTotals.carbs_g, targets.carbs_g)} color="#3b82f6" />
         <NutritionBar label="Calories" value={todayTotals.calories_kcal} unit="kcal" pct={percentageOfTarget(todayTotals.calories_kcal, targets.calories_kcal)} color="#f59e0b" />
-        <NutritionBar label="Produits laitiers" value={todayTotals.dairy_servings} unit="portion(s)" pct={percentageOfTarget(todayTotals.dairy_servings, targets.dairy_servings)} color="#a78bfa" />
 
         {!isEditingTargets && (
           <TouchableOpacity style={styles.buttonGhost} onPress={() => setIsEditingTargets(true)}>
@@ -422,15 +407,6 @@ function HomeScreen({
                 keyboardType="numeric"
                 value={draftTargets.calories_kcal}
                 onChangeText={(t) => setDraftTargets((prev) => ({ ...prev, calories_kcal: t.replace(',', '.') }))}
-              />
-            </View>
-            <View style={styles.targetRow}>
-              <Text style={styles.targetLabel}>Produits laitiers (portions)</Text>
-              <TextInput
-                style={styles.targetInput}
-                keyboardType="numeric"
-                value={draftTargets.dairy_servings}
-                onChangeText={(t) => setDraftTargets((prev) => ({ ...prev, dairy_servings: t.replace(',', '.') }))}
               />
             </View>
             <View style={styles.targetsActions}>
@@ -471,7 +447,6 @@ function HomeScreen({
   );
 }
 
-// ---- Écran ajout d'une consommation ----
 function AddEntryScreen({
   onCancel,
   onSave,
@@ -491,6 +466,7 @@ function AddEntryScreen({
   const [category, setCategory] = useState<MealEntry['category']>('sain');
   const [items, setItems] = useState<FoodItemRef[]>([]);
   const [quickFilter, setQuickFilter] = useState<CategoryFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectionNutrition = useMemo(() => {
     return items.reduce(
@@ -521,7 +497,7 @@ function AddEntryScreen({
       if (exists) return prev.filter((i) => i.foodId !== foodId);
       const fi = QUICK_ITEMS.find((f) => f.id === foodId);
       const addCost = fi ? computeFoodPoints(fi) : 0;
-      if (pendingCost + addCost > points) return prev; // not enough points
+      if (pendingCost + addCost > points) return prev;
       return [...prev, { foodId }];
     });
   };
@@ -542,13 +518,30 @@ function AddEntryScreen({
     return quickFilter === 'all' || cls.category === quickFilter;
   });
 
+  // Aliments de la base de données filtrés par recherche
+  const searchResults = searchQuery.trim().length > 0
+    ? FOOD_DB.filter((food) =>
+        food.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ).slice(0, 8) // Limiter à 8 résultats
+    : [];
+
+
   const handleSave = () => {
-    // Auto-generate label if empty but items selected
     let finalLabel = label.trim();
     if (!finalLabel && items.length > 0) {
       finalLabel = items.map(it => FOOD_DB.find(f => f.id === it.foodId)?.name || it.foodId).join(', ');
     }
-    if (!finalLabel) return; // Still need at least items or text
+    if (!finalLabel) return;
+    const projected = {
+      protein_g: todayTotals.protein_g + selectionNutrition.protein_g,
+      carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g,
+      calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal,
+    };
+    const overTargets =
+      projected.protein_g > targets.protein_g ||
+      projected.carbs_g > targets.carbs_g ||
+      projected.calories_kcal > targets.calories_kcal;
+    if (overTargets) return;
     
     const classification = items.length > 0 ? classifyMealByItems(items) : { score: mapManualCategoryToScore(category), category };
     onSave({ label: finalLabel, category: classification.category, score: classification.score, items });
@@ -556,18 +549,66 @@ function AddEntryScreen({
   };
 
   return (
-    <View style={styles.inner}>
+    <ScrollView style={styles.innerScroll} contentContainerStyle={styles.innerScrollContent}>
       <Text style={styles.logo}>Partager avec Toki</Text>
 
+      <Text style={styles.label}>Rechercher un aliment</Text>
       <TextInput
         style={styles.input}
-        placeholder="Ex: poulet + légumes, poutine, bière..."
+        placeholder="Ex: Pâté Chinois, burger, poutine..."
         placeholderTextColor="#6b7280"
-        value={label}
-        onChangeText={setLabel}
+        value={searchQuery}
+        onChangeText={setSearchQuery}
       />
 
-      <Text style={styles.label}>Catégorie</Text>
+      {searchResults.length > 0 && (
+        <View style={styles.searchResults}>
+          {searchResults.map((food) => {
+            const cost = computeFoodPoints(food as any);
+            const selected = items.some((i) => i.foodId === food.id);
+            const candidateMacros = {
+              protein_g: food.protein_g || 0,
+              carbs_g: food.carbs_g || 0,
+              calories_kcal: food.calories_kcal || 0,
+            };
+            const projected = {
+              protein_g: todayTotals.protein_g + selectionNutrition.protein_g + candidateMacros.protein_g,
+              carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + candidateMacros.carbs_g,
+              calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + candidateMacros.calories_kcal,
+            };
+            const overTargets =
+              projected.protein_g > targets.protein_g ||
+              projected.carbs_g > targets.carbs_g ||
+              projected.calories_kcal > targets.calories_kcal;
+            const enoughPoints = pendingCost + cost <= points;
+            const canSelect = enoughPoints && !overTargets;
+            return (
+              <TouchableOpacity
+                key={food.id}
+                style={[
+                  styles.searchResultItem,
+                  selected && styles.searchResultItemSelected,
+                  !canSelect && styles.searchResultItemDisabled,
+                ]}
+                onPress={() => {
+                  if (!canSelect) return;
+                  if (!selected) {
+                    setItems((prev) => [...prev, { foodId: food.id }]);
+                  } else {
+                    setItems((prev) => prev.filter((i) => i.foodId !== food.id));
+                  }
+                }}
+              >
+                <Text style={[styles.searchResultText, selected && styles.searchResultTextSelected, !canSelect && styles.searchResultTextDisabled]}>
+                  {food.name} · {cost} pts
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      <Text style={styles.label}>Note du repas</Text>
       <CategoryChips
         category={category}
         setCategory={(cat) => {
@@ -596,23 +637,20 @@ function AddEntryScreen({
         {filteredItems.map((fi) => {
           const cost = computeFoodPoints(fi as any);
           const selected = items.some((i) => i.foodId === fi.id);
-          const macros = {
+          const candidateMacros = {
             protein_g: fi.protein_g || 0,
             carbs_g: fi.carbs_g || 0,
             calories_kcal: fi.calories_kcal || 0,
-            dairy_servings: fi.dairy_serving || 0,
           };
           const projected = {
-            protein_g: todayTotals.protein_g + selectionNutrition.protein_g + (selected ? 0 : macros.protein_g),
-            carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + (selected ? 0 : macros.carbs_g),
-            calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + (selected ? 0 : macros.calories_kcal),
-            dairy_servings: todayTotals.dairy_servings + selectionNutrition.dairy_servings + (selected ? 0 : macros.dairy_servings),
+            protein_g: todayTotals.protein_g + selectionNutrition.protein_g + candidateMacros.protein_g,
+            carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + candidateMacros.carbs_g,
+            calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + candidateMacros.calories_kcal,
           };
           const overTargets =
             projected.protein_g > targets.protein_g ||
             projected.carbs_g > targets.carbs_g ||
-            projected.calories_kcal > targets.calories_kcal ||
-            projected.dairy_servings > targets.dairy_servings;
+            projected.calories_kcal > targets.calories_kcal;
           const affordable = pendingCost + (selected ? 0 : cost) <= points && !overTargets;
           return (
             <TouchableOpacity
@@ -620,14 +658,14 @@ function AddEntryScreen({
               style={[
                 styles.quickChip,
                 selected && styles.quickChipSelected,
-                (!affordable || overTargets) && styles.quickChipDisabled,
+                !affordable && styles.quickChipDisabled,
               ]}
               onPress={() => {
                 if (!affordable) return;
                 toggleItem(fi.id);
               }}
             >
-              <Text style={[styles.quickChipText, (!affordable || overTargets) && styles.quickChipTextDisabled]}>
+              <Text style={[styles.quickChipText, !affordable && styles.quickChipTextDisabled]}>
                 {fi.name} · {cost} pts
               </Text>
             </TouchableOpacity>
@@ -642,41 +680,38 @@ function AddEntryScreen({
             const fi = filteredItems.find((f) => f.id === ref.foodId);
             return sum + (fi ? computeFoodPoints(fi as any) : 0);
           }, 0);
-          const macrosSum = qm.items.reduce(
+          const macroSum = qm.items.reduce(
             (acc, ref) => {
-              const fi = FOOD_DB.find((f) => f.id === ref.foodId);
+              const fi = filteredItems.find((f) => f.id === ref.foodId);
               if (!fi) return acc;
               return {
                 protein_g: acc.protein_g + (fi.protein_g || 0),
                 carbs_g: acc.carbs_g + (fi.carbs_g || 0),
                 calories_kcal: acc.calories_kcal + (fi.calories_kcal || 0),
-                dairy_servings: acc.dairy_servings + (fi.dairy_serving || 0),
               };
             },
-            { protein_g: 0, carbs_g: 0, calories_kcal: 0, dairy_servings: 0 }
+            { protein_g: 0, carbs_g: 0, calories_kcal: 0 }
           );
           const projected = {
-            protein_g: todayTotals.protein_g + selectionNutrition.protein_g + macrosSum.protein_g,
-            carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + macrosSum.carbs_g,
-            calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + macrosSum.calories_kcal,
-            dairy_servings: todayTotals.dairy_servings + selectionNutrition.dairy_servings + macrosSum.dairy_servings,
+            protein_g: todayTotals.protein_g + selectionNutrition.protein_g + macroSum.protein_g,
+            carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + macroSum.carbs_g,
+            calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + macroSum.calories_kcal,
           };
           const overTargets =
             projected.protein_g > targets.protein_g ||
             projected.carbs_g > targets.carbs_g ||
-            projected.calories_kcal > targets.calories_kcal ||
-            projected.dairy_servings > targets.dairy_servings;
+            projected.calories_kcal > targets.calories_kcal;
           const affordable = pendingCost + totalCost <= points && !overTargets;
           return (
             <TouchableOpacity
               key={qm.id}
-              style={[styles.quickMealBtn, (!affordable || overTargets) && styles.quickMealBtnDisabled]}
+              style={[styles.quickMealBtn, !affordable && styles.quickMealBtnDisabled]}
               onPress={() => {
                 if (!affordable) return;
                 applyQuickMeal(qm.id);
               }}
             >
-              <Text style={[styles.quickMealText, (!affordable || overTargets) && styles.quickChipTextDisabled]}>
+              <Text style={[styles.quickMealText, !affordable && styles.quickChipTextDisabled]}>
                 {qm.name} · {totalCost} pts
               </Text>
             </TouchableOpacity>
@@ -693,12 +728,10 @@ function AddEntryScreen({
           <Text style={styles.saveText}>Nourrir Toki</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
-
-// ---- Composant chips catégories réutilisable ----
 function CategoryChips({
   category,
   setCategory,
@@ -735,7 +768,6 @@ function CategoryChips({
   );
 }
 
-// ---- Styles ----
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -749,12 +781,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingBottom: 24,
-  },
-  inner: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
   },
   logo: {
     fontSize: 28,
@@ -821,18 +847,14 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontSize: 14,
   },
-  buttonSecondary: {
-    backgroundColor: '#111827',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#4b5563',
-    alignItems: 'center',
+  innerScroll: {
+    flex: 1,
+    width: '100%',
   },
-  buttonSecondaryText: {
-    color: '#e5e7eb',
-    fontSize: 15,
+  innerScrollContent: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 100,
   },
   historyBox: {
     width: '100%',
@@ -856,6 +878,38 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontSize: 13,
     marginBottom: 12,
+  },
+  searchResults: {
+    width: '100%',
+    backgroundColor: '#0b1220',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  searchResultItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f2937',
+  },
+  searchResultItemSelected: {
+    backgroundColor: '#22c55e33',
+  },
+  searchResultItemDisabled: {
+    opacity: 0.45,
+  },
+  searchResultText: {
+    color: '#e5e7eb',
+    fontSize: 13,
+  },
+  searchResultTextSelected: {
+    color: '#bbf7d0',
+    fontWeight: '600',
+  },
+  searchResultTextDisabled: {
+    color: '#9ca3af',
   },
   targetsForm: {
     width: '100%',
@@ -1037,7 +1091,9 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
   },
   saveBtn: {
+    flex: 1,
     paddingVertical: 12,
+    marginLeft: 6,
     borderRadius: 999,
     backgroundColor: '#22c55e',
     alignItems: 'center',
@@ -1045,30 +1101,6 @@ const styles = StyleSheet.create({
   saveText: {
     color: '#022c22',
     fontWeight: 'bold',
-  },
-  askBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    marginLeft: 6,
-    borderRadius: 999,
-    backgroundColor: '#0369a1',
-    alignItems: 'center',
-  },
-  askText: {
-    color: '#e0f2fe',
-    fontWeight: 'bold',
-  },
-  adviceText: {
-    color: '#e5e7eb',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 6,
-  },
-  previewStats: {
-    color: '#9ca3af',
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: 16,
   },
   streakText: {
     color: '#c4b5fd',
