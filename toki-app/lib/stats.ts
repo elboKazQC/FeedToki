@@ -5,6 +5,9 @@ export type MealCategory = 'sain' | 'ok' | 'cheat';
 export type FoodItemRef = {
   foodId: string;
   quantityHint?: string;
+  portionSize?: 'small' | 'medium' | 'large'; // Ajouté pour les portions
+  portionGrams?: number; // Poids en grammes
+  multiplier?: number; // Multiplicateur pour les macros (1.0 = portion moyenne)
 };
 
 export type MealEntry = {
@@ -27,6 +30,8 @@ export type StreakStats = {
   totalFedDays: number;
   evolutionsUnlocked: number; // 0..12
   progressToNextEvolution: number; // 0..1
+  streakBonusEarned: number; // Nombre de bonus de 7 jours gagnés
+  isStreakBonusDay: boolean; // Vrai si aujourd'hui est un jour de bonus (multiple de 7)
 };
 
 export type DragonState = 'normal' | 'inquiet' | 'critique';
@@ -99,12 +104,18 @@ export function computeStreak(dayFeeds: Record<string, DayFeed>): StreakStats {
   const progressToNextEvolution =
     evolutionsUnlocked >= 12 ? 1 : (current % EVOLUTION_STEP_DAYS) / EVOLUTION_STEP_DAYS;
 
+  // Calculer les bonus de streak (chaque 7 jours)
+  const streakBonusEarned = Math.floor(current / 7);
+  const isStreakBonusDay = current > 0 && current % 7 === 0;
+
   return {
     currentStreakDays: current,
     longestStreakDays: longest,
     totalFedDays: total,
     evolutionsUnlocked,
     progressToNextEvolution,
+    streakBonusEarned,
+    isStreakBonusDay,
   };
 }
 

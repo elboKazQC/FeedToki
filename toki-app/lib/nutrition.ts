@@ -5,18 +5,21 @@ export type DailyNutritionTotals = {
   protein_g: number;
   carbs_g: number;
   calories_kcal: number;
+  dairy_servings: number;
 };
 
 export type NutritionTargets = {
   protein_g: number;
   carbs_g: number;
   calories_kcal: number;
+  dairy_servings: number;
 };
 
 export const DEFAULT_TARGETS: NutritionTargets = {
   protein_g: 100,
   carbs_g: 250,
   calories_kcal: 2000,
+  dairy_servings: 3,
 };
 
 export function computeDailyTotals(entries: MealEntry[], dateIso: string): DailyNutritionTotals {
@@ -26,19 +29,25 @@ export function computeDailyTotals(entries: MealEntry[], dateIso: string): Daily
   let protein = 0;
   let carbs = 0;
   let calories = 0;
+  let dairy = 0;
 
   for (const m of meals) {
     const items = m.items || [];
     for (const ref of items) {
       const f = FOOD_DB.find((x) => x.id === ref.foodId);
       if (!f) continue;
-      protein += f.protein_g || 0;
-      carbs += f.carbs_g || 0;
-      calories += f.calories_kcal || 0;
+      
+      // Appliquer le multiplicateur de portion (par défaut 1.0)
+      const multiplier = ref.multiplier || 1.0;
+      
+      protein += (f.protein_g || 0) * multiplier;
+      carbs += (f.carbs_g || 0) * multiplier;
+      calories += (f.calories_kcal || 0) * multiplier;
+      dairy += (f.dairy_serving || 0) * multiplier;
     }
   }
 
-  return { protein_g: protein, carbs_g: carbs, calories_kcal: calories };
+  return { protein_g: protein, carbs_g: carbs, calories_kcal: calories, dairy_servings: dairy };
 }
 
 export function percentageOfTarget(total: number, target: number): number {
