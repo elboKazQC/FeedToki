@@ -19,7 +19,6 @@ export type FoodItem = {
   carbs_g?: number;
   fat_g?: number; // lipides en grammes
   calories_kcal?: number;
-  dairy_serving?: number; // e.g., 1 per typical portion
   points?: number; // explicit points cost (0 for healthy; higher for indulgent)
 };
 
@@ -29,8 +28,8 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'poisson', name: 'Poisson', tags: ['proteine_maigre'], baseScore: 80, protein_g: 25, carbs_g: 0, fat_g: 6, calories_kcal: 160, points: 0 },
   { id: 'oeufs', name: 'Oeufs', tags: ['proteine_maigre'], baseScore: 75, protein_g: 12, carbs_g: 1, fat_g: 11, calories_kcal: 155, points: 0 },
   { id: 'tofu', name: 'Tofu', tags: ['proteine_maigre'], baseScore: 80, protein_g: 20, carbs_g: 4, fat_g: 11, calories_kcal: 180, points: 0 },
-  { id: 'yaourt', name: 'Yogourt', tags: ['proteine_maigre'], baseScore: 70, protein_g: 10, carbs_g: 8, fat_g: 5, calories_kcal: 120, dairy_serving: 1, points: 1 },
-  { id: 'fromage', name: 'Fromage', tags: ['proteine_maigre'], baseScore: 55, protein_g: 7, carbs_g: 1, fat_g: 9, calories_kcal: 110, dairy_serving: 1, points: 2 },
+  { id: 'yaourt', name: 'Yogourt', tags: ['proteine_maigre'], baseScore: 70, protein_g: 10, carbs_g: 8, fat_g: 5, calories_kcal: 120, points: 1 },
+  { id: 'fromage', name: 'Fromage', tags: ['proteine_maigre'], baseScore: 55, protein_g: 7, carbs_g: 1, fat_g: 9, calories_kcal: 110, points: 2 },
   { id: 'legumes', name: 'Légumes', tags: ['legume'], baseScore: 90, protein_g: 3, carbs_g: 10, fat_g: 0.5, calories_kcal: 60, points: 0 },
   { id: 'salade', name: 'Salade verte', tags: ['legume'], baseScore: 90, protein_g: 2, carbs_g: 5, fat_g: 0.2, calories_kcal: 30, points: 0 },
   { id: 'brocoli', name: 'Brocoli', tags: ['legume'], baseScore: 95, protein_g: 3, carbs_g: 6, fat_g: 0.4, calories_kcal: 55, points: 0 },
@@ -50,8 +49,8 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'pain_complet', name: 'Pain complet', tags: ['grain_complet'], baseScore: 70, protein_g: 6, carbs_g: 20, fat_g: 2, calories_kcal: 120, points: 1 },
   { id: 'riz_brun', name: 'Riz brun', tags: ['grain_complet'], baseScore: 70, protein_g: 5, carbs_g: 45, fat_g: 1.5, calories_kcal: 215, points: 1 },
   { id: 'orge', name: 'Orge', tags: ['grain_complet'], baseScore: 70, protein_g: 7, carbs_g: 45, fat_g: 1, calories_kcal: 270, points: 1 },
-  { id: 'pizza', name: 'Pizza', tags: ['ultra_transforme', 'gras_frit'], baseScore: 25, protein_g: 12, carbs_g: 35, fat_g: 11, calories_kcal: 285, dairy_serving: 0.5, points: 6 },
-  { id: 'poutine', name: 'Poutine', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 14, carbs_g: 50, fat_g: 35, calories_kcal: 740, dairy_serving: 0.5, points: 8 },
+  { id: 'pizza', name: 'Pizza', tags: ['ultra_transforme', 'gras_frit'], baseScore: 25, protein_g: 12, carbs_g: 35, fat_g: 11, calories_kcal: 285, points: 6 },
+  { id: 'poutine', name: 'Poutine', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 14, carbs_g: 50, fat_g: 35, calories_kcal: 740, points: 8 },
   { id: 'chips', name: 'Chips', tags: ['ultra_transforme', 'gras_frit'], baseScore: 15, protein_g: 2, carbs_g: 15, fat_g: 10, calories_kcal: 160, points: 4 },
   { id: 'beigne', name: 'Beigne', tags: ['ultra_transforme', 'sucre'], baseScore: 10, protein_g: 3, carbs_g: 45, fat_g: 12, calories_kcal: 300, points: 6 },
   { id: 'soda', name: 'Boisson sucrée', tags: ['sucre'], baseScore: 10, protein_g: 0, carbs_g: 39, fat_g: 0, calories_kcal: 150, points: 3 },
@@ -77,13 +76,13 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'ragoût', name: 'Ragoût de pattes de cochon', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 20, carbs_g: 25, fat_g: 24, calories_kcal: 450, points: 6 },
   { id: 'soupe_pois', name: 'Soupe aux pois', tags: ['feculent_simple'], baseScore: 55, protein_g: 12, carbs_g: 30, fat_g: 8, calories_kcal: 250, points: 2 },
   { id: 'feves', name: 'Fèves au lard', tags: ['ultra_transforme'], baseScore: 40, protein_g: 10, carbs_g: 35, fat_g: 16, calories_kcal: 350, points: 4 },
-  { id: 'poutine_fromage', name: 'Poutine fromage/sauce BBQ', tags: ['ultra_transforme', 'gras_frit'], baseScore: 18, protein_g: 16, carbs_g: 55, fat_g: 42, calories_kcal: 820, dairy_serving: 0.5, points: 9 },
+  { id: 'poutine_fromage', name: 'Poutine fromage/sauce BBQ', tags: ['ultra_transforme', 'gras_frit'], baseScore: 18, protein_g: 16, carbs_g: 55, fat_g: 42, calories_kcal: 820, points: 9 },
   { id: 'smoked_viande', name: 'Viande fumée', tags: ['ultra_transforme'], baseScore: 30, protein_g: 25, carbs_g: 2, fat_g: 16, calories_kcal: 280, points: 3 },
   { id: 'sandwich_viande', name: 'Sandwich à la viande fumée', tags: ['ultra_transforme'], baseScore: 25, protein_g: 28, carbs_g: 35, fat_g: 24, calories_kcal: 520, points: 6 },
   { id: 'hot_dog', name: 'Hot-dog', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 12, carbs_g: 25, fat_g: 22, calories_kcal: 380, points: 5 },
-  { id: 'nachos', name: 'Nachos avec fromage', tags: ['ultra_transforme', 'gras_frit'], baseScore: 15, protein_g: 10, carbs_g: 40, fat_g: 28, calories_kcal: 520, dairy_serving: 0.5, points: 7 },
+  { id: 'nachos', name: 'Nachos avec fromage', tags: ['ultra_transforme', 'gras_frit'], baseScore: 15, protein_g: 10, carbs_g: 40, fat_g: 28, calories_kcal: 520, points: 7 },
   { id: 'wings', name: 'Ailes de poulet frites', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 25, carbs_g: 15, fat_g: 28, calories_kcal: 450, points: 6 },
-  { id: 'poutine_complete', name: 'Poutine complète (bacon/œuf)', tags: ['ultra_transforme', 'gras_frit'], baseScore: 15, protein_g: 20, carbs_g: 60, fat_g: 48, calories_kcal: 900, dairy_serving: 0.5, points: 10 },
+  { id: 'poutine_complete', name: 'Poutine complète (bacon/œuf)', tags: ['ultra_transforme', 'gras_frit'], baseScore: 15, protein_g: 20, carbs_g: 60, fat_g: 48, calories_kcal: 900, points: 10 },
   { id: 'bacon', name: 'Bacon', tags: ['gras_frit'], baseScore: 25, protein_g: 12, carbs_g: 1, fat_g: 14, calories_kcal: 180, points: 3 },
   { id: 'saucisse', name: 'Saucisse', tags: ['ultra_transforme', 'gras_frit'], baseScore: 20, protein_g: 14, carbs_g: 2, fat_g: 20, calories_kcal: 240, points: 4 },
   { id: 'boulette', name: 'Boulette de viande', tags: ['ultra_transforme'], baseScore: 25, protein_g: 18, carbs_g: 8, fat_g: 18, calories_kcal: 280, points: 3 },

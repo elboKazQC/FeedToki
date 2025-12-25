@@ -136,7 +136,7 @@ export default function App() {
   const [lastClaimDate, setLastClaimDate] = useState<string>('');
   const [targets, setTargets] = useState(DEFAULT_TARGETS);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [preselectedItem, setPreselectedItem] = useState<{ item: FoodItem; portion: PortionSize } | null>(null);
+  const [preselectedItem, setPreselectedItem] = useState<{ item: FoodItem; portion: PortionReference } | null>(null);
   // TEMPORAIRE: Désactiver le modal dragon pour fixer le bug
   // const [showDragonDeadModal, setShowDragonDeadModal] = useState(false);
   const [isDragonDead, setIsDragonDead] = useState(false);
@@ -187,7 +187,7 @@ export default function App() {
   // Charger les entrées au démarrage - recharger quand userId change
   useEffect(() => {
     // Attendre que le profil soit chargé
-    if (authLoading || !currentUserId || currentUserId === 'guest') {
+    if (authLoading || !currentUserId) {
       console.log('[Index] Waiting for user, currentUserId:', currentUserId);
       return;
     }
@@ -242,7 +242,7 @@ export default function App() {
 
   // Charger les objectifs nutritionnels personnalisés
   useEffect(() => {
-    if (authLoading || !currentUserId || currentUserId === 'guest') return;
+    if (authLoading || !currentUserId) return;
     
     const loadTargets = async () => {
       try {
@@ -256,7 +256,7 @@ export default function App() {
               protein_g: Number(parsed.protein_g) || DEFAULT_TARGETS.protein_g,
               carbs_g: Number(parsed.carbs_g) || DEFAULT_TARGETS.carbs_g,
               calories_kcal: Number(parsed.calories_kcal) || DEFAULT_TARGETS.calories_kcal,
-              dairy_servings: Number(parsed.dairy_servings) || DEFAULT_TARGETS.dairy_servings,
+              fat_g: Number(parsed.fat_g) || DEFAULT_TARGETS.fat_g,
             });
           }
         }
@@ -286,7 +286,7 @@ export default function App() {
   // Utiliser les nouvelles fonctions avec validation des calories
   const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
   const streak = computeStreakWithCalories(dayFeeds, dayCaloriesMap);
-  const recommendations = getCanadaGuideRecommendations(entries);
+  const recommendations = getCanadaGuideRecommendations();
   const todayTotals = computeDailyTotals(entries, new Date().toISOString());
   
   // Vérifier si le dragon est mort (5 jours sans repas complet)
@@ -305,7 +305,7 @@ export default function App() {
   // Points: charger et créditer quotidiennement (utiliser le profil si disponible)
   useEffect(() => {
     const loadPoints = async () => {
-      if (!userProfile || authLoading || !currentUserId || currentUserId === 'guest') {
+      if (!userProfile || authLoading || !currentUserId) {
         console.log('[Index] loadPoints waiting - userProfile:', !!userProfile, 'currentUserId:', currentUserId);
         return;
       }
@@ -364,7 +364,7 @@ export default function App() {
   useEffect(() => {
     const save = async () => {
       // Ne pas sauvegarder si userId pas encore chargé
-      if (!currentUserId || currentUserId === 'guest') {
+      if (!currentUserId) {
         console.log('[Index] Skip save - no valid userId yet');
         return;
       }
@@ -376,7 +376,7 @@ export default function App() {
         console.log('Erreur sauvegarde AsyncStorage', e);
       }
     };
-    if (isReady && currentUserId && currentUserId !== 'guest') {
+    if (isReady && currentUserId) {
       save();
     }
   }, [entries, isReady, currentUserId]);
@@ -474,14 +474,14 @@ function HomeScreen({
   points: number;
   totalPointsEarned: number;
   userProfile: UserProfile | null;
-  setPreselectedItem: (item: { item: FoodItem; portion: PortionSize } | null) => void;
+  setPreselectedItem: (item: { item: FoodItem; portion: PortionReference } | null) => void;
 }) {
   const [isEditingTargets, setIsEditingTargets] = useState(false);
   const [draftTargets, setDraftTargets] = useState({
     protein_g: targets.protein_g.toString(),
     carbs_g: targets.carbs_g.toString(),
     calories_kcal: targets.calories_kcal.toString(),
-    dairy_servings: targets.dairy_servings.toString(),
+    fat_g: targets.fat_g.toString(),
   });
 
   useEffect(() => {
@@ -489,7 +489,7 @@ function HomeScreen({
       protein_g: targets.protein_g.toString(),
       carbs_g: targets.carbs_g.toString(),
       calories_kcal: targets.calories_kcal.toString(),
-      dairy_servings: targets.dairy_servings.toString(),
+      fat_g: targets.fat_g.toString(),
     });
   }, [targets]);
 
@@ -498,7 +498,7 @@ function HomeScreen({
       protein_g: Number(draftTargets.protein_g) || targets.protein_g,
       carbs_g: Number(draftTargets.carbs_g) || targets.carbs_g,
       calories_kcal: Number(draftTargets.calories_kcal) || targets.calories_kcal,
-      dairy_servings: Number(draftTargets.dairy_servings) || targets.dairy_servings,
+      fat_g: Number(draftTargets.fat_g) || targets.fat_g,
     };
     await onSaveTargets(next);
     setIsEditingTargets(false);
@@ -794,10 +794,10 @@ function HomeScreen({
           )}
         </View>
         {/* Changement pour forcer rebuild */}
+        <NutritionBar label="Calories" value={todayTotals.calories_kcal} unit="kcal" pct={percentageOfTarget(todayTotals.calories_kcal, targets.calories_kcal)} color="#f59e0b" target={targets.calories_kcal} />
         <NutritionBar label="Protéines" value={todayTotals.protein_g} unit="g" pct={percentageOfTarget(todayTotals.protein_g, targets.protein_g)} color="#22c55e" target={targets.protein_g} />
         <NutritionBar label="Glucides" value={todayTotals.carbs_g} unit="g" pct={percentageOfTarget(todayTotals.carbs_g, targets.carbs_g)} color="#3b82f6" target={targets.carbs_g} />
-        <NutritionBar label="Calories" value={todayTotals.calories_kcal} unit="kcal" pct={percentageOfTarget(todayTotals.calories_kcal, targets.calories_kcal)} color="#f59e0b" target={targets.calories_kcal} />
-        <NutritionBar label="Produits laitiers" value={todayTotals.dairy_servings} unit="portion(s)" pct={percentageOfTarget(todayTotals.dairy_servings, targets.dairy_servings)} color="#a78bfa" target={targets.dairy_servings} />
+        <NutritionBar label="Lipides" value={todayTotals.fat_g} unit="g" pct={percentageOfTarget(todayTotals.fat_g, targets.fat_g)} color="#ec4899" target={targets.fat_g} />
 
         {isEditingTargets && (
           <View style={styles.targetsForm}>
@@ -830,12 +830,12 @@ function HomeScreen({
               />
             </View>
             <View style={styles.targetRow}>
-              <Text style={styles.targetLabel}>Produits laitiers (portions)</Text>
+              <Text style={styles.targetLabel}>Lipides (g)</Text>
               <TextInput
                 style={styles.targetInput}
                 keyboardType="numeric"
-                value={draftTargets.dairy_servings}
-                onChangeText={(t) => setDraftTargets((prev) => ({ ...prev, dairy_servings: t.replace(',', '.') }))}
+                value={draftTargets.fat_g}
+                onChangeText={(t) => setDraftTargets((prev) => ({ ...prev, fat_g: t.replace(',', '.') }))}
               />
             </View>
             <View style={styles.targetsActions}>
@@ -892,7 +892,7 @@ function AddEntryScreen({
   spendPoints: (cost: number) => Promise<void> | void;
   todayTotals: ReturnType<typeof computeDailyTotals>;
   targets: typeof DEFAULT_TARGETS;
-  preselectedItem: { item: FoodItem; portion: PortionSize } | null;
+  preselectedItem: { item: FoodItem; portion: PortionReference } | null;
 }) {
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState<MealEntry['category']>('sain');
@@ -904,15 +904,16 @@ function AddEntryScreen({
     return items.reduce(
       (acc, ref) => {
         const fi = FOOD_DB.find((f) => f.id === ref.foodId);
+        if (!fi) return acc;
         const multiplier = ref.multiplier || 1.0;
         return {
           protein_g: acc.protein_g + (fi.protein_g || 0) * multiplier,
           carbs_g: acc.carbs_g + (fi.carbs_g || 0) * multiplier,
           calories_kcal: acc.calories_kcal + (fi.calories_kcal || 0) * multiplier,
-          dairy_servings: acc.dairy_servings + (fi.dairy_serving || 0) * multiplier,
+          fat_g: acc.fat_g + (fi.fat_g || 0) * multiplier,
         };
       },
-      { protein_g: 0, carbs_g: 0, calories_kcal: 0, dairy_servings: 0 }
+      { protein_g: 0, carbs_g: 0, calories_kcal: 0, fat_g: 0 }
     );
   }, [items]);
 
@@ -966,12 +967,7 @@ function AddEntryScreen({
   useEffect(() => {
     if (preselectedItem) {
       const portion = preselectedItem.portion;
-      addItemWithPortion(preselectedItem.item.id, {
-        size: portion.size,
-        grams: portion.grams,
-        visualRef: portion.visualRef,
-        multiplier: portion.multiplier,
-      });
+      addItemWithPortion(preselectedItem.item.id, portion);
     }
   }, []); // Exécuter une seule fois au montage
 
@@ -1124,19 +1120,19 @@ function AddEntryScreen({
             protein_g: fi.protein_g || 0,
             carbs_g: fi.carbs_g || 0,
             calories_kcal: fi.calories_kcal || 0,
-            dairy_servings: fi.dairy_serving || 0,
+            fat_g: fi.fat_g || 0,
           };
           const projected = {
             protein_g: todayTotals.protein_g + selectionNutrition.protein_g + (selected ? 0 : macros.protein_g),
             carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + (selected ? 0 : macros.carbs_g),
             calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + (selected ? 0 : macros.calories_kcal),
-            dairy_servings: todayTotals.dairy_servings + selectionNutrition.dairy_servings + (selected ? 0 : macros.dairy_servings),
+            fat_g: todayTotals.fat_g + selectionNutrition.fat_g + (selected ? 0 : macros.fat_g),
           };
           const overTargets =
             projected.protein_g > targets.protein_g ||
             projected.carbs_g > targets.carbs_g ||
             projected.calories_kcal > targets.calories_kcal ||
-            projected.dairy_servings > targets.dairy_servings;
+            projected.fat_g > targets.fat_g;
           const affordable = pendingCost + (selected ? 0 : cost) <= points && !overTargets;
           return (
             <TouchableOpacity
@@ -1186,22 +1182,22 @@ function AddEntryScreen({
                 protein_g: acc.protein_g + (fi.protein_g || 0),
                 carbs_g: acc.carbs_g + (fi.carbs_g || 0),
                 calories_kcal: acc.calories_kcal + (fi.calories_kcal || 0),
-                dairy_servings: acc.dairy_servings + (fi.dairy_serving || 0),
+                fat_g: acc.fat_g + (fi.fat_g || 0),
               };
             },
-            { protein_g: 0, carbs_g: 0, calories_kcal: 0, dairy_servings: 0 }
+            { protein_g: 0, carbs_g: 0, calories_kcal: 0, fat_g: 0 }
           );
           const projected = {
             protein_g: todayTotals.protein_g + selectionNutrition.protein_g + macrosSum.protein_g,
             carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + macrosSum.carbs_g,
             calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + macrosSum.calories_kcal,
-            dairy_servings: todayTotals.dairy_servings + selectionNutrition.dairy_servings + macrosSum.dairy_servings,
+            fat_g: todayTotals.fat_g + selectionNutrition.fat_g + macrosSum.fat_g,
           };
           const overTargets =
             projected.protein_g > targets.protein_g ||
             projected.carbs_g > targets.carbs_g ||
             projected.calories_kcal > targets.calories_kcal ||
-            projected.dairy_servings > targets.dairy_servings;
+            projected.fat_g > targets.fat_g;
           const affordable = pendingCost + totalCost <= points && !overTargets;
           return (
             <TouchableOpacity
@@ -1322,11 +1318,6 @@ const styles = StyleSheet.create({
   scroll: {
     flex: 1,
     width: '100%',
-  },
-  innerContent: {
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 24,
   },
   inner: {
     flex: 1,

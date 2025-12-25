@@ -1,5 +1,6 @@
 // Context Provider pour l'authentification
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { onAuthChange, getCurrentUser, getUserProfile, AuthUser } from '../lib/firebase-auth';
 import { UserProfile } from '../lib/types';
@@ -51,6 +52,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('[AuthContext] Local userProfile:', JSON.stringify(userProfile, null, 2));
         setProfile(userProfile);
         setUser(currentUser); // Aussi mettre à jour le user
+      } else {
+        // Fallback: charger un profil "invité" si présent (mode sans compte)
+        const raw = await AsyncStorage.getItem('toki_user_profile_v1');
+        if (raw) {
+          const guestProfile = JSON.parse(raw);
+          console.log('[AuthContext] Loaded guest profile (v1):', JSON.stringify(guestProfile, null, 2));
+          setProfile(guestProfile);
+        }
       }
     }
   };
@@ -116,10 +125,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
         } else {
-          console.log('[AuthContext] No user, routing to /auth');
-          if (!initialRoutingDone) {
-            setInitialRoutingDone(true);
-            router.replace('/auth');
+          // Aucun compte local connecté
+          // Fallback: si un profil invité (v1) existe et est complété, démarrer directement l'app
+          const raw = await AsyncStorage.getItem('toki_user_profile_v1');
+          if (raw) {
+            const guestProfile = JSON.parse(raw);
+            setProfile(guestProfile);
+            if (!initialRoutingDone) {
+              setInitialRoutingDone(true);
+              if (!guestProfile.onboardingCompleted) {
+                console.log('[AuthContext] Guest profile found, routing to /onboarding');
+                router.replace('/onboarding');
+              } else {
+                console.log('[AuthContext] Guest profile found, routing to /(tabs)');
+                router.replace('/(tabs)');
+              }
+            }
+          } else {
+            console.log('[AuthContext] No user, routing to /auth');
+            if (!initialRoutingDone) {
+              setInitialRoutingDone(true);
+              router.replace('/auth');
+            }
           }
         }
         

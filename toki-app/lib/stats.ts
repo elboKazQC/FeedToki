@@ -5,7 +5,7 @@ export type MealCategory = 'sain' | 'ok' | 'cheat';
 export type FoodItemRef = {
   foodId: string;
   quantityHint?: string;
-  portionSize?: 'small' | 'medium' | 'large'; // Ajouté pour les portions
+  portionSize?: string; // 'small' | 'medium' | 'large' | 'custom'
   portionGrams?: number; // Poids en grammes
   multiplier?: number; // Multiplicateur pour les macros (1.0 = portion moyenne)
 };

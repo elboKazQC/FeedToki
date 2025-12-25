@@ -1,12 +1,8 @@
 // Meal auto-classification from food items
 import { FOOD_DB } from './food-db';
+import { FoodItemRef, MealCategory } from './stats';
 
-export type MealCategory = 'sain' | 'ok' | 'cheat';
-
-export type FoodItemRef = {
-  foodId: string;
-  quantityHint?: string;
-};
+export type { FoodItemRef, MealCategory };
 
 export function classifyMealByItems(items: FoodItemRef[]): { score: number; category: MealCategory } {
   if (!items || items.length === 0) {

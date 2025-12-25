@@ -4,6 +4,10 @@ import { Platform } from 'react-native';
 
 // Request permission; returns 'granted' | 'denied' | 'undetermined'
 export async function requestNotifPermission() {
+  // Notifications permissions are not supported on web; avoid warning by no-op
+  if (Platform.OS === 'web') {
+    return 'denied' as const;
+  }
   const { status } = await Notifications.requestPermissionsAsync();
   return status;
 }

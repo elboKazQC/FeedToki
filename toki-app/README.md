@@ -24,7 +24,8 @@
 - **Système points** : 3 pts/jour, cap 12 pts max
 - **Score 7 jours** : Moyenne santé (0-100) avec zones vert/jaune/rouge
 - **Streaks** : Jours consécutifs nourri, calcul évolutions dragon (0-12)
-- **Targets nutrition** : Protéines, glucides, calories personnalisables
+- **Targets nutrition** : Protéines (g), glucides (g), calories (kcal), lipides (g) — personnalisables
+  - **Canada Food Guide v2024:** Dairy (produits laitiers) removedTracker now focus lipides/fats instead
 - **Dragon mood** : États normal/inquiet/critique selon jours sans repas
 - **Notifications locales** : Rappels quotidiens
 - **Présets rapides** : Repas pré-configurés (Déjeuner, Poulet+Riz, etc.)
@@ -442,7 +443,7 @@ const max_cap = Math.min(points_per_day * 4, 12); // Cap à 12 max
 
 ## 🚧 Issues Connus (à Fixer en Phase 1)
 
-1. **Dairy servings non-tracké** : lib/nutrition.ts manque la somme des `dairy_serving`
+1. **Fat/Lipids tracking** : Implementé selon Canadian food guide v2024 (dairy remplacé par lipides)
 2. **Points/calories incohérents** : Staples 1-pt coûtent 200-270 cal (devrait être ~100-150)
 3. **Pas de validation inputs** : User peut entrer targets négatifs
 4. **AsyncStorage migration** : Faut gérer migration v1 → Firestore sans perte données
