@@ -4,21 +4,21 @@ import { getDragonLevel, getDragonProgress, getPointsToNextLevel } from '../lib/
 import { DragonStatus } from '../lib/stats';
 
 type DragonSpriteProps = {
-  totalPoints: number;
+  streakDays: number;  // Jours consécutifs de streak
   mood?: DragonStatus['mood'];
   showInfo?: boolean;
   size?: number;
 };
 
 export function DragonSprite({ 
-  totalPoints, 
+  streakDays, 
   mood,
   showInfo = false,
   size = 120 
 }: DragonSpriteProps) {
-  const level = getDragonLevel(totalPoints);
-  const progress = getDragonProgress(totalPoints);
-  const pointsToNext = getPointsToNextLevel(totalPoints);
+  const level = getDragonLevel(streakDays);
+  const progress = getDragonProgress(streakDays);
+  const daysToNext = getPointsToNextLevel(streakDays);
   
   return (
     <View style={styles.container}>
@@ -44,7 +44,7 @@ export function DragonSprite({
           <Text style={styles.levelName}>{level.name}</Text>
           <Text style={styles.levelNumber}>Niveau {level.level}/12</Text>
           
-          {pointsToNext > 0 && (
+          {daysToNext > 0 && (
             <>
               {/* Barre de progression */}
               <View style={styles.progressBar}>
@@ -54,7 +54,7 @@ export function DragonSprite({
               </View>
               
               <Text style={styles.pointsToNext}>
-                {pointsToNext} pts pour niveau suivant
+                {daysToNext} jour{daysToNext > 1 ? 's' : ''} pour niveau suivant
               </Text>
             </>
           )}

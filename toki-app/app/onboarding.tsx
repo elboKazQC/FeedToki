@@ -2,11 +2,11 @@ import { View, Text, ScrollView, Pressable, TextInput, StyleSheet } from 'react-
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WeightGoal, ActivityLevel } from '@/lib/types';
-import { computeUserProfile, getGoalDescription, getDailyCalorieTarget } from '@/lib/points-calculator';
-import { getCurrentLocalUser, updateLocalUserProfile } from '@/lib/local-auth';
-import { FIREBASE_ENABLED } from '@/lib/firebase-config';
-import { useAuth } from '@/lib/auth-context';
+import { WeightGoal, ActivityLevel } from '../lib/types';
+import { computeUserProfile, getGoalDescription, getDailyCalorieTarget } from '../lib/points-calculator';
+import { getCurrentLocalUser, updateLocalUserProfile } from '../lib/local-auth';
+import { FIREBASE_ENABLED } from '../lib/firebase-config';
+import { useAuth } from '../lib/auth-context';
 
 const PROFILE_KEY = 'toki_user_profile_v1';
 

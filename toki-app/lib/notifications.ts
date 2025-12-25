@@ -10,6 +10,10 @@ export async function requestNotifPermission() {
 
 // Schedule daily reminders (default times: 07:30, 12:00, 18:00)
 export async function scheduleDailyDragonReminders() {
+  // Notifications APIs are not available on web; safely no-op
+  if (Platform.OS === 'web') {
+    return;
+  }
   const triggers = [
     { hour: 7, minute: 30 },
     { hour: 12, minute: 0 },
@@ -32,6 +36,10 @@ export async function scheduleDailyDragonReminders() {
 
 // Initialize channels (Android) and reschedule if already granted
 export async function initNotificationsIfAllowed() {
+  // Skip notifications setup entirely on web
+  if (Platform.OS === 'web') {
+    return;
+  }
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'FeedToki',

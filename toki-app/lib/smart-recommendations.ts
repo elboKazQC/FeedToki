@@ -1,8 +1,8 @@
 // Smart food recommendations based on remaining daily targets
 
 import { FOOD_DB, FoodItem } from './food-db';
-import { NutritionTotals, NutritionTargets } from './nutrition';
-import { getDefaultPortion, PortionSize } from './portions';
+import { DailyNutritionTotals, NutritionTargets } from './nutrition';
+import { getDefaultPortion, PortionReference } from './portions';
 
 export type SmartRecommendation = {
   item: FoodItem;
@@ -11,7 +11,7 @@ export type SmartRecommendation = {
   pointsCost: number;
   suggestedGrams: number; // Portion suggérée en grammes
   suggestedVisualRef: string; // Référence visuelle
-  portion: PortionSize; // Objet portion complet
+  portion: PortionReference; // Objet portion complet
 };
 
 /**
@@ -19,7 +19,7 @@ export type SmartRecommendation = {
  * Analyzes what's missing (protein, calories, etc.) and suggests accordingly
  */
 export function getSmartRecommendations(
-  currentTotals: NutritionTotals,
+  currentTotals: DailyNutritionTotals,
   targets: NutritionTargets,
   availablePoints: number,
   timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
@@ -34,7 +34,6 @@ export function getSmartRecommendations(
   // Calculate percentages
   const proteinPct = currentTotals.protein_g / targets.protein_g;
   const caloriesPct = currentTotals.calories_kcal / targets.calories_kcal;
-  const carbsPct = currentTotals.carbs_g / targets.carbs_g;
 
   const recommendations: SmartRecommendation[] = [];
 
@@ -46,7 +45,6 @@ export function getSmartRecommendations(
   FOOD_DB.forEach((item) => {
     const itemProtein = item.protein_g || 0;
     const itemCalories = item.calories_kcal || 0;
-    const itemCarbs = item.carbs_g || 0;
 
     // Skip if item would exceed remaining calories significantly
     if (itemCalories > remaining.calories * 1.2 && !nearCalorieLimit) {
@@ -130,7 +128,7 @@ export function getSmartRecommendations(
  * Get a single "best recommendation" for quick decision
  */
 export function getBestRecommendation(
-  currentTotals: NutritionTotals,
+  currentTotals: DailyNutritionTotals,
   targets: NutritionTargets,
   availablePoints: number,
   timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
@@ -166,7 +164,7 @@ function estimatePointsCost(item: FoodItem): number {
  * Get explanation of what user needs most right now
  */
 export function getHungerAnalysis(
-  currentTotals: NutritionTotals,
+  currentTotals: DailyNutritionTotals,
   targets: NutritionTargets
 ): string {
   const remaining = {
@@ -195,4 +193,36 @@ export function getHungerAnalysis(
   }
 
   return `Il te reste ${Math.round(remaining.calories)} cal. Choisis ce qui te fait envie! 😊`;
+}
+
+/**
+ * Recommandations simples basées sur le Guide alimentaire canadien (fallback)
+ */
+export function getCanadaGuideRecommendations(): {
+  group: string;
+  title: string;
+  examples: string[];
+}[] {
+  return [
+    {
+      group: 'proteines',
+      title: 'Ajoute des protéines',
+      examples: ['Poulet', 'Dinde', 'Poisson', 'Oeufs'],
+    },
+    {
+      group: 'legumes_fruits',
+      title: 'Remplis la moitié avec légumes/fruits',
+      examples: ['Légumes', 'Salade verte', 'Brocoli'],
+    },
+    {
+      group: 'grains_entiers',
+      title: 'Complète avec grains entiers',
+      examples: ['Riz', 'Pâtes', 'Quinoa'],
+    },
+    {
+      group: 'eau',
+      title: 'Bois de l\'eau',
+      examples: ['Verre d\'eau'],
+    },
+  ];
 }

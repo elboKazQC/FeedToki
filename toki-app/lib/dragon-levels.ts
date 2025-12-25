@@ -1,122 +1,122 @@
-// Système de niveaux et progression du dragon
+// Système de niveaux et progression du dragon basé sur les jours consécutifs
 import { DragonStatus } from './stats';
 
 export type DragonLevel = {
   level: number;
   name: string;
-  minPoints: number;
-  maxPoints: number;
+  minDays: number;    // Jours consécutifs minimum
+  maxDays: number;    // Jours consécutifs maximum
   emoji: string; // Placeholder jusqu'à ce que les vraies images soient ajoutées
   description: string;
 };
 
-// 12 niveaux d'évolution du dragon
+// 12 niveaux d'évolution du dragon - 1 niveau = 30 jours consécutifs (1 mois)
 export const DRAGON_LEVELS: DragonLevel[] = [
   {
     level: 1,
     name: "Oeuf Mystérieux",
-    minPoints: 0,
-    maxPoints: 100,
+    minDays: 0,
+    maxDays: 29,
     emoji: "🥚",
     description: "Un oeuf mystérieux attend d'éclore..."
   },
   {
     level: 2,
     name: "Éclosion",
-    minPoints: 101,
-    maxPoints: 300,
+    minDays: 30,
+    maxDays: 59,
     emoji: "🐣",
-    description: "L'oeuf commence à craquer!"
+    description: "L'oeuf commence à craquer! (1 mois)"
   },
   {
     level: 3,
     name: "Bébé Dragon",
-    minPoints: 301,
-    maxPoints: 600,
+    minDays: 60,
+    maxDays: 89,
     emoji: "🐲",
-    description: "Un bébé dragon vient de naître!"
+    description: "Un bébé dragon vient de naître! (2 mois)"
   },
   {
     level: 4,
     name: "Dragon Enfant",
-    minPoints: 601,
-    maxPoints: 1000,
+    minDays: 90,
+    maxDays: 119,
     emoji: "🐉",
-    description: "Ton dragon grandit et devient curieux"
+    description: "Ton dragon grandit et devient curieux (3 mois)"
   },
   {
     level: 5,
     name: "Dragon Adolescent",
-    minPoints: 1001,
-    maxPoints: 1500,
+    minDays: 120,
+    maxDays: 149,
     emoji: "🐲",
-    description: "Les ailes de ton dragon commencent à pousser"
+    description: "Les ailes de ton dragon commencent à pousser (4 mois)"
   },
   {
     level: 6,
     name: "Jeune Dragon",
-    minPoints: 1501,
-    maxPoints: 2200,
+    minDays: 150,
+    maxDays: 179,
     emoji: "🐉",
-    description: "Ton dragon peut maintenant voler!"
+    description: "Ton dragon peut maintenant voler! (5 mois)"
   },
   {
     level: 7,
     name: "Dragon Adulte",
-    minPoints: 2201,
-    maxPoints: 3000,
+    minDays: 180,
+    maxDays: 209,
     emoji: "🐲",
-    description: "Un dragon pleinement formé et majestueux"
+    description: "Un dragon pleinement formé et majestueux (6 mois)"
   },
   {
     level: 8,
     name: "Dragon Sage",
-    minPoints: 3001,
-    maxPoints: 4000,
+    minDays: 210,
+    maxDays: 239,
     emoji: "🐉",
-    description: "Ton dragon possède une grande sagesse"
+    description: "Ton dragon possède une grande sagesse (7 mois)"
   },
   {
     level: 9,
     name: "Dragon Ancien",
-    minPoints: 4001,
-    maxPoints: 5500,
+    minDays: 240,
+    maxDays: 269,
     emoji: "🐲",
-    description: "Un dragon ancien et puissant"
+    description: "Un dragon ancien et puissant (8 mois)"
   },
   {
     level: 10,
     name: "Dragon Légendaire",
-    minPoints: 5501,
-    maxPoints: 7500,
+    minDays: 270,
+    maxDays: 299,
     emoji: "⭐",
-    description: "Un dragon de légende!"
+    description: "Un dragon de légende! (9 mois)"
   },
   {
     level: 11,
     name: "Dragon Mythique",
-    minPoints: 7501,
-    maxPoints: 10000,
+    minDays: 300,
+    maxDays: 329,
     emoji: "✨",
-    description: "Un dragon cosmique ultra-rare"
+    description: "Un dragon cosmique ultra-rare (10 mois)"
   },
   {
     level: 12,
     name: "Dragon Divin",
-    minPoints: 10001,
-    maxPoints: Infinity,
+    minDays: 330,
+    maxDays: Infinity,
     emoji: "🌟",
-    description: "Le summum de la perfection draconique!"
+    description: "Le summum de la perfection draconique! (11 mois)"
   }
 ];
 
 /**
- * Calculer le niveau du dragon selon les points totaux accumulés
+ * Calculer le niveau du dragon selon les jours consécutifs de streak
  */
-export function getDragonLevel(totalPoints: number): DragonLevel {
+export function getDragonLevel(streakDays: number): DragonLevel {
   // Trouver le niveau correspondant
   for (let i = DRAGON_LEVELS.length - 1; i >= 0; i--) {
-    if (totalPoints >= DRAGON_LEVELS[i].minPoints) {
+    if (streakDays >= DRAGON_LEVELS[i].minDays) {
       return DRAGON_LEVELS[i];
     }
   }
@@ -126,31 +126,34 @@ export function getDragonLevel(totalPoints: number): DragonLevel {
 /**
  * Calculer la progression vers le prochain niveau (0-1)
  */
-export function getDragonProgress(totalPoints: number): number {
-  const currentLevel = getDragonLevel(totalPoints);
+export function getDragonProgress(streakDays: number): number {
+  const currentLevel = getDragonLevel(streakDays);
   
-  if (currentLevel.maxPoints === Infinity) {
+  if (currentLevel.maxDays === Infinity) {
     return 1; // Max level atteint
   }
   
-  const pointsInLevel = totalPoints - currentLevel.minPoints;
-  const levelRange = currentLevel.maxPoints - currentLevel.minPoints;
+  const daysInLevel = streakDays - currentLevel.minDays;
+  const levelRange = currentLevel.maxDays - currentLevel.minDays;
   
-  return Math.min(1, pointsInLevel / levelRange);
+  return Math.min(1, daysInLevel / levelRange);
 }
 
 /**
- * Points nécessaires pour le prochain niveau
+ * Jours nécessaires pour le prochain niveau
  */
-export function getPointsToNextLevel(totalPoints: number): number {
-  const currentLevel = getDragonLevel(totalPoints);
+export function getPointsToNextLevel(streakDays: number): number {
+  const currentLevel = getDragonLevel(streakDays);
   
-  if (currentLevel.maxPoints === Infinity) {
+  if (currentLevel.maxDays === Infinity) {
     return 0; // Déjà au max
   }
   
-  return currentLevel.maxPoints - totalPoints + 1;
+  return currentLevel.maxDays - streakDays + 1;
 }
+
+// Alias pour clarté
+export const getDaysToNextLevel = getPointsToNextLevel;
 
 /**
  * Obtenir le chemin de l'image du dragon (si elle existe)

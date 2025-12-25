@@ -1,12 +1,22 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
 import { router } from 'expo-router';
-import { useAuth } from '@/lib/auth-context';
-import { localSignOut } from '@/lib/local-auth';
-import { useEffect } from 'react';
+import { useAuth } from '../../lib/auth-context';
+import { useTheme } from '../../lib/theme-context';
+import { Colors } from '../../constants/theme';
+import { localSignOut } from '../../lib/local-auth';
+import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TabTwoScreen() {
   const { user, profile } = useAuth();
+  const { activeTheme, setTheme } = useTheme();
+  const [isDarkMode, setIsDarkMode] = useState(activeTheme === 'dark');
+  const colors = Colors[activeTheme];
+
+  // Synchroniser le switch avec le thème actif
+  useEffect(() => {
+    setIsDarkMode(activeTheme === 'dark');
+  }, [activeTheme]);
 
   // Debug logging
   useEffect(() => {
@@ -20,7 +30,6 @@ export default function TabTwoScreen() {
         console.log('[Explore] === ALL ASYNCSTORAGE KEYS ===');
         console.log('[Explore] Keys:', allKeys);
         
-        // Afficher les entrées pour chaque clé feedtoki_entries
         for (const key of allKeys) {
           if (key.includes('entries')) {
             const value = await AsyncStorage.getItem(key);
@@ -56,53 +65,95 @@ export default function TabTwoScreen() {
   };
 
   const handleSignOut = async () => {
-    try {
-      await localSignOut();
-      router.replace('/auth');
-    } catch (error) {
-      console.error('Erreur déconnexion:', error);
-    }
+    await localSignOut();
+    router.replace('/');
+  };
+
+  const handleThemeToggle = async (value: boolean) => {
+    setIsDarkMode(value);
+    await setTheme(value ? 'dark' : 'light');
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.content}>
-        <Text style={styles.title}>⚙️ Paramètres</Text>
+        {/* Header avec bouton retour */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.push('/(tabs)')}>
+            <Text style={[styles.backButtonText, { color: colors.tint }]}>← Accueil</Text>
+          </TouchableOpacity>
+        </View>
 
+        <Text style={[styles.title, { color: colors.text }]}>⚙️ Paramètres</Text>
+
+        {/* Section Apparence */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Compte</Text>
-          <View style={styles.card}>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{displayEmail}</Text>
-          </View>
-          <View style={styles.card}>
-            <Text style={styles.label}>Nom</Text>
-            <Text style={styles.value}>{displayName}</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Apparence</Text>
+          <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={styles.row}>
+              <View style={styles.labelContainer}>
+                <Text style={[styles.label, { color: colors.text }]}>
+                  {isDarkMode ? '🌙' : '☀️'} Mode sombre
+                </Text>
+                <Text style={[styles.labelHint, { color: colors.icon }]}>
+                  {isDarkMode ? 'Activé' : 'Désactivé'}
+                </Text>
+              </View>
+              <Switch
+                value={isDarkMode}
+                onValueChange={handleThemeToggle}
+                trackColor={{ false: '#d1d5db', true: '#3b82f6' }}
+                thumbColor={isDarkMode ? '#60a5fa' : '#f3f4f6'}
+              />
+            </View>
           </View>
         </View>
 
+        {/* Section Compte */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mes objectifs</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mon compte</Text>
+          <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <Text style={[styles.label, { color: colors.icon }]}>Email</Text>
+            <Text style={[styles.value, { color: colors.text }]}>{displayEmail}</Text>
+          </View>
+          <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <Text style={[styles.label, { color: colors.icon }]}>Nom</Text>
+            <Text style={[styles.value, { color: colors.text }]}>{displayName}</Text>
+          </View>
+        </View>
+
+        {/* Section Objectifs */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mes objectifs</Text>
           {profile && (
             <>
-              <View style={styles.card}>
-                <Text style={styles.label}>Objectif calorique hebdomadaire</Text>
-                <Text style={styles.value}>{profile.weeklyCalorieTarget?.toLocaleString()} cal</Text>
+              <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+                <Text style={[styles.label, { color: colors.icon }]}>Objectif calorique hebdomadaire</Text>
+                <Text style={[styles.value, { color: colors.text }]}>{profile.weeklyCalorieTarget?.toLocaleString()} cal</Text>
               </View>
-              <View style={styles.card}>
-                <Text style={styles.label}>Points quotidiens</Text>
-                <Text style={styles.value}>{profile.dailyPointsBudget} pts</Text>
+              <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+                <Text style={[styles.label, { color: colors.icon }]}>Points quotidiens</Text>
+                <Text style={[styles.value, { color: colors.text }]}>{profile.dailyPointsBudget} pts</Text>
               </View>
-              <View style={styles.card}>
-                <Text style={styles.label}>Cap maximum</Text>
-                <Text style={styles.value}>{profile.maxPointsCap} pts</Text>
+              <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+                <Text style={[styles.label, { color: colors.icon }]}>Cap maximum</Text>
+                <Text style={[styles.value, { color: colors.text }]}>{profile.maxPointsCap} pts</Text>
               </View>
             </>
           )}
         </View>
 
+        {/* Boutons */}
         <TouchableOpacity style={styles.button} onPress={handleEditProfile}>
           <Text style={styles.buttonText}>✏️ Modifier mes objectifs</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/food-request')}>
+          <Text style={styles.buttonText}>🍽️ Demander un aliment</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-requests')}>
+          <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.button, styles.buttonDanger]} onPress={handleSignOut}>
@@ -116,17 +167,26 @@ export default function TabTwoScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
   },
   content: {
     padding: 20,
     paddingTop: 60,
   },
+  header: {
+    marginBottom: 8,
+  },
+  backButton: {
+    paddingVertical: 8,
+    alignSelf: 'flex-start',
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     marginBottom: 24,
-    color: '#111827',
   },
   section: {
     marginBottom: 24,
@@ -134,11 +194,9 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
     marginBottom: 12,
   },
   card: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 8,
@@ -148,15 +206,25 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  labelContainer: {
+    flex: 1,
+  },
   label: {
     fontSize: 14,
-    color: '#6b7280',
     marginBottom: 4,
+  },
+  labelHint: {
+    fontSize: 12,
+    marginTop: 2,
   },
   value: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
   },
   button: {
     backgroundColor: '#3b82f6',

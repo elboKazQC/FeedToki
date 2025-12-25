@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getCurrentLocalUser, verifyEmail, resendVerificationCode } from '@/lib/local-auth';
+import { getCurrentLocalUser, verifyEmail, resendVerificationCode } from '../lib/local-auth';
 
 export default function VerifyEmailScreen() {
   const router = useRouter();

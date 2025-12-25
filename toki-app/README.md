@@ -142,6 +142,41 @@
   - `app/auth/profile.tsx` : Voir/modifier profil
 - **Migration données:** AsyncStorage → Firestore au premier login
 
+#### Production (Single-User) — Activer Firebase & Persistance Compte
+
+Pour passer en production immédiatement en mode « un seul utilisateur » et conserver toutes tes données de compte de façon persistante (multi‑devices), active Firebase.
+
+**Checklist rapide (Prod Single-User):**
+- Installer Firebase (déjà fait) et créer un projet sur console.firebase.google.com
+- Copier les clés dans `lib/firebase-config.ts` et mettre `FIREBASE_ENABLED = true`
+- Démarrer l’app et te connecter via `/auth` (Firebase)
+- Vérifier que l’onboarding est bien complété puis accéder à `/(tabs)`
+- Optionnel: migrer tes données locales existantes vers Firestore
+
+**Étapes détaillées:**
+1. Crée un projet Firebase, active Authentication (Email/Password) et Firestore.
+2. Récupère l’objet `firebaseConfig` et colle‑le dans `lib/firebase-config.ts`.
+3. Mets `export const FIREBASE_ENABLED = true;` pour basculer en mode cloud.
+4. Redémarre Expo:
+   ```powershell
+   cd "c:\Users\vcasaubon\OneDrive - Noovelia\Documents\GitHub\Toki\toki-app"
+   npx expo start --clear
+   ```
+5. Sur l’écran `/auth`, connecte‑toi avec ton compte Firebase. L’app route automatiquement vers `/(tabs)` si ton profil existe et que l’onboarding est complété (voir `lib/auth-context.tsx`).
+
+**Migration Local → Firebase (préserver tes données):**
+- Par défaut, Toki utilise AsyncStorage en mode local. En activant Firebase, tes nouvelles données seront enregistrées côté cloud.
+- Si tu avais déjà des repas/profil en local, plan de migration recommandé:
+  - Ouvrir l’app en mode local une dernière fois et noter les éléments importants (profil, objectifs, dernière semaine de repas).
+  - Activer Firebase (étapes ci‑dessus) puis te connecter.
+  - Re‑créer les objectifs/profil si nécessaire; les prochains repas seront sauvegardés dans Firestore.
+  - Option avancée: ajouter un petit utilitaire de migration qui lit tes entrées locales et les pousse dans Firestore (ex: `scripts/migrate-local-to-firestore.ts`).
+
+**Pourquoi Firebase dès le départ (même seul utilisateur):**
+- Persistance multi‑devices et sauvegarde cloud (aucune perte si le navigateur/AsyncStorage est vidé)
+- Évolutif pour ouvrir à d’autres utilisateurs ensuite
+- Intégration simple avec futures features (Stripe, Analytics, IA)
+
 **2.2 Structure Firestore**
 ```
 users/
@@ -429,6 +464,9 @@ npx expo start
 - **Comments:** Expliquer le "pourquoi" pas le "quoi"
 - **Types:** Exporter depuis `lib/types.ts` (à créer)
 
+### Décisions UI (trace)
+- Le calendrier Heatmap des streaks n’apparaît plus sur la Home. Il est affiché uniquement sur l’écran **Stats/Streak**, accessible via le bouton « Streak ». Objectif: éviter la redondance visuelle et concentrer la Home sur l’ajout/consultation rapide.
+
 ### Testing (À Ajouter)
 - **Unit tests:** Jest pour `lib/` functions
 - **E2E:** Detox pour flows critiques (onboarding, meal logging)
@@ -461,5 +499,5 @@ npx expo start
 
 ---
 
-**Dernière mise à jour:** 24 décembre 2025  
+**Dernière mise à jour:** 25 décembre 2025  
 **Version:** 0.9 (Prototype) → v1.0 (Q1 2026)

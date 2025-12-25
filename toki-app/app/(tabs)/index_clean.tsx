@@ -28,7 +28,7 @@ import {
   requestNotifPermission,
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
-import { getCanadaGuideRecommendations } from '../../lib/recommendations';
+import { getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget } from '../../lib/nutrition';
 
 type StatsUI = {

@@ -9,6 +9,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -18,8 +19,12 @@ import {
   computeDragonState,
   computeScore7Jours,
   computeStreak,
+  computeStreakWithCalories,
+  computeDragonStateWithCalories,
   mapManualCategoryToScore,
   normalizeDate,
+  DAYS_CRITICAL,
+  MIN_CALORIES_FOR_COMPLETE_DAY,
 } from '../../lib/stats';
 import { classifyMealByItems, FoodItemRef } from '../../lib/classifier';
 import { QUICK_ITEMS, QUICK_MEALS } from '../../lib/presets';
@@ -29,16 +34,15 @@ import {
   requestNotifPermission,
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
-import { getCanadaGuideRecommendations } from '../../lib/recommendations';
+import { getSmartRecommendations, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
-import { getSmartRecommendations, getHungerAnalysis, SmartRecommendation } from '../../lib/smart-recommendations';
-import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference } from '../../lib/portions';
-import { getDragonLevel, getPointsToNextLevel } from '../../lib/dragon-levels';
+import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference, PortionSize } from '../../lib/portions';
 import { DragonSprite } from '../../components/dragon-sprite';
-import { StreakCalendar } from '../../components/streak-calendar';
 import { useAuth } from '../../lib/auth-context';
+import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
+import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
 
 type StatsUI = {
   scorePct: number;
@@ -133,6 +137,9 @@ export default function App() {
   const [targets, setTargets] = useState(DEFAULT_TARGETS);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [preselectedItem, setPreselectedItem] = useState<{ item: FoodItem; portion: PortionSize } | null>(null);
+  // TEMPORAIRE: Désactiver le modal dragon pour fixer le bug
+  // const [showDragonDeadModal, setShowDragonDeadModal] = useState(false);
+  const [isDragonDead, setIsDragonDead] = useState(false);
 
   // Utiliser le profil du contexte Auth
   useEffect(() => {
@@ -264,10 +271,36 @@ export default function App() {
   const dayFeeds = useMemo(() => buildDayFeeds(entries), [entries]);
   const score7 = computeScore7Jours(entries);
   const stats = mapScore7ToStatsUI(score7.score);
-  const dragonState = computeDragonState(dayFeeds);
-  const streak = computeStreak(dayFeeds);
+  
+  // Calculer les calories par jour pour valider les journées "complètes"
+  const dayCaloriesMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const entry of entries) {
+      const dateKey = normalizeDate(entry.createdAt);
+      const dayTotals = computeDailyTotals(entries, entry.createdAt);
+      map[dateKey] = dayTotals.calories_kcal;
+    }
+    return map;
+  }, [entries]);
+  
+  // Utiliser les nouvelles fonctions avec validation des calories
+  const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
+  const streak = computeStreakWithCalories(dayFeeds, dayCaloriesMap);
   const recommendations = getCanadaGuideRecommendations(entries);
   const todayTotals = computeDailyTotals(entries, new Date().toISOString());
+  
+  // Vérifier si le dragon est mort (5 jours sans repas complet)
+  const dragonIsDead = checkDragonDeath(dragonState.daysSinceLastMeal);
+  const resurrectCost = calculateResurrectCost(dragonState.daysSinceLastMeal);
+  
+  // TEMPORAIRE: Désactiver le useEffect pour le modal
+  // Afficher le modal de mort si le dragon meurt
+  // useEffect(() => {
+  //   if (dragonIsDead && !isDragonDead) {
+  //     setIsDragonDead(true);
+  //     setShowDragonDeadModal(true);
+  //   }
+  // }, [dragonIsDead, isDragonDead]);
 
   // Points: charger et créditer quotidiennement (utiliser le profil si disponible)
   useEffect(() => {
@@ -569,6 +602,8 @@ function HomeScreen({
         </View>
       )}
 
+      {/* Modal Dragon Mort - TEMPORAIREMENT DÉSACTIVÉ - TODO: Réimplémenter après fix */}
+
       {/* Alerte profil suspect */}
       {hasSuspectProfile && (
         <View style={styles.warningBanner}>
@@ -588,7 +623,7 @@ function HomeScreen({
 
       {/* Dragon avec système de niveaux */}
       <DragonSprite 
-        totalPoints={totalPointsEarned}
+        streakDays={streak.currentStreakDays}
         mood={dragonState.mood}
         showInfo={true}
         size={140}
@@ -632,20 +667,31 @@ function HomeScreen({
         7 derniers jours : {stats.label} ({stats.scorePct}%)
       </Text>
 
-      <Text style={styles.streakText}>
-        Streak actuel: {streak.currentStreakDays} jour(s) · Meilleurs: {streak.longestStreakDays} · Jours nourris: {streak.totalFedDays}
-      </Text>
+      {/* Bouton Streak - ouvre la page stats */}
+      <TouchableOpacity 
+        style={styles.streakButton}
+        onPress={() => router.push('/stats')}
+      >
+        <View style={styles.streakButtonContent}>
+          <Text style={styles.streakButtonIcon}>🔥</Text>
+          <View style={styles.streakButtonInfo}>
+            <Text style={styles.streakButtonDays}>{streak.currentStreakDays} jour{streak.currentStreakDays !== 1 ? 's' : ''}</Text>
+            <Text style={styles.streakButtonLabel}>Streak actuel</Text>
+          </View>
+          <Text style={styles.streakButtonArrow}>→</Text>
+        </View>
+      </TouchableOpacity>
 
       {/* Bonus de streak */}
       {streak.streakBonusEarned > 0 && (
         <View style={styles.streakBonusBox}>
           <Text style={styles.streakBonusTitle}>🔥 Bonus Streak!</Text>
           <Text style={styles.streakBonusText}>
-            Tu as complété {streak.streakBonusEarned} série{streak.streakBonusEarned > 1 ? 's' : ''} de 7 jours!
+            Tu as complété {streak.streakBonusEarned} mois complet{streak.streakBonusEarned > 1 ? 's' : ''} (30 jours)!
           </Text>
           {streak.isStreakBonusDay && (
             <Text style={styles.streakBonusSpecial}>
-              🎉 Félicitations! Tu viens de compléter une série de 7 jours!
+              🎉 Félicitations! Tu viens de compléter un mois complet (30 jours)!
             </Text>
           )}
         </View>
@@ -733,8 +779,7 @@ function HomeScreen({
         <Text style={styles.progressHint}>Progrès vers le prochain niveau</Text>
       </View>
 
-      {/* Calendrier des streaks */}
-      <StreakCalendar entries={entries} weeksToShow={12} />
+      {/* Calendrier des streaks retiré de la Home; disponible via l'écran Streak/Stats */}
 
       <View style={styles.nutritionBox}>
         <View style={styles.nutritionHeader}>
@@ -1001,6 +1046,17 @@ function AddEntryScreen({
           })}
         </View>
       )}
+
+      {/* Demande d'aliment manquant */}
+      <View style={styles.requestBox}>
+        <Text style={styles.requestText}>Tu ne trouves pas l&apos;aliment?</Text>
+        <TouchableOpacity
+          style={styles.requestLinkBtn}
+          onPress={() => router.push({ pathname: '/food-request', params: { q: label || '' } })}
+        >
+          <Text style={styles.requestLink}>Demander un ajout</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.label}>Catégorie</Text>
       <CategoryChips
@@ -1299,6 +1355,34 @@ const styles = StyleSheet.create({
   },
   headerSettingsIcon: {
     fontSize: 22,
+  },
+  requestBox: {
+    width: '100%',
+    marginTop: 12,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  requestText: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  requestLinkBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#1f2937',
+  },
+  requestLink: {
+    color: '#60a5fa',
+    fontWeight: '600',
+    fontSize: 14,
   },
   settingsOverlay: {
     position: 'absolute',
@@ -1748,6 +1832,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
+  streakButton: {
+    width: '100%',
+    backgroundColor: '#1e3a8a',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#f97316',
+  },
+  streakButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  streakButtonIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  streakButtonInfo: {
+    flex: 1,
+  },
+  streakButtonDays: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fbbf24',
+  },
+  streakButtonLabel: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
+  },
+  streakButtonArrow: {
+    fontSize: 20,
+    color: '#9ca3af',
+  },
   streakBonusBox: {
     width: '100%',
     backgroundColor: '#1e3a8a',
@@ -2130,6 +2248,71 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // Dragon Dead Modal Styles
+  dragonDeadModal: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  dragonDeadEmoji: {
+    fontSize: 60,
+    marginBottom: 16,
+  },
+  dragonDeadTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#ef4444',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  dragonDeadText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  dragonDeadOptions: {
+    width: '100%',
+    gap: 12,
+  },
+  dragonDeadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+  },
+  dragonDeadButtonPrimary: {
+    backgroundColor: '#3b82f6',
+  },
+  dragonDeadButtonSecondary: {
+    backgroundColor: '#374151',
+  },
+  dragonDeadButtonDisabled: {
+    opacity: 0.5,
+  },
+  dragonDeadButtonIcon: {
+    fontSize: 24,
+  },
+  dragonDeadButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  dragonDeadButtonCost: {
+    fontSize: 12,
+    color: '#d1d5db',
+    marginTop: 2,
+  },
+  dragonDeadClose: {
+    marginTop: 20,
+    padding: 12,
+  },
+  dragonDeadCloseText: {
+    fontSize: 13,
+    color: '#6b7280',
+    textAlign: 'center',
   },
 });
 
