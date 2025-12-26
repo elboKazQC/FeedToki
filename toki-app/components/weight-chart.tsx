@@ -7,9 +7,11 @@ type Props = {
   height?: number;
   color?: string;
   axisColor?: string;
+  baselineValue?: number; // optional baseline in same unit as values
+  showGrid?: boolean;
 };
 
-export function WeightChart({ values, labels = [], height = 140, color = '#3b82f6', axisColor = '#9ca3af' }: Props) {
+export function WeightChart({ values, labels = [], height = 140, color = '#3b82f6', axisColor = '#9ca3af', baselineValue, showGrid = true }: Props) {
   const [width, setWidth] = useState(0);
   const padding = 12;
   const contentWidth = Math.max(0, width - padding * 2);
@@ -36,6 +38,23 @@ export function WeightChart({ values, labels = [], height = 140, color = '#3b82f
       {/* Axes */}
       <View style={[styles.axisLine, { left: padding, top: padding, height: contentHeight, backgroundColor: axisColor }]} />
       <View style={[styles.axisLine, { left: padding, top: padding + contentHeight, width: contentWidth, height: 2, backgroundColor: axisColor }]} />
+
+      {/* Gridlines */}
+      {showGrid && (() => {
+        const ticks = [max, mid, min];
+        const gridColor = 'rgba(156,163,175,0.2)';
+        return ticks.map((val, idx) => {
+          const y = padding + (contentHeight - ((val - min) / range) * contentHeight);
+          return (
+            <View key={`grid-${idx}`} style={{ position: 'absolute', left: padding, top: y, width: contentWidth, height: 1, backgroundColor: gridColor }} />
+          );
+        });
+      })()}
+
+      {/* Baseline horizontal line */}
+      {typeof baselineValue === 'number' && range > 0 && baselineValue >= min && baselineValue <= max && (
+        <View style={{ position: 'absolute', left: padding, top: padding + (contentHeight - ((baselineValue - min) / range) * contentHeight), width: contentWidth, height: 1, backgroundColor: '#34d399' }} />
+      )}
 
       {/* Y ticks and labels (min/mid/max) */}
       {(() => {
@@ -73,9 +92,9 @@ export function WeightChart({ values, labels = [], height = 140, color = '#3b82f
               left: midX - len / 2,
               top: midY,
               width: len,
-              height: 2,
+              height: 1,
               backgroundColor: color,
-              transform: [{ rotate: `${angle}deg` }, { translateY: -1 }],
+              transform: [{ rotate: `${angle}deg` }, { translateY: -0.5 }],
             }}
           />
         );

@@ -96,6 +96,14 @@ export default function StatsScreen() {
   const dragonProgress = getDragonProgress(streak.currentStreakDays);
   const daysToNext = getDaysToNextLevel(streak.currentStreakDays);
 
+  const saveWeightEntry = async (weightKg: number) => {
+    const today = new Date().toISOString().slice(0, 10);
+    await saveWeight(currentUserId, { date: today, weightKg });
+    const list = await loadWeights(currentUserId);
+    setWeights(list);
+    setWeightInput(String(toDisplay(weightKg, weightUnit)));
+  };
+
   // Vérifier si le dragon est mort (5 jours sans nourrir)
   const isDragonDead = dragonState.daysSinceLastMeal >= DAYS_CRITICAL;
 
@@ -253,15 +261,34 @@ export default function StatsScreen() {
                 onPress={async () => {
                   const v = parseFloat(weightInput);
                   if (!isNaN(v)) {
-                    const today = new Date().toISOString().slice(0, 10);
-                    await saveWeight(currentUserId, { date: today, weightKg: toKg(v, weightUnit) });
-                    const list = await loadWeights(currentUserId);
-                    setWeights(list);
+                    await saveWeightEntry(toKg(v, weightUnit));
                   }
                 }}
               >
                 <Text style={styles.saveBtnText}>Enregistrer</Text>
               </TouchableOpacity>
+            </View>
+
+            {/* Ajustements rapides */}
+            <View style={styles.quickRow}>
+              {['-','+'].map((sign) => {
+                const delta = weightUnit === 'kg' ? 0.5 : 1;
+                const lastKg = weights[weights.length - 1]?.weightKg ?? baseline?.weightKg;
+                return (
+                  <TouchableOpacity
+                    key={`quick-${sign}`}
+                    style={styles.quickBtn}
+                    onPress={() => {
+                      if (lastKg == null) return;
+                      const deltaKg = sign === '+' ? toKg(delta, weightUnit) : -toKg(delta, weightUnit);
+                      const nextKg = Math.max(0, lastKg + deltaKg);
+                      saveWeightEntry(nextKg);
+                    }}
+                  >
+                    <Text style={styles.quickBtnText}>{sign}{delta} {weightUnit}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Graphique XY avec points reliés */}
@@ -277,14 +304,14 @@ export default function StatsScreen() {
                   const valuesDisplay = valuesKg.map((v) => toDisplay(v, weightUnit));
                   const labels = weekly.map((w) => w.weekStart);
                   const trendColor = baseline && valuesKg.length ? (valuesKg[valuesKg.length - 1] < baseline.weightKg ? '#10b981' : '#ef4444') : '#3b82f6';
-                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} />;
+                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} baselineValue={baseline ? toDisplay(baseline.weightKg, weightUnit) : undefined} />;
                 } else {
                   const daily = weights.slice(-30);
                   const valuesKg = daily.map((w) => w.weightKg);
                   const valuesDisplay = valuesKg.map((v) => toDisplay(v, weightUnit));
                   const labels = daily.map((w) => w.date);
                   const trendColor = baseline && valuesKg.length ? (valuesKg[valuesKg.length - 1] < baseline.weightKg ? '#10b981' : '#ef4444') : '#3b82f6';
-                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} />;
+                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} baselineValue={baseline ? toDisplay(baseline.weightKg, weightUnit) : undefined} />;
                 }
               })()}
             </View>
@@ -501,6 +528,24 @@ const styles = StyleSheet.create({
   saveBtnText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  quickRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  quickBtn: {
+    backgroundColor: '#eef2ff',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+  },
+  quickBtnText: {
+    color: '#4f46e5',
+    fontWeight: '600',
+    fontSize: 12,
   },
   chartRow: {
     flexDirection: 'row',

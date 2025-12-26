@@ -337,6 +337,21 @@ users/
 
 ---
 
+### **PHASE 4 : Scan Codes-Barres (Post-v1)** _(optionnel, après prod)_
+
+**Objectifs**
+- Ajouter un bouton "Scanner" pour pré-remplir un aliment depuis un code-barres.
+- Couvrir la majorité des produits courants avec une base publique.
+
+**Plan rapide**
+- **Scan:** `expo-barcode-scanner` (permission caméra + callback EAN/UPC).
+- **API produit:** Open Food Facts `https://world.openfoodfacts.org/api/v2/product/{code}.json` (gratuite, large couverture, qualité variable).
+- **Fallback:** Si non trouvé → formulaire manuel avec code déjà rempli.
+- **Cache local:** Mémoriser les derniers produits scannés pour offline.
+- **Plus tard (payant/robuste):** Provider GS1 ou base commerciale pour meilleure fiabilité.
+
+---
+
 ## 📊 Architecture Technique
 
 ### Stack
@@ -413,6 +428,16 @@ const max_cap = Math.min(points_per_day * 4, 12); // Cap à 12 max
 - **2-3 points:** Produits laitiers, sauces, jus ~150-250 cal
 - **4-6 points:** Fast-food modéré (pizza, frites, wings) ~300-450 cal
 - **7-10 points:** Indulgences lourdes (poutine complète, burger deluxe) ~500-900 cal
+
+#### Logique détaillée et références code
+- Les items de `lib/food-db.ts` portent un champ `points` explicite quand disponible. À défaut, un coût est estimé depuis les **tags** + **calories**.
+- Règles d’estimation (simplifiées):
+  - `proteine_maigre` ou `legume` → 0 pt
+  - `grain_complet` → −20% sur le coût estimé
+  - `ultra_transforme` → +50% | `gras_frit` → +30% | `sucre` (>100 kcal) → +20%
+  - Base énergétique ≈ `calories / 100`, arrondi à l’entier supérieur, min 0
+- Implémentation: `lib/smart-recommendations.ts > estimatePointsCost()`.
+- Calcul du budget de points/jour et du cap: `lib/points-calculator.ts`.
 
 ---
 
