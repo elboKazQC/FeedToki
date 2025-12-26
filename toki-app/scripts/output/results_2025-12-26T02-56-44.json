@@ -1,0 +1,509 @@
+{
+  "config": {
+    "weeks": 12,
+    "seed": 1766717804682
+  },
+  "timestamp": "2025-12-26T02:56:44.777Z",
+  "results": [
+    {
+      "profile": {
+        "name": "Strict Sarah",
+        "weightKg": 90,
+        "tdeeKcal": 2500,
+        "weeklyTarget": 10500,
+        "pointsPerDay": 7,
+        "maxCap": 12,
+        "complianceRate": 0.9,
+        "cheatsPerWeek": 1
+      },
+      "summary": {
+        "initialWeight": 90,
+        "finalWeight": 77.8081818181818,
+        "totalWeightChange": -12.191818181818206,
+        "avgCaloriesPerDay": 1382.4166666666667,
+        "avgPointsPerDay": 7.988095238095238,
+        "daysOverBudget": 48,
+        "totalDays": 84
+      }
+    },
+    {
+      "profile": {
+        "name": "Normal Nathan",
+        "weightKg": 90,
+        "tdeeKcal": 2500,
+        "weeklyTarget": 10500,
+        "pointsPerDay": 7,
+        "maxCap": 12,
+        "complianceRate": 0.7,
+        "cheatsPerWeek": 3
+      },
+      "summary": {
+        "initialWeight": 90,
+        "finalWeight": 77.93805194805194,
+        "totalWeightChange": -12.061948051948065,
+        "avgCaloriesPerDay": 1394.3214285714287,
+        "avgPointsPerDay": 8.011904761904763,
+        "daysOverBudget": 48,
+        "totalDays": 84
+      }
+    },
+    {
+      "profile": {
+        "name": "Cheater Charlie",
+        "weightKg": 90,
+        "tdeeKcal": 2500,
+        "weeklyTarget": 10500,
+        "pointsPerDay": 7,
+        "maxCap": 12,
+        "complianceRate": 0.4,
+        "cheatsPerWeek": 6
+      },
+      "summary": {
+        "initialWeight": 90,
+        "finalWeight": 77.35181818181817,
+        "totalWeightChange": -12.648181818181826,
+        "avgCaloriesPerDay": 1340.5833333333333,
+        "avgPointsPerDay": 9.333333333333334,
+        "daysOverBudget": 58,
+        "totalDays": 84
+      }
+    },
+    {
+      "profile": {
+        "name": "Chaotic Casey",
+        "weightKg": 90,
+        "tdeeKcal": 2500,
+        "weeklyTarget": 10500,
+        "pointsPerDay": 7,
+        "maxCap": 12,
+        "complianceRate": 0.6,
+        "cheatsPerWeek": 4
+      },
+      "summary": {
+        "initialWeight": 90,
+        "finalWeight": 77.45220779220777,
+        "totalWeightChange": -12.547792207792227,
+        "avgCaloriesPerDay": 1349.7857142857142,
+        "avgPointsPerDay": 9.214285714285714,
+        "daysOverBudget": 60,
+        "totalDays": 84
+      }
+    }
+  ],
+  "audit": {
+    "worst": [
+      {
+        "id": "cretons",
+        "name": "Creton",
+        "points": 4,
+        "calories": 150,
+        "calPerPoint": 37.5,
+        "tags": [
+          "ultra_transforme",
+          "gras_frit"
+        ]
+      },
+      {
+        "id": "redbull",
+        "name": "Red Bull Original",
+        "points": 3,
+        "calories": 110,
+        "calPerPoint": 36.666666666666664,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "redbull_tropical",
+        "name": "Red Bull Tropical",
+        "points": 3,
+        "calories": 110,
+        "calPerPoint": 36.666666666666664,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "redbull_berry",
+        "name": "Red Bull Berry",
+        "points": 3,
+        "calories": 110,
+        "calPerPoint": 36.666666666666664,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "redbull_coconut",
+        "name": "Red Bull Coconut",
+        "points": 3,
+        "calories": 110,
+        "calPerPoint": 36.666666666666664,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "salade",
+        "name": "Salade verte",
+        "points": 0,
+        "calories": 30,
+        "calPerPoint": 30,
+        "tags": [
+          "legume"
+        ]
+      },
+      {
+        "id": "poivrons",
+        "name": "Poivrons",
+        "points": 0,
+        "calories": 30,
+        "calPerPoint": 30,
+        "tags": [
+          "legume"
+        ]
+      },
+      {
+        "id": "epinards",
+        "name": "Épinards",
+        "points": 0,
+        "calories": 23,
+        "calPerPoint": 23,
+        "tags": [
+          "legume"
+        ]
+      },
+      {
+        "id": "tomates",
+        "name": "Tomates",
+        "points": 0,
+        "calories": 22,
+        "calPerPoint": 22,
+        "tags": [
+          "legume"
+        ]
+      },
+      {
+        "id": "redbull_sugar_free",
+        "name": "Red Bull Sugar Free",
+        "points": 1,
+        "calories": 10,
+        "calPerPoint": 10,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "monster_zero",
+        "name": "Monster Zero Sugar",
+        "points": 1,
+        "calories": 10,
+        "calPerPoint": 10,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "monster_ultra",
+        "name": "Monster Ultra (Citron)",
+        "points": 1,
+        "calories": 10,
+        "calPerPoint": 10,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "monster_ultra_violet",
+        "name": "Monster Ultra Violet",
+        "points": 1,
+        "calories": 10,
+        "calPerPoint": 10,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "monster_ultra_rosa",
+        "name": "Monster Ultra Rosà",
+        "points": 1,
+        "calories": 10,
+        "calPerPoint": 10,
+        "tags": [
+          "sucre"
+        ]
+      },
+      {
+        "id": "guru_sugar_free",
+        "name": "Guru Sugar Free",
+        "points": 0,
+        "calories": 0,
+        "calPerPoint": 0,
+        "tags": [
+          "sucre"
+        ]
+      }
+    ],
+    "best": [
+      {
+        "id": "tofu",
+        "name": "Tofu",
+        "points": 0,
+        "calories": 180,
+        "calPerPoint": 180,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "shake_fruits",
+        "name": "Shake protéine Fruits rouges",
+        "points": 1,
+        "calories": 180,
+        "calPerPoint": 180,
+        "tags": [
+          "proteine_maigre",
+          "sucre"
+        ]
+      },
+      {
+        "id": "shake_chocolate",
+        "name": "Shake protéine Chocolat",
+        "points": 1,
+        "calories": 170,
+        "calPerPoint": 170,
+        "tags": [
+          "proteine_maigre",
+          "sucre"
+        ]
+      },
+      {
+        "id": "shake_vanille",
+        "name": "Shake protéine Vanille",
+        "points": 1,
+        "calories": 170,
+        "calPerPoint": 170,
+        "tags": [
+          "proteine_maigre",
+          "sucre"
+        ]
+      },
+      {
+        "id": "pudding_chia",
+        "name": "Pudding de chia",
+        "points": 1,
+        "calories": 170,
+        "calPerPoint": 170,
+        "tags": [
+          "dessert_sante"
+        ]
+      },
+      {
+        "id": "poulet",
+        "name": "Poulet",
+        "points": 0,
+        "calories": 165,
+        "calPerPoint": 165,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "dinde",
+        "name": "Dinde",
+        "points": 0,
+        "calories": 160,
+        "calPerPoint": 160,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "poisson",
+        "name": "Poisson",
+        "points": 0,
+        "calories": 160,
+        "calPerPoint": 160,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "oeufs",
+        "name": "Oeufs",
+        "points": 0,
+        "calories": 155,
+        "calPerPoint": 155,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "avoine",
+        "name": "Flocons d'avoine",
+        "points": 1,
+        "calories": 150,
+        "calPerPoint": 150,
+        "tags": [
+          "feculent_simple"
+        ]
+      },
+      {
+        "id": "shake_protein",
+        "name": "Shake de protéine",
+        "points": 0,
+        "calories": 150,
+        "calPerPoint": 150,
+        "tags": [
+          "proteine_maigre"
+        ]
+      },
+      {
+        "id": "soupe_pois",
+        "name": "Soupe aux pois",
+        "points": 2,
+        "calories": 250,
+        "calPerPoint": 125,
+        "tags": [
+          "feculent_simple"
+        ]
+      },
+      {
+        "id": "yaourt",
+        "name": "Yogourt",
+        "points": 1,
+        "calories": 120,
+        "calPerPoint": 120,
+        "tags": [
+          "proteine_maigre"
+        ]
+      },
+      {
+        "id": "toasts",
+        "name": "Toasts",
+        "points": 1,
+        "calories": 120,
+        "calPerPoint": 120,
+        "tags": [
+          "feculent_simple"
+        ]
+      },
+      {
+        "id": "pain_complet",
+        "name": "Pain complet",
+        "points": 1,
+        "calories": 120,
+        "calPerPoint": 120,
+        "tags": [
+          "grain_complet"
+        ]
+      }
+    ],
+    "suspicious": [
+      {
+        "id": "poulet",
+        "name": "Poulet",
+        "points": 0,
+        "calories": 165,
+        "calPerPoint": 165,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "dinde",
+        "name": "Dinde",
+        "points": 0,
+        "calories": 160,
+        "calPerPoint": 160,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "poisson",
+        "name": "Poisson",
+        "points": 0,
+        "calories": 160,
+        "calPerPoint": 160,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "oeufs",
+        "name": "Oeufs",
+        "points": 0,
+        "calories": 155,
+        "calPerPoint": 155,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "tofu",
+        "name": "Tofu",
+        "points": 0,
+        "calories": 180,
+        "calPerPoint": 180,
+        "tags": [
+          "proteine_maigre"
+        ],
+        "issue": "FREE_HIGH_CAL"
+      },
+      {
+        "id": "monster",
+        "name": "Monster Original",
+        "points": 5,
+        "calories": 210,
+        "calPerPoint": 42,
+        "tags": [
+          "sucre"
+        ],
+        "issue": "EXPENSIVE_LOW_CAL"
+      },
+      {
+        "id": "monster_mango",
+        "name": "Monster Mango Loco",
+        "points": 5,
+        "calories": 210,
+        "calPerPoint": 42,
+        "tags": [
+          "sucre"
+        ],
+        "issue": "EXPENSIVE_LOW_CAL"
+      },
+      {
+        "id": "monster_punch",
+        "name": "Monster Punch Tropical",
+        "points": 5,
+        "calories": 210,
+        "calPerPoint": 42,
+        "tags": [
+          "sucre"
+        ],
+        "issue": "EXPENSIVE_LOW_CAL"
+      },
+      {
+        "id": "monster_melon",
+        "name": "Monster Melon",
+        "points": 5,
+        "calories": 210,
+        "calPerPoint": 42,
+        "tags": [
+          "sucre"
+        ],
+        "issue": "EXPENSIVE_LOW_CAL"
+      }
+    ]
+  }
+}

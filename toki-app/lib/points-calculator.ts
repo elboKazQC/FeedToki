@@ -35,13 +35,20 @@ export function calculateWeeklyTarget(goal: WeightGoal, tdee: number): number {
  * - 30% of weekly calories can be "indulgences" (higher point items)
  * - Divide by 7 days to get daily indulgence budget
  * - Divide by avg calories per point to get points per day
+ * - Bonus +1 pt for deficit goals (-2 lbs/sem or more aggressive)
  */
 export function calculateDailyPoints(weeklyCalorieTarget: number): number {
   const weeklyIndulgenceBudget = weeklyCalorieTarget * INDULGENCE_RATIO;
   const dailyIndulgenceBudget = weeklyIndulgenceBudget / 7;
-  const pointsPerDay = dailyIndulgenceBudget / AVG_CALORIES_PER_POINT;
+  const basePoints = dailyIndulgenceBudget / AVG_CALORIES_PER_POINT;
   
-  return Math.max(3, Math.round(pointsPerDay)); // Minimum 3 points/day
+  // Bonus +1 pt for aggressive deficit goals (≤ 12,500 cal/week = -2 lbs/sem or more)
+  // This helps users feel less restricted while maintaining weight loss
+  const pointsPerDay = weeklyCalorieTarget <= 12500 
+    ? Math.round(basePoints) + 1 
+    : Math.round(basePoints);
+  
+  return Math.max(3, pointsPerDay); // Minimum 3 points/day
 }
 
 /**

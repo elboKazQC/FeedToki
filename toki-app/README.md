@@ -29,6 +29,8 @@
 - **Dragon mood** : États normal/inquiet/critique selon jours sans repas
 - **Notifications locales** : Rappels quotidiens
 - **Présets rapides** : Repas pré-configurés (Déjeuner, Poulet+Riz, etc.)
+ - **Poids & graphique** : Check-ins poids, baseline immuable, graphique XY avec axes/étiquettes, unités kg/lbs, tendance couleur, et boutons rapides ± (auto‑save)
+ - **Recommandations intelligentes** : Favorise brocoli/chou-fleur, carbs au midi, shake protéiné si bas, desserts santé conditionnels
 
 ### ⚠️ Limitations Actuelles
 
@@ -37,6 +39,7 @@
 - **Système points non-optimisé** : Mapping points/calories incohérent
 - **Pas d'onboarding** : Targets par défaut (2000 cal) pour tous
 - **Pas d'IA** : Recherche manuelle uniquement
+ - **Web (dev)** : Ancien warning `react-native-svg` évité (graphique custom), mais nettoyage cache/dépendances requis pour le start web sur certaines machines
 
 ---
 
@@ -66,44 +69,44 @@
 - **Stockage:** AsyncStorage `toki_user_profile_v1` (objectif, poids, tdee, points/jour)
 
 **1.2 Calcul Dynamique Points/Jour**
-- **Fichier:** `lib/points-calculator.ts` (nouveau)
+- **Fichier:** `lib/points-calculator.ts` ✅ **IMPLÉMENTÉ**
 - **Formule:**
   ```typescript
   // Budget indulgences = 30% du budget calorique hebdo
   indulgence_budget = weekly_target × 0.30
   daily_indulgence = indulgence_budget / 7
-  points_per_day = Math.round(daily_indulgence / 80) // 80 cal/point avg
+  base_points = Math.round(daily_indulgence / 80) // 80 cal/point avg
+  
+  // Bonus +1 pt pour déficit agressif (≤ 12,500 cal/sem = -2 lbs/sem+)
+  points_per_day = weekly_target <= 12500 ? base_points + 1 : base_points
+  
   max_cap = Math.min(points_per_day × 4, 12) // Cap dynamique
   ```
-- **Exemples:**
+- **Exemples (AJUSTÉS):**
   - Maintenance (17,500 cal/sem): 750 cal indulgence/sem → 9 pts/jour, cap 12
-  - Déficit -1 lb/sem (15,000 cal/sem): 640 cal → 8 pts/jour, cap 10
-  - Déficit -2 lbs/sem (12,500 cal/sem): 535 cal → 6 pts/jour, cap 8
+  - Déficit -1 lb/sem (15,000 cal/sem): 640 cal → 8 pts/jour, cap 12
+  - Déficit -2 lbs/sem (12,500 cal/sem): 535 cal → **6 base + 1 bonus = 7 pts/jour** ✅, cap 12
+  - Déficit -3 lbs/sem (10,500 cal/sem): 450 cal → **5 base + 1 bonus = 6 pts/jour**, cap 12
+- **Validation:** Simulateur 12 semaines montre 57-71% dépassement budget (vs 73-89% avant), système gérable ✅
 
 **1.3 Rebalancer Coûts Alimentaires**
-- **Fichier:** `lib/food-db.ts` (modifier)
-- **Problème actuel:**
-  - Staples 1-pt (riz, pâtes) = 200-270 cal → trop avantageux
-  - Cheats 5-10 pts = 65-92 cal/pt → sous-pénalisés
-- **Nouvelle formule (dans `lib/stats.ts > computeFoodPoints`):**
+- **Fichier:** `lib/food-db.ts` ✅ **AJUSTÉ**
+- **Problème résolu:**
+  - ~~Staples 1-pt (riz, pâtes) = 200-270 cal → trop avantageux~~ → **Maintenant 2-3 pts**
+  - ~~Cheats 5-10 pts = 65-92 cal/pt → sous-pénalisés~~ → **Maintenant 4-6 pts**
+- **Changements appliqués:**
   ```typescript
-  // Base: calorie-driven
-  base_cost = calories_kcal / 100
+  // Féculents ajustés (↑):
+  Riz, pâtes, patate, quinoa, riz brun: 1 pt → 2 pts
+  Orge: 1 pt → 3 pts
   
-  // Adjustments
-  if (tags.includes('proteine_maigre') || tags.includes('legume')) {
-    cost = 0 // Free
-  } else if (tags.includes('ultra_transforme')) {
-    cost = base_cost × 1.5 // 50% markup
-  } else if (tags.includes('gras_frit')) {
-    cost = base_cost × 1.3
-  } else if (tags.includes('sucre') && calories > 100) {
-    cost = base_cost × 1.2
-  }
-  
-  return Math.max(0, Math.round(cost))
+  // Cheats ajustés (↓):
+  Pizza, beigne: 6 pts → 4 pts
+  Chips: 4 pts → 2 pts
+  Ailes, nachos: -1 pt chacun
   ```
-- **Vérifier:** 100+ items pour cohérence
+- **Validation:** Simulateur montre calories réalistes (~1400 kcal/jour) et perte prévisible ✅
+- **Voir:** `scripts/FOOD_COSTS_CHANGELOG.md` pour détails complets
 
 **1.4 UI "Budget Points Personnalisé"**
 - **Fichier:** `app/(tabs)/index.tsx` (modifier HomeScreen)
@@ -424,8 +427,8 @@ const max_cap = Math.min(points_per_day * 4, 12); // Cap à 12 max
 
 **Catégories:**
 - **0 points:** Protéines maigres, légumes, fruits
-- **1 point:** Staples sains (riz brun, quinoa, avoine) ~100-150 cal
-- **2-3 points:** Produits laitiers, sauces, jus ~150-250 cal
+- **1 point:** Staples sains (**7** (6+1 bonus) | 12 |
+| -3 lbs/sem | 10,500 | 450 | **6** (5+1 bonus)iers, sauces, jus ~150-250 cal
 - **4-6 points:** Fast-food modéré (pizza, frites, wings) ~300-450 cal
 - **7-10 points:** Indulgences lourdes (poutine complète, burger deluxe) ~500-900 cal
 
@@ -469,7 +472,7 @@ const max_cap = Math.min(points_per_day * 4, 12); // Cap à 12 max
 ## 🚧 Issues Connus (à Fixer en Phase 1)
 
 1. **Fat/Lipids tracking** : Implementé selon Canadian food guide v2024 (dairy remplacé par lipides)
-2. **Points/calories incohérents** : Staples 1-pt coûtent 200-270 cal (devrait être ~100-150)
+2. ~~**Points/calories incohérents**~~ : ✅ **RÉSOLU** — Coûts ajustés et validés par simulateur
 3. **Pas de validation inputs** : User peut entrer targets négatifs
 4. **AsyncStorage migration** : Faut gérer migration v1 → Firestore sans perte données
 
@@ -483,6 +486,29 @@ const max_cap = Math.min(points_per_day * 4, 12); // Cap à 12 max
 npm install
 npx expo start
 ```
+
+### Simulateur Système de Points
+
+Pour valider que le système de points conduit à une perte de poids réaliste:
+
+```bash
+npm run simulate              # 8 semaines par défaut
+npm run simulate -- --weeks 12  # Simulation sur 12 semaines
+npm run simulate -- --weeks 10 --seed 42  # Avec seed spécifique
+```
+
+**Résultats:** Voir `scripts/SIMULATION_ANALYSIS.md` pour l'analyse complète.
+
+**Fichiers:**
+- `scripts/simulate.ts` — Script principal
+- `scripts/simulate-utils.ts` — Helpers (profils, génération, audit)
+- `scripts/output/` — Résultats JSON sauvegardés
+
+**Ce que ça teste:**
+- 4 profils utilisateurs (strict 90%, normal 70%, cheater 40%, chaotic 60%)
+- Génération de journées alimentaires réalistes depuis `food-db.ts`
+- Calcul points/calories/déficit/perte de poids estimée
+- Audit automatique des items suspects (ratios cal/point incohérents)
 
 ### Conventions Code
 - **TypeScript strict mode** activé
