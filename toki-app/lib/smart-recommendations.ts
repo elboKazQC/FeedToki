@@ -70,13 +70,21 @@ export function getSmartRecommendations(
       return;
     }
 
-    // Vegetables are always recommended
+    // Vegetables are always recommended, boost at lunch and dinner
     if (item.tags.includes('legume')) {
       priority += 2;
       reasons.push('Légumes nutritifs');
+      if (timeOfDay !== 'morning' && (item.id === 'brocoli' || item.id === 'chou_fleur')) {
+        priority += 2;
+        reasons.push('Favoriser brocoli/chou-fleur');
+      }
     }
 
-    // Match time of day
+    // Match time of day: carbs at lunch
+    if (timeOfDay === 'afternoon' && (item.id === 'riz' || item.id === 'patate' || item.tags.includes('grain_complet'))) {
+      priority += 2;
+      reasons.push('Bon glucides pour le dîner');
+    }
     if (timeOfDay === 'morning' && item.tags.includes('feculent_simple')) {
       priority += 1;
       reasons.push('Bon pour le matin');
@@ -112,6 +120,40 @@ export function getSmartRecommendations(
       });
     }
   });
+
+  // Daily protein shake suggestion if protein is still missing significantly
+  if (needsProtein && !nearCalorieLimit) {
+    const shake = FOOD_DB.find((i) => i.id === 'shake_protein');
+    if (shake) {
+      const defaultPortion = getDefaultPortion(shake.tags);
+      recommendations.push({
+        item: shake,
+        reason: 'Shake de protéine quotidien recommandé',
+        priority: 5,
+        pointsCost: estimatePointsCost(shake),
+        suggestedGrams: defaultPortion.grams,
+        suggestedVisualRef: defaultPortion.visualRef,
+        portion: defaultPortion,
+      });
+    }
+  }
+
+  // Healthy dessert ideas if protein met but still hungry
+  if (!needsProtein && caloriesPct < 0.9) {
+    const dessertCandidates = FOOD_DB.filter((i) => i.tags.includes('dessert_sante') || i.id === 'baies');
+    dessertCandidates.forEach((item) => {
+      const defaultPortion = getDefaultPortion(item.tags);
+      recommendations.push({
+        item,
+        reason: 'Dessert santé si encore faim',
+        priority: 3,
+        pointsCost: estimatePointsCost(item),
+        suggestedGrams: defaultPortion.grams,
+        suggestedVisualRef: defaultPortion.visualRef,
+        portion: defaultPortion,
+      });
+    });
+  }
 
   // Sort by priority (highest first), then by points cost (lowest first)
   return recommendations

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,6 +18,7 @@ import {
   DAYS_CRITICAL,
 } from '../lib/stats';
 import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dragon-levels';
+import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry } from '../lib/weight';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
@@ -36,6 +37,9 @@ export default function StatsScreen() {
   });
   const [dragonState, setDragonState] = useState<DragonStatus>({ mood: 'normal', daysSinceLastMeal: 0 });
   const [score7j, setScore7j] = useState<{ score: number; zone: 'vert' | 'jaune' | 'rouge'; mealsCount: number }>({ score: 0, zone: 'rouge', mealsCount: 0 });
+  const [weights, setWeights] = useState<WeightEntry[]>([]);
+  const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('lbs');
+  const [weightInput, setWeightInput] = useState('');
 
   const currentUserId = profile?.userId || (user as any)?.id || 'guest';
 
@@ -56,6 +60,18 @@ export default function StatsScreen() {
       }
     };
     loadEntries();
+  }, [currentUserId]);
+
+  // Charger poids
+  useEffect(() => {
+    const load = async () => {
+      const list = await loadWeights(currentUserId);
+      setWeights(list);
+      const last = list[list.length - 1];
+      if (last) setWeightInput(String(toDisplay(last.weightKg, weightUnit)));
+    };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId]);
 
   // Calculer les stats
@@ -185,6 +201,97 @@ export default function StatsScreen() {
           </View>
         </View>
 
+        {/* Poids */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>⚖️ Poids</Text>
+          <View style={[styles.weightCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={styles.weightRow}>
+              <View style={styles.unitSelector}>
+                <TouchableOpacity
+                  style={[styles.unitBtn, weightUnit === 'kg' && styles.unitBtnActive]}
+                  onPress={() => {
+                    setWeightUnit('kg');
+                    const last = weights[weights.length - 1];
+                    if (last) setWeightInput(String(toDisplay(last.weightKg, 'kg')));
+                  }}
+                >
+                  <Text style={[styles.unitText, weightUnit === 'kg' && styles.unitTextActive]}>kg</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.unitBtn, weightUnit === 'lbs' && styles.unitBtnActive]}
+                  onPress={() => {
+                    setWeightUnit('lbs');
+                    const last = weights[weights.length - 1];
+                    if (last) setWeightInput(String(toDisplay(last.weightKg, 'lbs')));
+                  }}
+                >
+                  <Text style={[styles.unitText, weightUnit === 'lbs' && styles.unitTextActive]}>lbs</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={styles.weightInput}
+                keyboardType="decimal-pad"
+                placeholder={weightUnit === 'kg' ? 'Ex: 95.2' : 'Ex: 210'}
+                value={weightInput}
+                onChangeText={setWeightInput}
+              />
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={async () => {
+                  const v = parseFloat(weightInput);
+                  if (!isNaN(v)) {
+                    const today = new Date().toISOString().slice(0, 10);
+                    await saveWeight(currentUserId, { date: today, weightKg: toKg(v, weightUnit) });
+                    const list = await loadWeights(currentUserId);
+                    setWeights(list);
+                  }
+                }}
+              >
+                <Text style={styles.saveBtnText}>Enregistrer</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Mini graphique barres */}
+            <View style={styles.chartRow}>
+              {(() => {
+                const last30 = weights.slice(-30);
+                if (last30.length < 2) {
+                  return <Text style={{ color: colors.icon }}>Ajoute 2+ valeurs pour voir la tendance</Text>;
+                }
+                const values = last30.map((w) => w.weightKg);
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const range = Math.max(0.1, max - min);
+                return last30.map((w, idx) => {
+                  const hPct = ((w.weightKg - min) / range) * 100;
+                  return (
+                    <View key={idx} style={styles.chartBarWrap}>
+                      <View style={[styles.chartBar, { height: `${Math.max(8, hPct)}%` }]} />
+                    </View>
+                  );
+                });
+              })()}
+            </View>
+
+            {/* Delta */}
+            {weights.length >= 2 && (
+              <View style={styles.deltaRow}>
+                {(() => {
+                  const last = weights[weights.length - 1].weightKg;
+                  const prev = weights[weights.length - 2].weightKg;
+                  const diff = last - prev;
+                  const sign = diff > 0 ? '+' : '';
+                  return (
+                    <Text style={[styles.deltaText, { color: diff <= 0 ? '#10b981' : '#ef4444' }]}>
+                      {sign}{toDisplay(diff, 'kg')} kg depuis la dernière mesure
+                    </Text>
+                  );
+                })()}
+              </View>
+            )}
+          </View>
+        </View>
+
         {/* Calendrier des streaks */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>📅 Calendrier</Text>
@@ -300,6 +407,87 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 24,
+  },
+  weightCard: {
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  weightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  unitSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  unitBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    backgroundColor: '#fff',
+  },
+  unitBtnActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: '#eff6ff',
+  },
+  unitText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  unitTextActive: {
+    color: '#3b82f6',
+  },
+  weightInput: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  saveBtn: {
+    backgroundColor: '#10b981',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  saveBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  chartRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 80,
+    marginTop: 8,
+  },
+  chartBarWrap: {
+    flex: 1,
+    paddingHorizontal: 1,
+    height: '100%',
+  },
+  chartBar: {
+    backgroundColor: '#3b82f6',
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+    width: '100%',
+  },
+  deltaRow: {
+    marginTop: 8,
+  },
+  deltaText: {
+    fontSize: 12,
   },
   sectionTitle: {
     fontSize: 18,

@@ -8,7 +8,8 @@ export type FoodTag =
   | 'ultra_transforme'
   | 'sucre'
   | 'alcool'
-  | 'gras_frit';
+  | 'gras_frit'
+  | 'dessert_sante';
 
 export type FoodItem = {
   id: string;
@@ -33,6 +34,7 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'legumes', name: 'Légumes', tags: ['legume'], baseScore: 90, protein_g: 3, carbs_g: 10, fat_g: 0.5, calories_kcal: 60, points: 0 },
   { id: 'salade', name: 'Salade verte', tags: ['legume'], baseScore: 90, protein_g: 2, carbs_g: 5, fat_g: 0.2, calories_kcal: 30, points: 0 },
   { id: 'brocoli', name: 'Brocoli', tags: ['legume'], baseScore: 95, protein_g: 3, carbs_g: 6, fat_g: 0.4, calories_kcal: 55, points: 0 },
+  { id: 'chou_fleur', name: 'Chou-fleur', tags: ['legume'], baseScore: 94, protein_g: 2, carbs_g: 5, fat_g: 0.3, calories_kcal: 50, points: 0 },
   { id: 'carottes', name: 'Carottes', tags: ['legume'], baseScore: 90, protein_g: 1, carbs_g: 10, fat_g: 0.2, calories_kcal: 45, points: 0 },
   { id: 'epinards', name: 'Épinards', tags: ['legume'], baseScore: 95, protein_g: 3, carbs_g: 4, fat_g: 0.4, calories_kcal: 23, points: 0 },
   { id: 'tomates', name: 'Tomates', tags: ['legume'], baseScore: 90, protein_g: 1, carbs_g: 5, fat_g: 0.2, calories_kcal: 22, points: 0 },
@@ -108,4 +110,8 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'guru_berry', name: 'Guru Baies', tags: ['sucre'], baseScore: 20, protein_g: 0, carbs_g: 38, fat_g: 0, calories_kcal: 160, points: 3 },
   { id: 'guru_peach', name: 'Guru Pêche Mangue', tags: ['sucre'], baseScore: 20, protein_g: 0, carbs_g: 38, fat_g: 0, calories_kcal: 160, points: 3 },
   { id: 'guru_lite', name: 'Guru Lite', tags: ['sucre'], baseScore: 22, protein_g: 0, carbs_g: 8, fat_g: 0, calories_kcal: 40, points: 1 },
+  // Desserts santé
+  { id: 'yaourt_grec', name: 'Yaourt grec nature', tags: ['dessert_sante', 'proteine_maigre'], baseScore: 75, protein_g: 17, carbs_g: 6, fat_g: 0, calories_kcal: 120, points: 0 },
+  { id: 'pudding_chia', name: 'Pudding de chia', tags: ['dessert_sante'], baseScore: 70, protein_g: 6, carbs_g: 15, fat_g: 7, calories_kcal: 170, points: 1 },
+  { id: 'pomme_cannelle', name: 'Pomme à la cannelle', tags: ['dessert_sante', 'legume'], baseScore: 80, protein_g: 0, carbs_g: 25, fat_g: 0.3, calories_kcal: 95, points: 0 },
 ];
