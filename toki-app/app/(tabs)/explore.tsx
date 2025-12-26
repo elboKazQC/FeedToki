@@ -65,8 +65,15 @@ export default function TabTwoScreen() {
   };
 
   const handleSignOut = async () => {
+    // Efface l'ID user courant
     await localSignOut();
-    router.replace('/');
+    // Efface le profil local associé
+    const userId = user?.id || profile?.userId;
+    if (userId) {
+      await AsyncStorage.removeItem(`toki_user_profile_${userId}`);
+    }
+    // Redirige vers l'écran de login
+    router.replace('/auth');
   };
 
   const handleThemeToggle = async (value: boolean) => {
