@@ -19,6 +19,7 @@ import {
 } from '../lib/stats';
 import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dragon-levels';
 import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry, loadBaseline, getWeeklyAverageSeries } from '../lib/weight';
+import { WeightChart } from '../components/weight-chart';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
@@ -263,42 +264,28 @@ export default function StatsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Mini graphique barres */}
+            {/* Graphique XY avec points reliés */}
             <View style={styles.chartRow}>
               {(() => {
                 if (weights.length < 2) {
                   return <Text style={{ color: colors.icon }}>Ajoute 2+ valeurs pour voir la tendance</Text>;
                 }
-                // If many entries, show weekly average for last 12 weeks
-                if (weights.length > 60) {
+                const useWeekly = weights.length > 60;
+                if (useWeekly) {
                   const weekly = getWeeklyAverageSeries(weights).slice(-12);
-                  const values = weekly.map((w) => w.avgKg);
-                  const min = Math.min(...values);
-                  const max = Math.max(...values);
-                  const range = Math.max(0.1, max - min);
-                  return weekly.map((w, idx) => {
-                    const hPct = ((w.avgKg - min) / range) * 100;
-                    return (
-                      <View key={idx} style={styles.chartBarWrap}>
-                        <View style={[styles.chartBar, { height: `${Math.max(8, hPct)}%` }]} />
-                      </View>
-                    );
-                  });
+                  const valuesKg = weekly.map((w) => w.avgKg);
+                  const valuesDisplay = valuesKg.map((v) => toDisplay(v, weightUnit));
+                  const labels = weekly.map((w) => w.weekStart);
+                  const trendColor = baseline && valuesKg.length ? (valuesKg[valuesKg.length - 1] < baseline.weightKg ? '#10b981' : '#ef4444') : '#3b82f6';
+                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} />;
+                } else {
+                  const daily = weights.slice(-30);
+                  const valuesKg = daily.map((w) => w.weightKg);
+                  const valuesDisplay = valuesKg.map((v) => toDisplay(v, weightUnit));
+                  const labels = daily.map((w) => w.date);
+                  const trendColor = baseline && valuesKg.length ? (valuesKg[valuesKg.length - 1] < baseline.weightKg ? '#10b981' : '#ef4444') : '#3b82f6';
+                  return <WeightChart values={valuesDisplay} labels={labels} height={120} color={trendColor} />;
                 }
-                // Otherwise show last 30 daily entries
-                const last30 = weights.slice(-30);
-                const values = last30.map((w) => w.weightKg);
-                const min = Math.min(...values);
-                const max = Math.max(...values);
-                const range = Math.max(0.1, max - min);
-                return last30.map((w, idx) => {
-                  const hPct = ((w.weightKg - min) / range) * 100;
-                  return (
-                    <View key={idx} style={styles.chartBarWrap}>
-                      <View style={[styles.chartBar, { height: `${Math.max(8, hPct)}%` }]} />
-                    </View>
-                  );
-                });
               })()}
             </View>
 
@@ -312,8 +299,28 @@ export default function StatsScreen() {
                   const sign = diff > 0 ? '+' : '';
                   return (
                     <Text style={[styles.deltaText, { color: diff <= 0 ? '#10b981' : '#ef4444' }]}>
-                      {sign}{toDisplay(diff, 'kg')} kg depuis le départ
+                      {sign}{toDisplay(diff, weightUnit)} {weightUnit} depuis le départ
                     </Text>
+                  );
+                })()}
+              </View>
+            )}
+
+            {/* Résumé de progression */}
+            {weights.length >= 2 && (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                {(() => {
+                  const last = weights[weights.length - 1].weightKg;
+                  const w7 = weights[weights.length - Math.min(7, weights.length)].weightKg;
+                  const w30 = weights[weights.length - Math.min(30, weights.length)].weightKg;
+                  const d7 = last - w7;
+                  const d30 = last - w30;
+                  return (
+                    <>
+                      <View style={styles.progressChip}><Text style={[styles.progressChipText, { color: d7 <= 0 ? '#10b981' : '#ef4444' }]}>7j: {d7 > 0 ? '+' : ''}{toDisplay(d7, weightUnit)} {weightUnit}</Text></View>
+                      <View style={styles.progressChip}><Text style={[styles.progressChipText, { color: d30 <= 0 ? '#10b981' : '#ef4444' }]}>30j: {d30 > 0 ? '+' : ''}{toDisplay(d30, weightUnit)} {weightUnit}</Text></View>
+                      <View style={styles.progressChip}><Text style={styles.progressChipText}>Dernier: {toDisplay(last, weightUnit)} {weightUnit}</Text></View>
+                    </>
                   );
                 })()}
               </View>
@@ -498,8 +505,8 @@ const styles = StyleSheet.create({
   chartRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    height: 80,
-    marginTop: 8,
+    height: 140,
+    marginTop: 12,
   },
   baselineRow: {
     flexDirection: 'row',
@@ -517,22 +524,21 @@ const styles = StyleSheet.create({
   baselineDate: {
     fontSize: 12,
   },
-  chartBarWrap: {
-    flex: 1,
-    paddingHorizontal: 1,
-    height: '100%',
-  },
-  chartBar: {
-    backgroundColor: '#3b82f6',
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-    width: '100%',
-  },
   deltaRow: {
     marginTop: 8,
   },
   deltaText: {
     fontSize: 12,
+  },
+  progressChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+  },
+  progressChipText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   sectionTitle: {
     fontSize: 18,
