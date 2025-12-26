@@ -10,6 +10,10 @@ function getKey(userId: string) {
   return `feedtoki_weights_${userId}_v1`;
 }
 
+function getBaselineKey(userId: string) {
+  return `feedtoki_weight_baseline_${userId}_v1`;
+}
+
 export async function loadWeights(userId: string): Promise<WeightEntry[]> {
   try {
     const raw = await AsyncStorage.getItem(getKey(userId));
@@ -31,6 +35,12 @@ export async function saveWeight(userId: string, entry: WeightEntry): Promise<vo
   const next = list.filter((e) => e.date !== dateKey).concat({ date: dateKey, weightKg: entry.weightKg })
     .sort((a, b) => a.date.localeCompare(b.date));
   await AsyncStorage.setItem(getKey(userId), JSON.stringify(next));
+
+  // Set baseline if not already defined
+  const baselineRaw = await AsyncStorage.getItem(getBaselineKey(userId));
+  if (!baselineRaw) {
+    await AsyncStorage.setItem(getBaselineKey(userId), JSON.stringify({ date: dateKey, weightKg: entry.weightKg }));
+  }
 }
 
 export function toDisplay(weightKg: number, unit: 'kg' | 'lbs'): number {
@@ -39,4 +49,35 @@ export function toDisplay(weightKg: number, unit: 'kg' | 'lbs'): number {
 
 export function toKg(value: number, unit: 'kg' | 'lbs'): number {
   return unit === 'kg' ? value : value * 0.453592;
+}
+
+export async function loadBaseline(userId: string): Promise<WeightEntry | null> {
+  try {
+    const raw = await AsyncStorage.getItem(getBaselineKey(userId));
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (typeof obj?.weightKg !== 'number' || typeof obj?.date !== 'string') return null;
+    return { date: normalizeDate(obj.date), weightKg: obj.weightKg };
+  } catch {
+    return null;
+  }
+}
+
+export function getWeeklyAverageSeries(weights: WeightEntry[]): Array<{ weekStart: string; avgKg: number }> {
+  const groups: Record<string, { sum: number; count: number }> = {};
+  for (const w of weights) {
+    const d = new Date(w.date);
+    const day = d.getDay(); // 0=Sun, 1=Mon
+    const diff = day === 0 ? -6 : 1 - day; // Monday start
+    const weekStartDate = new Date(d);
+    weekStartDate.setDate(d.getDate() + diff);
+    const key = normalizeDate(weekStartDate.toISOString());
+    const g = groups[key] || { sum: 0, count: 0 };
+    g.sum += w.weightKg;
+    g.count += 1;
+    groups[key] = g;
+  }
+  return Object.entries(groups)
+    .map(([weekStart, g]) => ({ weekStart, avgKg: g.sum / g.count }))
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 }
