@@ -3,18 +3,19 @@ import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
-// Active/désactive Firebase (mettre à true quand tu auras configuré Firebase)
-export const FIREBASE_ENABLED = false;
+// Firebase activé - Configuration du projet feed-toki
+export const FIREBASE_ENABLED = true;
 
-// Configuration Firebase - À remplacer avec tes vraies clés
-// Tu devras créer un projet Firebase sur console.firebase.google.com
+// Configuration Firebase - Projet feed-toki
+// Source: Firebase Console > Project Settings > General > Web App
 const firebaseConfig = {
-  apiKey: "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-  authDomain: "toki-app.firebaseapp.com",
-  projectId: "toki-app",
-  storageBucket: "toki-app.appspot.com",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:abcdef1234567890abcdef"
+  apiKey: "AIzaSyDpRzpFR-i_6MCP5dMpvXtzxjrmYxdKRTM",
+  authDomain: "feed-toki.firebaseapp.com",
+  projectId: "feed-toki",
+  storageBucket: "feed-toki.firebasestorage.app",
+  messagingSenderId: "936904189160",
+  appId: "1:936904189160:web:6d8504e13e67a9300e555d",
+  measurementId: "G-3G8CEV84ZM"
 };
 
 let app: FirebaseApp | null = null;

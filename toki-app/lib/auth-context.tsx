@@ -7,6 +7,7 @@ import { UserProfile } from '../lib/types';
 import { FIREBASE_ENABLED } from './firebase-config';
 import { getCurrentLocalUser, getLocalUserProfile, LocalUser, localSignOut } from './local-auth';
 import { migrateIncorrectWeights } from './migrate-profile';
+import { autoMigrateIfNeeded } from './migrate-to-firestore';
 
 type AuthContextType = {
   user: AuthUser | LocalUser | null;
@@ -75,6 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(authUser);
           
           if (authUser) {
+            // Migration automatique des données locales vers Firestore
+            await autoMigrateIfNeeded(authUser.uid);
+            
             const userProfile = await getUserProfile(authUser.uid);
             setProfile(userProfile);
             

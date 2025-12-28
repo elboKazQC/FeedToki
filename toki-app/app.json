@@ -23,7 +23,17 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Toki - Nutrition Gamifiée",
+      "shortName": "Toki",
+      "lang": "fr",
+      "scope": "/",
+      "themeColor": "#fbbf24",
+      "backgroundColor": "#020617",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "bundler": "metro"
     },
     "plugins": [
       "expo-router",

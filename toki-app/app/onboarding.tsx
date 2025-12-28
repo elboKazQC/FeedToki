@@ -18,6 +18,7 @@ export default function OnboardingScreen() {
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('lbs'); // Par défaut en lbs pour Amérique du Nord
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>('moderate');
   const [userId, setUserId] = useState<string | null>(null);
+  const [weightError, setWeightError] = useState<string>('');
 
   useEffect(() => {
     const loadUser = async () => {
@@ -35,11 +36,29 @@ export default function OnboardingScreen() {
     console.log('[Onboarding] handleComplete - userId:', userId);
     console.log('[Onboarding] handleComplete - weight:', weight, 'unit:', weightUnit);
     
-    // Convertir le poids en kg si nécessaire
+    // Validation du poids si fourni
     let weightInKg: number | undefined;
     if (weight) {
       const weightValue = parseFloat(weight);
+      
+      // Validation: poids doit être positif et raisonnable
+      if (isNaN(weightValue) || weightValue <= 0) {
+        setWeightError('Le poids doit être un nombre positif');
+        return;
+      }
+      
+      // Convertir en kg
       weightInKg = weightUnit === 'lbs' ? weightValue * 0.453592 : weightValue;
+      
+      // Validation: poids raisonnable (entre 20 kg et 300 kg)
+      if (weightInKg < 20 || weightInKg > 300) {
+        setWeightError(weightUnit === 'lbs' 
+          ? 'Le poids doit être entre 44 lbs et 660 lbs'
+          : 'Le poids doit être entre 20 kg et 300 kg');
+        return;
+      }
+      
+      setWeightError(''); // Clear error si validation OK
     }
     console.log('[Onboarding] weightInKg:', weightInKg);
     
@@ -194,15 +213,22 @@ export default function OnboardingScreen() {
             </View>
             
             <TextInput
-              style={styles.input}
+              style={[styles.input, weightError && styles.inputError]}
               placeholder={weightUnit === 'kg' ? "Ex: 75" : "Ex: 165"}
               keyboardType="decimal-pad"
               value={weight}
-              onChangeText={setWeight}
+              onChangeText={(text) => {
+                setWeight(text);
+                setWeightError(''); // Clear error on change
+              }}
             />
-            <Text style={styles.inputHint}>
-              Optionnel - Par défaut, on utilise 165 lbs (75 kg) pour les calculs
-            </Text>
+            {weightError ? (
+              <Text style={styles.errorText}>{weightError}</Text>
+            ) : (
+              <Text style={styles.inputHint}>
+                Optionnel - Par défaut, on utilise 165 lbs (75 kg) pour les calculs
+              </Text>
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -413,6 +439,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#d1d5db',
+  },
+  inputError: {
+    borderColor: '#ef4444',
+    borderWidth: 2,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#ef4444',
+    marginTop: 4,
+    fontWeight: '500',
   },
   unitSelector: {
     flexDirection: 'row',

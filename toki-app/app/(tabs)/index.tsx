@@ -43,6 +43,8 @@ import { DragonSprite } from '../../components/dragon-sprite';
 import { useAuth } from '../../lib/auth-context';
 import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
+import { computeFoodPoints } from '../../lib/points-utils';
+import { syncAllToFirestore } from '../../lib/data-sync';
 
 type StatsUI = {
   scorePct: number;
@@ -87,42 +89,6 @@ function scoreToCategory(score: number): MealEntry['category'] {
   if (score >= 70) return 'sain';
   if (score >= 40) return 'ok';
   return 'cheat';
-}
-
-function computeFoodPoints(fi: FoodItem): number {
-  // Si l'item a déjà un coût explicite, l'utiliser
-  if (typeof fi.points === 'number') return fi.points;
-  
-  // Nouvelle formule basée sur les calories (plus cohérente)
-  const cal = fi.calories_kcal ?? 150;
-  
-  // Les protéines maigres et légumes sont gratuits
-  if (fi.tags.includes('proteine_maigre') || fi.tags.includes('legume')) {
-    return 0;
-  }
-  
-  // Base: calories divisées par 100 (100 cal = ~1 point)
-  let baseCost = cal / 100;
-  
-  // Ajustements selon les tags
-  if (fi.tags.includes('ultra_transforme')) {
-    baseCost *= 1.5; // 50% plus cher
-  }
-  
-  if (fi.tags.includes('gras_frit')) {
-    baseCost *= 1.3; // 30% plus cher
-  }
-  
-  if (fi.tags.includes('sucre') && cal > 100) {
-    baseCost *= 1.2; // 20% plus cher
-  }
-  
-  // Grains complets sont légèrement avantagés
-  if (fi.tags.includes('grain_complet')) {
-    baseCost *= 0.8;
-  }
-  
-  return Math.max(0, Math.round(baseCost));
 }
 
 // ---- Composant principal ----
@@ -372,6 +338,9 @@ export default function App() {
         const key = getEntriesKey();
         console.log('[Index] Saving entries to key:', key, 'count:', entries.length);
         await AsyncStorage.setItem(key, JSON.stringify(entries));
+        
+        // Sync vers Firestore en arrière-plan
+        await syncAllToFirestore(currentUserId);
       } catch (e) {
         console.log('Erreur sauvegarde AsyncStorage', e);
       }
@@ -494,11 +463,35 @@ function HomeScreen({
   }, [targets]);
 
   const handleSaveTargets = async () => {
+    // Validation des inputs
+    const protein = Number(draftTargets.protein_g);
+    const carbs = Number(draftTargets.carbs_g);
+    const calories = Number(draftTargets.calories_kcal);
+    const fat = Number(draftTargets.fat_g);
+
+    // Validation: valeurs doivent être positives et raisonnables
+    if (isNaN(protein) || protein < 0 || protein > 500) {
+      alert('Les protéines doivent être entre 0 et 500 g');
+      return;
+    }
+    if (isNaN(carbs) || carbs < 0 || carbs > 1000) {
+      alert('Les glucides doivent être entre 0 et 1000 g');
+      return;
+    }
+    if (isNaN(calories) || calories < 500 || calories > 10000) {
+      alert('Les calories doivent être entre 500 et 10000 kcal/jour');
+      return;
+    }
+    if (isNaN(fat) || fat < 0 || fat > 500) {
+      alert('Les lipides doivent être entre 0 et 500 g');
+      return;
+    }
+
     const next = {
-      protein_g: Number(draftTargets.protein_g) || targets.protein_g,
-      carbs_g: Number(draftTargets.carbs_g) || targets.carbs_g,
-      calories_kcal: Number(draftTargets.calories_kcal) || targets.calories_kcal,
-      fat_g: Number(draftTargets.fat_g) || targets.fat_g,
+      protein_g: protein,
+      carbs_g: carbs,
+      calories_kcal: calories,
+      fat_g: fat,
     };
     await onSaveTargets(next);
     setIsEditingTargets(false);
@@ -853,6 +846,12 @@ function HomeScreen({
       <View style={styles.homeButtons}>
         <TouchableOpacity style={styles.buttonPrimary} onPress={onPressAdd}>
           <Text style={styles.buttonPrimaryText}>Partager avec Toki</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.buttonAI} 
+          onPress={() => router.push('/ai-logger')}
+        >
+          <Text style={styles.buttonAIText}>🧠 Log avec IA</Text>
         </TouchableOpacity>
       </View>
 
@@ -1515,6 +1514,21 @@ const styles = StyleSheet.create({
   },
   buttonPrimaryText: {
     color: '#022c22',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  buttonAI: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#93c5fd',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  buttonAIText: {
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
   },
