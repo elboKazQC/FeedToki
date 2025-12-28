@@ -6,7 +6,9 @@ import { UserProfile, GOAL_WEEKLY_CALORIES, ACTIVITY_MULTIPLIERS, WeightGoal, Ac
 const INDULGENCE_RATIO = 0.30; // 30%
 
 // Average calorie cost per point (estimated from food database)
-const AVG_CALORIES_PER_POINT = 80;
+// Ajusté pour être plus réaliste : la plupart des aliments "indulgents" coûtent 2-6 points
+// pour 200-500 calories, donc environ 100 cal/point en moyenne
+const AVG_CALORIES_PER_POINT = 100; // Augmenté de 80 à 100 pour réduire les points
 
 // Maximum cap regardless of goal (to prevent overeating)
 const ABSOLUTE_MAX_CAP = 12;

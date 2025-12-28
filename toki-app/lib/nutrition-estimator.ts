@@ -73,6 +73,12 @@ const KEYWORD_MAPPING: Record<string, FoodTag[]> = {
   'sausage': ['ultra_transforme'],
   'smoked': ['ultra_transforme'],
   'fumé': ['ultra_transforme'],
+  'cigare': ['proteine_maigre', 'legume'],
+  'cigar': ['proteine_maigre', 'legume'],
+  'chou': ['legume'],
+  'choux': ['legume'],
+  'cabbage': ['legume'],
+  'dolma': ['proteine_maigre', 'legume'],
   
   // Sucres
   'sucre': ['sucre'],

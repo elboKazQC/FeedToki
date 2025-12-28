@@ -26,8 +26,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          href: null, // Masquer de la barre d'onglets mais garder accessible via router.push('/explore')
         }}
       />
     </Tabs>

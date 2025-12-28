@@ -1,5 +1,5 @@
 import { MealEntry, normalizeDate } from './stats';
-import { FOOD_DB } from './food-db';
+import { FOOD_DB, FoodItem } from './food-db';
 
 export type DailyNutritionTotals = {
   protein_g: number;
@@ -22,9 +22,12 @@ export const DEFAULT_TARGETS: NutritionTargets = {
   fat_g: 65,
 };
 
-export function computeDailyTotals(entries: MealEntry[], dateIso: string): DailyNutritionTotals {
+export function computeDailyTotals(entries: MealEntry[], dateIso: string, customFoods: FoodItem[] = []): DailyNutritionTotals {
   const dayKey = normalizeDate(dateIso);
   const meals = entries.filter((e) => normalizeDate(e.createdAt) === dayKey);
+
+  // Fusionner FOOD_DB avec customFoods pour chercher dans les deux
+  const allFoods = [...FOOD_DB, ...customFoods];
 
   let protein = 0;
   let carbs = 0;
@@ -34,8 +37,11 @@ export function computeDailyTotals(entries: MealEntry[], dateIso: string): Daily
   for (const m of meals) {
     const items = m.items || [];
     for (const ref of items) {
-      const f = FOOD_DB.find((x) => x.id === ref.foodId);
-      if (!f) continue;
+      const f = allFoods.find((x) => x.id === ref.foodId);
+      if (!f) {
+        console.warn(`[Nutrition] Aliment non trouvé pour foodId: ${ref.foodId} (total foods: ${allFoods.length}, custom: ${customFoods.length})`);
+        continue;
+      }
       
       // Appliquer le multiplicateur de portion (par défaut 1.0)
       const multiplier = ref.multiplier || 1.0;

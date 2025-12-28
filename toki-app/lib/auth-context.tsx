@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { onAuthChange, getCurrentUser, getUserProfile, AuthUser } from '../lib/firebase-auth';
+import { onAuthChange, getCurrentUser, getUserProfile, updateUserProfile, AuthUser } from '../lib/firebase-auth';
 import { UserProfile } from '../lib/types';
 import { FIREBASE_ENABLED } from './firebase-config';
 import { getCurrentLocalUser, getLocalUserProfile, LocalUser, localSignOut } from './local-auth';
@@ -79,17 +79,125 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Migration automatique des données locales vers Firestore
             await autoMigrateIfNeeded(authUser.uid);
             
-            const userProfile = await getUserProfile(authUser.uid);
+            // Synchroniser les données depuis Firestore (fusion intelligente)
+            try {
+              const { syncFromFirestore } = await import('./data-sync');
+              const syncResult = await syncFromFirestore(authUser.uid);
+              if (syncResult.mealsMerged > 0 || syncResult.pointsRestored || syncResult.targetsRestored || syncResult.weightsMerged > 0) {
+                console.log('[AuthContext] Données synchronisées depuis Firestore:', syncResult);
+                // Les composants se rechargeront via leurs useEffect qui dépendent de currentUserId
+              }
+            } catch (error) {
+              console.error('[AuthContext] Erreur synchronisation Firestore:', error);
+              // Continue même si la synchronisation échoue
+            }
+            
+            let userProfile = await getUserProfile(authUser.uid);
+            
+            // Corriger les profils avec dailyPointsBudget = 45 (ancienne valeur incorrecte)
+            // MAIS seulement si onboardingCompleted est true (pour éviter de rediriger vers onboarding)
+            if (userProfile && userProfile.dailyPointsBudget === 45 && userProfile.onboardingCompleted) {
+              console.log('[AuthContext] Correction du profil avec 45 points -> recalcul...');
+              const { calculateDailyPoints, calculateMaxCap } = await import('./points-calculator');
+              const correctedPoints = calculateDailyPoints(userProfile.weeklyCalorieTarget);
+              const correctedCap = calculateMaxCap(correctedPoints);
+              
+              userProfile = {
+                ...userProfile,
+                dailyPointsBudget: correctedPoints,
+                maxPointsCap: correctedCap,
+                // Préserver onboardingCompleted
+                onboardingCompleted: true,
+              };
+              
+              // Sauvegarder la correction dans Firestore
+              await updateUserProfile(authUser.uid, userProfile);
+              console.log('[AuthContext] Profil corrigé:', correctedPoints, 'pts/jour');
+            }
+            
             setProfile(userProfile);
             
+            // Vérifier si le profil local a onboardingCompleted = true mais pas Firestore
+            // Si c'est le cas, mettre à jour Firestore (AVANT la vérification de routage)
             if (userProfile && !userProfile.onboardingCompleted) {
-              router.replace('/onboarding');
-            } else if (userProfile) {
-              router.replace('/(tabs)');
+              try {
+                // Vérifier dans AsyncStorage avec plusieurs clés possibles
+                const localProfileKey1 = `toki_user_profile_${authUser.uid}`;
+                const localProfileKey2 = 'toki_user_profile_v1';
+                let localProfileRaw = await AsyncStorage.getItem(localProfileKey1);
+                if (!localProfileRaw) {
+                  localProfileRaw = await AsyncStorage.getItem(localProfileKey2);
+                }
+                
+                if (localProfileRaw) {
+                  const localProfile = JSON.parse(localProfileRaw);
+                  if (localProfile.onboardingCompleted) {
+                    // Le profil local est complété mais pas Firestore, mettre à jour Firestore
+                    console.log('[AuthContext] Profil local complété mais pas Firestore, mise à jour...');
+                    const cleanProfile = { ...userProfile, onboardingCompleted: true };
+                    // Filtrer undefined
+                    const firestoreProfile: any = {};
+                    for (const [key, value] of Object.entries(cleanProfile)) {
+                      if (value !== undefined) {
+                        firestoreProfile[key] = value;
+                      }
+                    }
+                    firestoreProfile.userId = authUser.uid;
+                    await updateUserProfile(authUser.uid, firestoreProfile);
+                    userProfile.onboardingCompleted = true;
+                    setProfile(userProfile);
+                    console.log('[AuthContext] Profil Firestore mis à jour avec onboardingCompleted: true');
+                  }
+                }
+              } catch (e) {
+                console.error('[AuthContext] Erreur vérification profil local:', e);
+              }
             }
+            
+            setProfile(userProfile);
+            
+            // Ne rediriger que lors de l'initialisation initiale ET seulement si nécessaire
+            if (!initialRoutingDone) {
+              setInitialRoutingDone(true);
+              
+              // Toujours vérifier le chemin actuel avant de rediriger
+              const currentPath = router.pathname || '';
+              
+              // Si on est déjà sur l'app principale, ne JAMAIS rediriger vers l'onboarding
+              if (currentPath.includes('(tabs)')) {
+                console.log('[AuthContext] Déjà sur l\'app principale, pas de redirection');
+                setLoading(false);
+                return;
+              }
+              
+              // Si on est déjà sur l'onboarding, ne pas rediriger
+              if (currentPath.includes('onboarding')) {
+                console.log('[AuthContext] Déjà sur l\'onboarding, pas de redirection');
+                setLoading(false);
+                return;
+              }
+              
+              // Seulement maintenant, décider où aller
+              if (userProfile && !userProfile.onboardingCompleted) {
+                console.log('[AuthContext] Profil non complété, redirection vers onboarding');
+                router.replace('/onboarding');
+              } else if (userProfile) {
+                console.log('[AuthContext] Profil complété, redirection vers app principale');
+                router.replace('/(tabs)');
+              }
+            }
+            
+            setLoading(false);
           } else {
             setProfile(null);
-            router.replace('/auth');
+            // Seulement rediriger vers auth si on n'y est pas déjà
+            if (!initialRoutingDone) {
+              setInitialRoutingDone(true);
+              const currentPath = router.pathname || '';
+              if (!currentPath.includes('auth')) {
+                router.replace('/auth');
+              }
+            }
           }
           
           setLoading(false);

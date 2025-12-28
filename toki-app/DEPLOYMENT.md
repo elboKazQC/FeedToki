@@ -45,6 +45,19 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
+    
+    // Logs utilisateurs - pour debugging
+    match /user_logs/{logId} {
+      // Les utilisateurs peuvent créer leurs propres logs
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      
+      // Les utilisateurs peuvent lire leurs propres logs
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      
+      // TODO: Ajouter un champ "admin" dans le profil utilisateur pour permettre la lecture de tous les logs
+      // allow read: if request.auth != null && 
+      //   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.admin == true;
+    }
   }
 }
 ```

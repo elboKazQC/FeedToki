@@ -6,12 +6,14 @@ import { WeightGoal, ActivityLevel } from '../lib/types';
 import { computeUserProfile, getGoalDescription, getDailyCalorieTarget } from '../lib/points-calculator';
 import { getCurrentLocalUser, updateLocalUserProfile } from '../lib/local-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
+
 import { useAuth } from '../lib/auth-context';
+import { updateUserProfile } from '../lib/firebase-auth';
 
 const PROFILE_KEY = 'toki_user_profile_v1';
 
 export default function OnboardingScreen() {
-  const { refreshProfile } = useAuth();
+  const { refreshProfile, user } = useAuth();
   const [step, setStep] = useState(1);
   const [goal, setGoal] = useState<WeightGoal>('lose-1lb');
   const [weight, setWeight] = useState('');
@@ -71,18 +73,49 @@ export default function OnboardingScreen() {
     console.log('[Onboarding] computed profile:', JSON.stringify(profile, null, 2));
 
     // Sauvegarde du profil - toujours écrire directement pour éviter les erreurs
-    const profileKey = userId ? `toki_user_profile_${userId}` : PROFILE_KEY;
-    const fullProfile = { ...profile, userId: userId || undefined, onboardingCompleted: true };
+    const firebaseUserId = (user as any)?.uid || userId;
+    const profileKey = firebaseUserId ? `toki_user_profile_${firebaseUserId}` : PROFILE_KEY;
+    
+    // S'assurer que userId est toujours défini pour Firestore
+    const fullProfile = { 
+      ...profile, 
+      userId: firebaseUserId || userId || undefined, 
+      onboardingCompleted: true 
+    };
+    
     await AsyncStorage.setItem(profileKey, JSON.stringify(fullProfile));
     
     console.log('[Onboarding] Profil sauvegardé:', profileKey);
+
+    // Si Firebase est activé, sauvegarder aussi dans Firestore
+    if (FIREBASE_ENABLED && user && (user as any).uid) {
+      try {
+        // Filtrer les valeurs undefined pour Firestore
+        const firestoreProfile: any = {};
+        for (const [key, value] of Object.entries(fullProfile)) {
+          if (value !== undefined) {
+            firestoreProfile[key] = value;
+          }
+        }
+        // S'assurer que userId est toujours défini et que onboardingCompleted est true
+        firestoreProfile.userId = (user as any).uid;
+        firestoreProfile.onboardingCompleted = true;
+        
+        console.log('[Onboarding] Sauvegarde Firestore avec:', firestoreProfile);
+        await updateUserProfile((user as any).uid, firestoreProfile);
+        console.log('[Onboarding] Profil sauvegardé dans Firestore avec succès');
+      } catch (error) {
+        console.error('[Onboarding] Erreur sauvegarde Firestore:', error);
+        // Continuer même si Firestore échoue
+      }
+    }
 
     // Recharger le profil dans le contexte et attendre
     await refreshProfile();
     console.log('[Onboarding] refreshProfile done');
     
     // Petit délai pour laisser le contexte se mettre à jour
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     // Naviguer vers l'application principale
     console.log('[Onboarding] Navigating to /(tabs)');

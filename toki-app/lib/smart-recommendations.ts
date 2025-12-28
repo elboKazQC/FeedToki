@@ -207,7 +207,8 @@ function estimatePointsCost(item: FoodItem): number {
  */
 export function getHungerAnalysis(
   currentTotals: DailyNutritionTotals,
-  targets: NutritionTargets
+  targets: NutritionTargets,
+  timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
 ): string {
   const remaining = {
     calories: Math.max(0, targets.calories_kcal - currentTotals.calories_kcal),
@@ -217,24 +218,39 @@ export function getHungerAnalysis(
 
   const proteinPct = currentTotals.protein_g / targets.protein_g;
   const caloriesPct = currentTotals.calories_kcal / targets.calories_kcal;
+  
+  // Déterminer le type de repas selon l'heure
+  const hour = new Date().getHours();
+  const mealType = timeOfDay === 'morning' ? 'petit-déjeuner' : 
+                   timeOfDay === 'afternoon' ? 'déjeuner' : 'souper';
+  const isSnackTime = (timeOfDay === 'afternoon' && hour >= 15 && hour < 17) ||
+                      (timeOfDay === 'evening' && hour >= 20);
+
+  // Build analysis message avec contexte de l'heure
+  let timeContext = '';
+  if (isSnackTime) {
+    timeContext = 'C\'est l\'heure d\'une collation. ';
+  } else {
+    timeContext = `C'est l'heure du ${mealType}. `;
+  }
 
   if (caloriesPct > 0.95) {
-    return "Tu es proche de ton objectif calorique! Choisis des légumes ou protéines légères. 🥗";
+    return `${timeContext}Tu es proche de ton objectif calorique! Choisis des légumes ou protéines légères pour compléter sans dépasser. 🥗`;
   }
 
   if (proteinPct < 0.6) {
-    return `Il te manque ${Math.round(remaining.protein)}g de protéines. Focus sur poulet, poisson ou œufs! 💪`;
+    return `${timeContext}Il te manque ${Math.round(remaining.protein)}g de protéines (tu as ${currentTotals.protein_g.toFixed(0)}g sur ${targets.protein_g}g). Focus sur poulet, poisson ou œufs pour compléter tes besoins! 💪`;
   }
 
   if (proteinPct < 0.8 && caloriesPct < 0.7) {
-    return `Tu as encore ${Math.round(remaining.calories)} cal de budget. Ajoute des protéines et féculents! 🍽️`;
+    return `${timeContext}Tu as encore ${Math.round(remaining.calories)} cal de budget. Ajoute des protéines et féculents pour un repas équilibré! 🍽️`;
   }
 
   if (caloriesPct < 0.5) {
-    return `Tu es à ${Math.round(caloriesPct * 100)}% de ton objectif. Tu peux manger un bon repas complet! 🍴`;
+    return `${timeContext}Tu es à ${Math.round(caloriesPct * 100)}% de ton objectif. Tu peux manger un bon repas complet pour compléter tes besoins nutritionnels! 🍴`;
   }
 
-  return `Il te reste ${Math.round(remaining.calories)} cal. Choisis ce qui te fait envie! 😊`;
+  return `${timeContext}Il te reste ${Math.round(remaining.calories)} cal. Choisis ce qui te fait envie! 😊`;
 }
 
 /**

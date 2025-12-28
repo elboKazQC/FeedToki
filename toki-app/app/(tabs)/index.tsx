@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
   Platform,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -44,7 +45,9 @@ import { useAuth } from '../../lib/auth-context';
 import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
 import { computeFoodPoints } from '../../lib/points-utils';
-import { syncAllToFirestore } from '../../lib/data-sync';
+import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
+import { loadCustomFoods, mergeFoodsWithCustom } from '../../lib/custom-foods';
+import { userLogger, logError } from '../../lib/user-logger';
 
 type StatsUI = {
   scorePct: number;
@@ -94,6 +97,7 @@ function scoreToCategory(score: number): MealEntry['category'] {
 // ---- Composant principal ----
 export default function App() {
   const { profile: authProfile, user: authUser, loading: authLoading } = useAuth();
+  const [customFoods, setCustomFoods] = useState<typeof FOOD_DB>([]);
   const [screen, setScreen] = useState<'home' | 'add'>('home');
   const [entries, setEntries] = useState<MealEntry[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -151,15 +155,26 @@ export default function App() {
   }, [currentUserId]);
 
   // Charger les entrées au démarrage - recharger quand userId change
+  // Note: La synchronisation depuis Firestore se fait dans auth-context.tsx et ici aussi
   useEffect(() => {
     // Attendre que le profil soit chargé
-    if (authLoading || !currentUserId) {
+    if (authLoading || !currentUserId || currentUserId === 'guest') {
       console.log('[Index] Waiting for user, currentUserId:', currentUserId);
       return;
     }
     
     const load = async () => {
       try {
+        // IMPORTANT: Synchroniser d'abord depuis Firestore (fusion) pour avoir les données les plus récentes
+        try {
+          const { syncFromFirestore } = await import('../../lib/data-sync');
+          const syncResult = await syncFromFirestore(currentUserId);
+          console.log('[Index] Sync depuis Firestore terminée:', syncResult);
+        } catch (syncError) {
+          console.warn('[Index] Erreur sync Firestore, utilisation locale:', syncError);
+        }
+        
+        // Après synchronisation, charger depuis AsyncStorage (qui contient maintenant les données fusionnées)
         const key = getEntriesKey();
         console.log('[Index] Loading entries for key:', key);
         const json = await AsyncStorage.getItem(key);
@@ -243,7 +258,7 @@ export default function App() {
     const map: Record<string, number> = {};
     for (const entry of entries) {
       const dateKey = normalizeDate(entry.createdAt);
-      const dayTotals = computeDailyTotals(entries, entry.createdAt);
+      const dayTotals = computeDailyTotals(entries, entry.createdAt, customFoods);
       map[dateKey] = dayTotals.calories_kcal;
     }
     return map;
@@ -252,8 +267,38 @@ export default function App() {
   // Utiliser les nouvelles fonctions avec validation des calories
   const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
   const streak = computeStreakWithCalories(dayFeeds, dayCaloriesMap);
-  const recommendations = getCanadaGuideRecommendations();
-  const todayTotals = computeDailyTotals(entries, new Date().toISOString());
+  const todayTotals = computeDailyTotals(entries, new Date().toISOString(), customFoods);
+  
+  // Déterminer l'heure de la journée pour les recommandations intelligentes
+  const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    return 'evening';
+  };
+  
+  // Déterminer l'heure de la journée
+  const timeOfDay = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    return 'evening';
+  }, []);
+  
+  // Générer des recommandations intelligentes basées sur ce qui a été mangé
+  const smartRecommendations = useMemo(() => {
+    return getSmartRecommendations(
+      todayTotals,
+      targets,
+      points,
+      timeOfDay
+    );
+  }, [todayTotals, targets, points, timeOfDay]);
+  
+  // Analyse de la faim basée sur les totaux
+  const hungerAnalysis = useMemo(() => {
+    return getHungerAnalysis(todayTotals, targets, timeOfDay);
+  }, [todayTotals, targets, timeOfDay]);
   
   // Vérifier si le dragon est mort (5 jours sans repas complet)
   const dragonIsDead = checkDragonDeath(dragonState.daysSinceLastMeal);
@@ -297,20 +342,72 @@ export default function App() {
           const parsed = JSON.parse(raw);
           let balance = parsed.balance ?? 0;
           const last = parsed.lastClaimDate ?? '';
+          
+          console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance);
+          
           if (last !== today) {
+            // Nouveau jour : créditer les points quotidiens
+            const oldBalance = balance;
             balance = Math.min(maxCapFromProfile, balance + dailyPointsFromProfile);
+            console.log('[Index] Nouveau jour ! Crédit de', dailyPointsFromProfile, 'pts. Ancien:', oldBalance, '→ Nouveau:', balance);
+            
             await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance, lastClaimDate: today }));
             
             // Incrémenter les points totaux
-            const newTotal = (JSON.parse(totalRaw || '0')) + dailyPointsFromProfile;
+            const currentTotal = totalRaw ? JSON.parse(totalRaw) : 0;
+            const newTotal = currentTotal + dailyPointsFromProfile;
             setTotalPointsEarned(newTotal);
             await AsyncStorage.setItem(totalKey, JSON.stringify(newTotal));
+          } else {
+            console.log('[Index] Points déjà crédités aujourd\'hui. Balance actuelle:', balance);
+            
+            // Si le solde est à 0 mais qu'on devrait avoir des points, vérifier s'il y a eu un problème
+            // Calculer combien on devrait avoir en fonction des dépenses d'aujourd'hui
+            if (balance === 0) {
+              const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+              const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+              const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
+              let totalSpentToday = 0;
+              
+              for (const entry of todayEntries) {
+                if (entry.items && entry.items.length > 0) {
+                  const entryCost = entry.items.reduce((sum, itemRef) => {
+                    const fi = allFoods.find(f => f.id === itemRef.foodId);
+                    if (!fi) return sum;
+                    const multiplier = itemRef.multiplier || 1.0;
+                    const baseCost = computeFoodPoints(fi);
+                    const cost = Math.round(baseCost * Math.sqrt(multiplier));
+                    return sum + cost;
+                  }, 0);
+                  totalSpentToday += entryCost;
+                }
+              }
+              
+              // Calculer le solde attendu : points du jour - dépenses
+              const expectedBalance = Math.max(0, Math.min(maxCapFromProfile, dailyPointsFromProfile - totalSpentToday));
+              
+              // Si le solde attendu est différent du solde actuel, corriger
+              if (expectedBalance !== balance) {
+                console.log('[Index] Correction automatique des points:', {
+                  dailyPoints: dailyPointsFromProfile,
+                  totalSpent: totalSpentToday,
+                  expectedBalance,
+                  currentBalance: balance,
+                });
+                balance = expectedBalance;
+                await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance, lastClaimDate: today }));
+                console.log('[Index] Solde corrigé automatiquement:', balance);
+              }
+            }
           }
           setPoints(balance);
           setLastClaimDate(today);
         } else {
+          // Premier jour : donner les points quotidiens au lieu de INITIAL_POINTS
           console.log('[Index] No points found, initializing for user:', currentUserId);
-          const initBalance = INITIAL_POINTS;
+          const initBalance = Math.min(maxCapFromProfile, dailyPointsFromProfile);
+          console.log('[Index] Initialisation avec', initBalance, 'pts (budget quotidien:', dailyPointsFromProfile, ', cap:', maxCapFromProfile, ')');
+          
           await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: initBalance, lastClaimDate: today }));
           setPoints(initBalance);
           setLastClaimDate(today);
@@ -325,6 +422,30 @@ export default function App() {
     };
     loadPoints();
   }, [userProfile, currentUserId, authLoading]); // Relancer quand le profil ou userId change
+
+  // Charger les aliments personnalisés (depuis AsyncStorage + Firestore)
+  const loadCustomFoodsData = async () => {
+    if (!currentUserId || currentUserId === 'guest') {
+      const custom = await loadCustomFoods();
+      setCustomFoods(custom);
+      return;
+    }
+    const custom = await loadCustomFoods(currentUserId);
+    setCustomFoods(custom);
+  };
+
+  useEffect(() => {
+    if (currentUserId) {
+      loadCustomFoodsData();
+    }
+  }, [currentUserId]);
+
+  // Recharger les aliments personnalisés quand on revient sur l'écran add
+  useEffect(() => {
+    if (screen === 'add' && currentUserId) {
+      loadCustomFoodsData();
+    }
+  }, [screen, currentUserId]);
 
   // Sauvegarder à chaque changement - SEULEMENT si on a un vrai userId
   useEffect(() => {
@@ -350,17 +471,253 @@ export default function App() {
     }
   }, [entries, isReady, currentUserId]);
 
-  const handleAddEntry = (entry: Omit<MealEntry, 'id' | 'createdAt'> & { score?: number }) => {
-    const newEntry: MealEntry = {
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      ...entry,
-      score: typeof entry.score === 'number' ? entry.score : mapManualCategoryToScore(entry.category),
-    };
-    setEntries((prev) => [newEntry, ...prev]);
-    setScreen('home');
+  const handleAddEntry = async (entry: Omit<MealEntry, 'id' | 'createdAt'> & { score?: number }) => {
+    try {
+      const newEntry: MealEntry = {
+        id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        ...entry,
+        score: typeof entry.score === 'number' ? entry.score : mapManualCategoryToScore(entry.category),
+      };
+      
+      await userLogger.info(
+        currentUserId,
+        `Ajout d'entrée: ${newEntry.label}`,
+        'add-entry',
+        { entryId: newEntry.id, itemsCount: entry.items?.length || 0, category: newEntry.category }
+      );
+      
+      // Ajouter au state
+      const updatedEntries = [newEntry, ...entries];
+      setEntries(updatedEntries);
+      
+      // Sauvegarder dans AsyncStorage
+      const entriesKey = getEntriesKey();
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(updatedEntries));
+      
+      // Synchroniser avec Firestore
+      if (currentUserId !== 'guest') {
+        await syncMealEntryToFirestore(currentUserId, newEntry);
+      }
+      
+      // Calculer et déduire les points si l'entrée a des items
+      if (entry.items && entry.items.length > 0) {
+        const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+        
+        const totalPoints = entry.items.reduce((sum, itemRef) => {
+          const fi = allFoods.find(f => f.id === itemRef.foodId);
+          if (!fi) {
+            console.warn(`[Index] Aliment non trouvé pour itemRef.foodId: ${itemRef.foodId}`);
+            return sum;
+          }
+          const multiplier = itemRef.multiplier || 1.0;
+          const baseCost = computeFoodPoints(fi);
+          const cost = Math.round(baseCost * Math.sqrt(multiplier));
+          console.log(`[Index] Calcul points: ${fi.name} = ${cost} pts (base: ${baseCost}, mult: ${multiplier})`);
+          return sum + cost;
+        }, 0);
+        
+        console.log(`[Index] Total points calculés pour entrée ${newEntry.id}: ${totalPoints} pts`);
+        
+        if (totalPoints > 0) {
+          const pointsKey = getPointsKey();
+          const pointsRaw = await AsyncStorage.getItem(pointsKey);
+          const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+          const newBalance = Math.max(0, pointsData.balance - totalPoints);
+          
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({
+            ...pointsData,
+            balance: newBalance,
+          }));
+          
+          setPoints(newBalance);
+          
+          // Synchroniser les points avec Firestore
+          if (currentUserId !== 'guest') {
+            await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
+          }
+          
+          await userLogger.info(
+            currentUserId,
+            `Points déduits: -${totalPoints} pts (nouveau solde: ${newBalance})`,
+            'points-calculation',
+            { pointsDeducted: totalPoints, newBalance, previousBalance: pointsData.balance }
+          );
+        } else {
+          await userLogger.warn(
+            currentUserId,
+            `Entrée ajoutée mais aucun point déduit`,
+            'add-entry',
+            { entryId: newEntry.id, items: entry.items }
+          );
+        }
+      } else {
+        await userLogger.warn(
+          currentUserId,
+          `Entrée ajoutée sans items`,
+          'add-entry',
+          { entryId: newEntry.id, label: newEntry.label }
+        );
+      }
+      
+      setScreen('home');
+    } catch (error) {
+      await logError(currentUserId, error, 'add-entry', { entry });
+      console.error('[Index] Erreur lors de l\'ajout d\'entrée:', error);
+      Alert.alert('Erreur', 'Impossible d\'enregistrer l\'entrée. Réessayez plus tard.');
+    }
   };
 
+  const handleDeleteEntry = async (entryId: string) => {
+    try {
+      // Trouver l'entrée à supprimer
+      const entryToDelete = entries.find(e => e.id === entryId);
+      if (!entryToDelete) {
+        console.error('Entrée non trouvée:', entryId);
+        return;
+      }
+
+      // Calculer le coût en points de cette entrée pour remboursement
+      let refundPoints = 0;
+      if (entryToDelete.items && entryToDelete.items.length > 0) {
+        // Charger les aliments personnalisés pour le calcul
+        const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+        
+        refundPoints = entryToDelete.items.reduce((sum, itemRef) => {
+          const fi = allFoods.find(f => f.id === itemRef.foodId);
+          if (!fi) return sum;
+          const multiplier = itemRef.multiplier || 1.0;
+          const baseCost = computeFoodPoints(fi);
+          const cost = Math.round(baseCost * Math.sqrt(multiplier));
+          return sum + cost;
+        }, 0);
+      }
+
+      // Supprimer l'entrée
+      const updated = entries.filter(e => e.id !== entryId);
+      setEntries(updated);
+      
+      // Rembourser les points si nécessaire
+      if (refundPoints > 0) {
+        const newBalance = Math.min(userProfile?.maxPointsCap || MAX_POINTS, points + refundPoints);
+        setPoints(newBalance);
+        
+        // Sauvegarder les points
+        const pointsKey = getPointsKey();
+        const pointsRaw = await AsyncStorage.getItem(pointsKey);
+        const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+        await AsyncStorage.setItem(pointsKey, JSON.stringify({
+          ...pointsData,
+          balance: newBalance,
+        }));
+        
+        console.log(`[Index] Points remboursés: +${refundPoints} pts (nouveau solde: ${newBalance})`);
+      }
+      
+      // Sauvegarder les entrées
+      const key = getEntriesKey();
+      await AsyncStorage.setItem(key, JSON.stringify(updated));
+      if (currentUserId !== 'guest') {
+        await syncAllToFirestore(currentUserId);
+      }
+      
+      // Afficher un message de succès
+      const successMsg = refundPoints > 0 
+        ? `Entrée supprimée. ${refundPoints} point(s) remboursé(s).`
+        : 'Entrée supprimée avec succès';
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        console.log(successMsg);
+        if (refundPoints > 0) {
+          window.alert(successMsg);
+        }
+      } else {
+        Alert.alert('✅ Supprimé', successMsg);
+      }
+    } catch (e) {
+      console.error('Erreur suppression entrée:', e);
+      const errorMsg = 'Impossible de supprimer l\'entrée. Réessayez plus tard.';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Erreur', errorMsg);
+      }
+    }
+  };
+
+  // Fonction pour corriger les points après les changements du système
+  const fixPointsBalance = async () => {
+    if (!userProfile || !currentUserId) {
+      console.log('[Index] fixPointsBalance: Pas de profil ou userId');
+      return;
+    }
+    
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
+      const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
+      
+      // Calculer le total dépensé aujourd'hui
+      const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
+      let totalSpent = 0;
+      
+      if (todayEntries.length > 0) {
+        const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+        
+        for (const entry of todayEntries) {
+          if (entry.items && entry.items.length > 0) {
+            const entryCost = entry.items.reduce((sum, itemRef) => {
+              const fi = allFoods.find(f => f.id === itemRef.foodId);
+              if (!fi) return sum;
+              const multiplier = itemRef.multiplier || 1.0;
+              const baseCost = computeFoodPoints(fi);
+              const cost = Math.round(baseCost * Math.sqrt(multiplier));
+              return sum + cost;
+            }, 0);
+            totalSpent += entryCost;
+          }
+        }
+      }
+      
+      // Calculer le solde correct : points du jour - dépenses
+      const correctBalance = Math.max(0, Math.min(maxCapFromProfile, dailyPointsFromProfile - totalSpent));
+      
+      const pointsKey = getPointsKey();
+      await AsyncStorage.setItem(pointsKey, JSON.stringify({
+        balance: correctBalance,
+        lastClaimDate: today,
+      }));
+      
+      setPoints(correctBalance);
+      setLastClaimDate(today);
+      
+      console.log('[Index] Points corrigés:', {
+        dailyPoints: dailyPointsFromProfile,
+        totalSpent,
+        correctBalance,
+      });
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Points corrigés ! Tu as maintenant ${correctBalance} points (reçu ${dailyPointsFromProfile} pts ce matin, dépensé ${totalSpent} pts).`);
+      } else {
+        Alert.alert(
+          '✅ Points corrigés',
+          `Tu as maintenant ${correctBalance} points (reçu ${dailyPointsFromProfile} pts ce matin, dépensé ${totalSpent} pts).`
+        );
+      }
+    } catch (e) {
+      console.error('[Index] Erreur correction points:', e);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Erreur lors de la correction des points.');
+      } else {
+        Alert.alert('Erreur', 'Impossible de corriger les points.');
+      }
+    }
+  };
+  
   const spendPoints = async (cost: number) => {
     if (cost <= 0) return;
     const newBalance = Math.max(0, points - cost);
@@ -378,10 +735,13 @@ export default function App() {
         <HomeScreen
           entries={entries}
           onPressAdd={() => setScreen('add')}
+          onDeleteEntry={handleDeleteEntry}
           stats={stats}
           dragonState={dragonState}
           streak={streak}
-          recommendations={recommendations}
+          recommendations={smartRecommendations}
+          hungerAnalysis={hungerAnalysis}
+          timeOfDay={timeOfDay}
           todayTotals={todayTotals}
           targets={targets}
           onSaveTargets={async (next) => {
@@ -392,6 +752,9 @@ export default function App() {
           totalPointsEarned={totalPointsEarned}
           userProfile={userProfile}
           setPreselectedItem={setPreselectedItem}
+          lastClaimDate={lastClaimDate}
+          customFoods={customFoods}
+          fixPointsBalance={fixPointsBalance}
         />
       )}
 
@@ -407,6 +770,7 @@ export default function App() {
           todayTotals={todayTotals}
           targets={targets}
           preselectedItem={preselectedItem}
+          customFoods={customFoods}
         />
       )}
 
@@ -419,6 +783,7 @@ export default function App() {
 function HomeScreen({
   entries,
   onPressAdd,
+  onDeleteEntry,
   stats,
   dragonState,
   streak,
@@ -430,13 +795,17 @@ function HomeScreen({
   totalPointsEarned,
   userProfile,
   setPreselectedItem,
+  lastClaimDate,
+  customFoods,
 }: {
   entries: MealEntry[];
   onPressAdd: () => void;
+  onDeleteEntry: (entryId: string) => void | Promise<void>;
   stats: StatsUI;
   dragonState: DragonStatus;
   streak: ReturnType<typeof computeStreak>;
-  recommendations: ReturnType<typeof getCanadaGuideRecommendations>;
+  recommendations: SmartRecommendation[];
+  hungerAnalysis: string;
   todayTotals: ReturnType<typeof computeDailyTotals>;
   targets: typeof DEFAULT_TARGETS;
   onSaveTargets: (next: typeof DEFAULT_TARGETS) => void | Promise<void>;
@@ -444,7 +813,24 @@ function HomeScreen({
   totalPointsEarned: number;
   userProfile: UserProfile | null;
   setPreselectedItem: (item: { item: FoodItem; portion: PortionReference } | null) => void;
+  lastClaimDate: string;
+  customFoods: typeof FOOD_DB;
+  fixPointsBalance: () => Promise<void>;
 }) {
+  // Calculer le coût en points d'une entrée
+  const calculateEntryCost = (entry: MealEntry): number => {
+    if (!entry.items || entry.items.length === 0) return 0;
+    const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+    return entry.items.reduce((sum, itemRef) => {
+      const fi = allFoods.find(f => f.id === itemRef.foodId);
+      if (!fi) return sum;
+      const multiplier = itemRef.multiplier || 1.0;
+      const baseCost = computeFoodPoints(fi);
+      const cost = Math.round(baseCost * Math.sqrt(multiplier));
+      return sum + cost;
+    }, 0);
+  };
+  
   const [isEditingTargets, setIsEditingTargets] = useState(false);
   const [draftTargets, setDraftTargets] = useState({
     protein_g: targets.protein_g.toString(),
@@ -521,10 +907,11 @@ function HomeScreen({
     return 'evening';
   };
   
+  const timeOfDay = getTimeOfDay();
   const smartRecs = showHungryMode 
-    ? getSmartRecommendations(todayTotals, targets, points, getTimeOfDay())
+    ? getSmartRecommendations(todayTotals, targets, points, timeOfDay)
     : [];
-  const hungerAnalysis = getHungerAnalysis(todayTotals, targets);
+  const hungerAnalysis = getHungerAnalysis(todayTotals, targets, timeOfDay);
 
   // Détection de profil suspect (calories trop élevées = probable erreur lbs/kg)
   const hasSuspectProfile = userProfile && weeklyCalTarget && weeklyCalTarget > 30000;
@@ -631,27 +1018,61 @@ function HomeScreen({
               Objectif: {weeklyCalTarget.toLocaleString()} cal/semaine
             </Text>
           )}
-          <View style={styles.budgetRow}>
-            <View style={styles.budgetCol}>
-              <Text style={styles.budgetLabel}>Quotidien</Text>
-              <Text style={styles.budgetValue}>{dailyBudget} pts</Text>
+          
+          {/* Points disponibles - Mise en avant */}
+          <View style={styles.budgetCurrentBox}>
+            <Text style={styles.budgetCurrentLabel}>Points disponibles</Text>
+            <Text style={[styles.budgetCurrentValue, points === 0 && styles.budgetCurrentZero]}>
+              {points} pts
+            </Text>
+            {points === 0 && (
+              <Text style={styles.budgetHint}>
+                Tu as utilisé tous tes points aujourd'hui. Tu recevras {dailyBudget} nouveaux points demain matin.
+              </Text>
+            )}
+            {points > 0 && lastClaimDate === new Date().toISOString().slice(0, 10) && (
+              <Text style={styles.budgetHint}>
+                Reçu ce matin : {dailyBudget} pts
+              </Text>
+            )}
+            {/* Bouton pour corriger les points si nécessaire */}
+            {points === 0 && entries.length > 0 && (
+              <TouchableOpacity 
+                style={styles.fixPointsButton}
+                onPress={() => fixPointsBalance()}
+              >
+                <Text style={styles.fixPointsButtonText}>🔧 Corriger mes points</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Détails du système */}
+          <View style={styles.budgetDetailsRow}>
+            <View style={styles.budgetDetailCol}>
+              <Text style={styles.budgetDetailLabel}>Gagné par jour</Text>
+              <Text style={styles.budgetDetailValue}>{dailyBudget} pts</Text>
+              <Text style={styles.budgetDetailHint}>Reçu chaque matin</Text>
             </View>
-            <View style={styles.budgetCol}>
-              <Text style={styles.budgetLabel}>Maximum</Text>
-              <Text style={styles.budgetValue}>{maxCap} pts</Text>
-            </View>
-            <View style={styles.budgetCol}>
-              <Text style={styles.budgetLabel}>Disponible</Text>
-              <Text style={[styles.budgetValue, styles.budgetCurrent]}>{points} pts</Text>
+            <View style={styles.budgetDetailCol}>
+              <Text style={styles.budgetDetailLabel}>Cap maximum</Text>
+              <Text style={styles.budgetDetailValue}>{maxCap} pts</Text>
+              <Text style={styles.budgetDetailHint}>Maximum accumulable</Text>
             </View>
           </View>
-          <View style={styles.budgetProgressTrack}>
-            <View 
-              style={[
-                styles.budgetProgressBar, 
-                { width: `${Math.min(100, (points / maxCap) * 100)}%` }
-              ]} 
-            />
+
+          {/* Barre de progression */}
+          <View style={styles.budgetProgressContainer}>
+            <View style={styles.budgetProgressTrack}>
+              <View 
+                style={[
+                  styles.budgetProgressBar, 
+                  { width: `${Math.min(100, (points / maxCap) * 100)}%` }
+                ]} 
+              />
+            </View>
+            <Text style={styles.budgetProgressText}>
+              {points} / {maxCap} pts
+            </Text>
           </View>
         </View>
       )}
@@ -710,6 +1131,22 @@ function HomeScreen({
       {showHungryMode && (
         <View style={styles.smartRecsBox}>
           <Text style={styles.smartRecsTitle}>🤖 Suggestions Intelligentes</Text>
+          
+          {/* Résumé de ce qui a été mangé aujourd'hui */}
+          <View style={styles.todaySummaryBox}>
+            <Text style={styles.todaySummaryTitle}>📊 Ce que tu as mangé aujourd'hui:</Text>
+            <Text style={styles.todaySummaryText}>
+              • {todayTotals.calories_kcal.toFixed(0)} / {targets.calories_kcal.toFixed(0)} calories ({((todayTotals.calories_kcal / targets.calories_kcal) * 100).toFixed(0)}%)
+            </Text>
+            <Text style={styles.todaySummaryText}>
+              • {todayTotals.protein_g.toFixed(0)} / {targets.protein_g.toFixed(0)}g protéines ({((todayTotals.protein_g / targets.protein_g) * 100).toFixed(0)}%)
+            </Text>
+            <Text style={styles.todaySummaryText}>
+              • {todayTotals.carbs_g.toFixed(0)} / {targets.carbs_g.toFixed(0)}g glucides ({((todayTotals.carbs_g / targets.carbs_g) * 100).toFixed(0)}%)
+            </Text>
+          </View>
+          
+          {/* Analyse de la faim avec contexte temporel */}
           <Text style={styles.smartRecsAnalysis}>{hungerAnalysis}</Text>
           
           {smartRecs.length === 0 ? (
@@ -718,7 +1155,9 @@ function HomeScreen({
             </Text>
           ) : (
             <>
-              <Text style={styles.smartRecsSubtitle}>Recommandé pour toi:</Text>
+              <Text style={styles.smartRecsSubtitle}>
+                💡 Recommandé pour toi ({timeOfDay === 'morning' ? 'matin' : timeOfDay === 'afternoon' ? 'après-midi' : 'soir'}):
+              </Text>
               {smartRecs.map((rec, idx) => (
                 <TouchableOpacity
                   key={rec.item.id}
@@ -738,9 +1177,9 @@ function HomeScreen({
                     </Text>
                     <Text style={styles.smartRecCost}>{rec.pointsCost} pts</Text>
                   </View>
-                  <Text style={styles.smartRecReason}>{rec.reason}</Text>
+                  <Text style={styles.smartRecReason}>💡 {rec.reason}</Text>
                   <Text style={styles.smartRecNutrition}>
-                    {rec.suggestedGrams}g ({rec.suggestedVisualRef}) · {rec.item.calories_kcal || 0} cal · {rec.item.protein_g || 0}g protéines
+                    📏 {rec.suggestedGrams}g ({rec.suggestedVisualRef}) · 🔥 {rec.item.calories_kcal || 0} cal · 💪 {rec.item.protein_g || 0}g protéines
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -752,7 +1191,7 @@ function HomeScreen({
       {(dragonState.mood === 'inquiet' || dragonState.mood === 'critique') && (
         <View style={styles.hungryBox}>
           <Text style={styles.hungryTitle}>Toki a faim — voici quoi ajouter :</Text>
-          {recommendations.map((rec) => (
+          {getCanadaGuideRecommendations().map((rec) => (
             <View key={rec.group} style={styles.recRow}>
               <Text style={styles.recTitle}>{rec.title}</Text>
               <Text style={styles.recExamples}>{rec.examples.join(', ')}</Text>
@@ -847,12 +1286,6 @@ function HomeScreen({
         <TouchableOpacity style={styles.buttonPrimary} onPress={onPressAdd}>
           <Text style={styles.buttonPrimaryText}>Partager avec Toki</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.buttonAI} 
-          onPress={() => router.push('/ai-logger')}
-        >
-          <Text style={styles.buttonAIText}>🧠 Log avec IA</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.historyBox}>
@@ -863,11 +1296,78 @@ function HomeScreen({
           <FlatList
             data={entries.slice(0, 5)}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <Text style={styles.historyItem}>
-                • [{item.category}] {item.label}
-              </Text>
-            )}
+            renderItem={({ item }) => {
+              const entryCost = calculateEntryCost(item);
+              // Calculer les totaux nutritionnels pour cette entrée
+              const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+              const entryNutrition = item.items?.reduce((acc, itemRef) => {
+                const fi = allFoods.find(f => f.id === itemRef.foodId);
+                if (!fi) return acc;
+                const multiplier = itemRef.multiplier || 1.0;
+                return {
+                  calories: acc.calories + (fi.calories_kcal || 0) * multiplier,
+                  protein: acc.protein + (fi.protein_g || 0) * multiplier,
+                  carbs: acc.carbs + (fi.carbs_g || 0) * multiplier,
+                  fat: acc.fat + (fi.fat_g || 0) * multiplier,
+                };
+              }, { calories: 0, protein: 0, carbs: 0, fat: 0 }) || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+              
+              return (
+              <View style={styles.historyItemRow}>
+                <View style={styles.historyItemContent}>
+                  <Text style={styles.historyItem}>
+                    • [{item.category}] {item.label}
+                  </Text>
+                  <View style={styles.historyItemNutrition}>
+                    <Text style={styles.historyItemNutritionText}>
+                      🔥 {Math.round(entryNutrition.calories)} cal
+                    </Text>
+                    <Text style={styles.historyItemNutritionText}>
+                      💪 {Math.round(entryNutrition.protein)}g prot
+                    </Text>
+                    <Text style={styles.historyItemNutritionText}>
+                      🍞 {Math.round(entryNutrition.carbs)}g gluc
+                    </Text>
+                    <Text style={styles.historyItemNutritionText}>
+                      🧈 {Math.round(entryNutrition.fat)}g lipides
+                    </Text>
+                  </View>
+                  {entryCost > 0 && (
+                    <Text style={styles.historyItemCost}>
+                      -{entryCost} pts
+                    </Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.historyDeleteButton}
+                  onPress={() => {
+                    // Sur web, utiliser window.confirm, sinon Alert.alert
+                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                      const confirmed = window.confirm(`Supprimer "${item.label}" ?`);
+                      if (confirmed) {
+                        onDeleteEntry(item.id);
+                      }
+                    } else {
+                      Alert.alert(
+                        'Supprimer',
+                        `Supprimer "${item.label}" ?`,
+                        [
+                          { text: 'Annuler', style: 'cancel' },
+                          {
+                            text: 'Supprimer',
+                            style: 'destructive',
+                            onPress: () => onDeleteEntry(item.id),
+                          },
+                        ]
+                      );
+                    }
+                  }}
+                >
+                  <Text style={styles.historyDeleteText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              );
+            }}
           />
         )}
       </View>
@@ -884,6 +1384,7 @@ function AddEntryScreen({
   todayTotals,
   targets,
   preselectedItem,
+  customFoods = [],
 }: {
   onCancel: () => void;
   onSave: (entry: Omit<MealEntry, 'id' | 'createdAt'>) => void;
@@ -892,6 +1393,7 @@ function AddEntryScreen({
   todayTotals: ReturnType<typeof computeDailyTotals>;
   targets: typeof DEFAULT_TARGETS;
   preselectedItem: { item: FoodItem; portion: PortionReference } | null;
+  customFoods?: typeof FOOD_DB;
 }) {
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState<MealEntry['category']>('sain');
@@ -899,10 +1401,15 @@ function AddEntryScreen({
   const [quickFilter, setQuickFilter] = useState<CategoryFilter>('all');
   const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null); // Item ID pour modal portion
 
+  // Fusionner FOOD_DB avec les aliments personnalisés (doit être défini avant tout usage)
+  const allFoods = useMemo(() => {
+    return mergeFoodsWithCustom(FOOD_DB, customFoods);
+  }, [customFoods]);
+
   const selectionNutrition = useMemo(() => {
     return items.reduce(
       (acc, ref) => {
-        const fi = FOOD_DB.find((f) => f.id === ref.foodId);
+        const fi = allFoods.find((f) => f.id === ref.foodId);
         if (!fi) return acc;
         const multiplier = ref.multiplier || 1.0;
         return {
@@ -914,10 +1421,10 @@ function AddEntryScreen({
       },
       { protein_g: 0, carbs_g: 0, calories_kcal: 0, fat_g: 0 }
     );
-  }, [items]);
+  }, [items, allFoods]);
 
   const pendingCost = items.reduce((sum, ref) => {
-    const fi = QUICK_ITEMS.find((f) => f.id === ref.foodId);
+    const fi = allFoods.find((f) => f.id === ref.foodId);
     if (!fi) return sum;
     const multiplier = ref.multiplier || 1.0;
     const baseCost = computeFoodPoints(fi);
@@ -932,7 +1439,7 @@ function AddEntryScreen({
       if (exists) return prev.filter((i) => i.foodId !== foodId);
       
       // Ouvrir le sélecteur de portion au lieu d'ajouter directement
-      const fi = QUICK_ITEMS.find((f) => f.id === foodId);
+      const fi = allFoods.find((f) => f.id === foodId);
       if (!fi) return prev;
       
       setSelectedItemForPortion(foodId);
@@ -941,7 +1448,7 @@ function AddEntryScreen({
   };
   
   const addItemWithPortion = (foodId: string, portion: PortionReference) => {
-    const fi = QUICK_ITEMS.find((f) => f.id === foodId);
+    const fi = allFoods.find((f) => f.id === foodId);
     if (!fi) return;
     
     const baseCost = computeFoodPoints(fi);
@@ -980,9 +1487,10 @@ function AddEntryScreen({
     }
   };
 
+
   // Filtre basé sur la recherche + la catégorie sélectionnée
   const searchLower = label.toLowerCase().trim();
-  const filteredItems = QUICK_ITEMS.filter((fi) => {
+  const filteredItems = allFoods.filter((fi) => {
     const matchesCategory = quickFilter === 'all' || scoreToCategory(fi.baseScore) === quickFilter;
     const matchesSearch = !searchLower || fi.name.toLowerCase().includes(searchLower);
     return matchesCategory && matchesSearch;
@@ -995,17 +1503,24 @@ function AddEntryScreen({
     return matchesCategory && matchesSearch;
   });
 
-  const handleSave = () => {
-    // Auto-generate label if empty but items selected
-    let finalLabel = label.trim();
-    if (!finalLabel && items.length > 0) {
-      finalLabel = items.map(it => FOOD_DB.find(f => f.id === it.foodId)?.name || it.foodId).join(', ');
+  const handleSave = async () => {
+    // Toujours exiger des items - le label est généré automatiquement
+    if (items.length === 0) {
+      Alert.alert(
+        'Aucun aliment sélectionné',
+        'Veuillez sélectionner au moins un aliment dans la liste ci-dessous, ou utilise le bouton "🧠 Log avec IA" pour analyser du texte libre.',
+        [{ text: 'OK' }]
+      );
+      return;
     }
-    if (!finalLabel) return; // Still need at least items or text
     
-    const classification = items.length > 0 ? classifyMealByItems(items) : { score: mapManualCategoryToScore(category), category };
+    // Générer le label automatiquement à partir des items sélectionnés
+    const finalLabel = items.map(it => allFoods.find(f => f.id === it.foodId)?.name || it.foodId).join(', ');
+    
+    const classification = classifyMealByItems(items);
+    // onSave gère maintenant la sauvegarde ET la déduction des points
+    // Ne plus appeler spendPoints ici pour éviter la double déduction
     onSave({ label: finalLabel, category: classification.category, score: classification.score, items });
-    spendPoints(pendingCost);
   };
 
   return (
@@ -1014,36 +1529,21 @@ function AddEntryScreen({
 
       <TextInput
         style={styles.input}
-        placeholder="Ex: poulet + légumes, poutine, bière..."
+        placeholder="Rechercher un aliment..."
         placeholderTextColor="#6b7280"
         value={label}
         onChangeText={setLabel}
       />
 
-      {/* Suggestions de recherche */}
-      {searchLower && filteredItems.length > 0 && (
-        <View style={styles.suggestionsBox}>
-          <Text style={styles.suggestionsTitle}>Suggestions</Text>
-          {filteredItems.slice(0, 6).map((fi) => {
-            const cost = computeFoodPoints(fi as any);
-            return (
-              <TouchableOpacity
-                key={fi.id}
-                style={styles.suggestionItem}
-                onPress={() => {
-                  setLabel(fi.name);
-                }}
-              >
-                <Text style={styles.suggestionItemName}>{fi.name}</Text>
-                <Text style={styles.suggestionItemCost}>{cost} pts</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
 
-      {/* Demande d'aliment manquant */}
+      {/* Options: Log avec IA et Demande d'aliment */}
       <View style={styles.requestBox}>
+        <TouchableOpacity
+          style={[styles.requestLinkBtn, { backgroundColor: '#8b5cf6', marginBottom: 8 }]}
+          onPress={() => router.push({ pathname: '/ai-logger', params: { initialText: label } })}
+        >
+          <Text style={[styles.requestLink, { color: '#fff', fontWeight: '600' }]}>🧠 Log avec IA</Text>
+        </TouchableOpacity>
         <Text style={styles.requestText}>Tu ne trouves pas l&apos;aliment?</Text>
         <TouchableOpacity
           style={styles.requestLinkBtn}
@@ -1083,7 +1583,7 @@ function AddEntryScreen({
           <Text style={styles.label}>Sélectionnés ({items.length})</Text>
           <View style={styles.selectedItemsBox}>
             {items.map((itemRef, idx) => {
-              const fi = FOOD_DB.find(f => f.id === itemRef.foodId);
+              const fi = allFoods.find(f => f.id === itemRef.foodId);
               if (!fi) return null;
               const multiplier = itemRef.multiplier || 1.0;
               return (
@@ -1175,7 +1675,7 @@ function AddEntryScreen({
           }, 0);
           const macrosSum = qm.items.reduce(
             (acc, ref) => {
-              const fi = FOOD_DB.find((f) => f.id === ref.foodId);
+              const fi = allFoods.find((f) => f.id === ref.foodId);
               if (!fi) return acc;
               return {
                 protein_g: acc.protein_g + (fi.protein_g || 0),
@@ -1233,11 +1733,11 @@ function AddEntryScreen({
               Choisis la portion
             </Text>
             <Text style={styles.portionModalSubtitle}>
-              {QUICK_ITEMS.find(f => f.id === selectedItemForPortion)?.name}
+              {allFoods.find(f => f.id === selectedItemForPortion)?.name}
             </Text>
             
             {getPortionsForItem(
-              QUICK_ITEMS.find(f => f.id === selectedItemForPortion)?.tags || []
+              allFoods.find(f => f.id === selectedItemForPortion)?.tags || []
             ).map((portion) => (
               <TouchableOpacity
                 key={portion.size}
@@ -1250,7 +1750,7 @@ function AddEntryScreen({
                 <Text style={styles.portionOptionCost}>
                   {Math.round(
                     computeFoodPoints(
-                      QUICK_ITEMS.find(f => f.id === selectedItemForPortion)!
+                      allFoods.find(f => f.id === selectedItemForPortion)!
                     ) * Math.sqrt(portion.multiplier)
                   )} pts
                 </Text>
@@ -1572,10 +2072,45 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 13,
   },
+  historyItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginVertical: 4,
+  },
+  historyItemContent: {
+    flex: 1,
+    flexDirection: 'column',
+    gap: 4,
+  },
   historyItem: {
     color: '#d1d5db',
     fontSize: 14,
-    marginVertical: 2,
+    flex: 1,
+  },
+  historyItemNutrition: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  historyItemNutritionText: {
+    color: '#9ca3af',
+    fontSize: 11,
+  },
+  historyItemCost: {
+    color: '#f59e0b',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  historyDeleteButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  historyDeleteText: {
+    color: '#ef4444',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   pointsText: {
     color: '#e5e7eb',
@@ -2036,6 +2571,76 @@ const styles = StyleSheet.create({
     color: '#059669',
     fontSize: 22,
   },
+  budgetCurrentBox: {
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#86efac',
+  },
+  budgetCurrentLabel: {
+    color: '#065f46',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  budgetCurrentValue: {
+    color: '#059669',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  budgetCurrentZero: {
+    color: '#dc2626',
+  },
+  budgetHint: {
+    color: '#92400e',
+    fontSize: 11,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  budgetDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 12,
+    gap: 12,
+  },
+  budgetDetailCol: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    backgroundColor: '#fffbeb',
+    borderRadius: 8,
+  },
+  budgetDetailLabel: {
+    color: '#92400e',
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  budgetDetailValue: {
+    color: '#78350f',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  budgetDetailHint: {
+    color: '#a16207',
+    fontSize: 9,
+    textAlign: 'center',
+  },
+  budgetProgressContainer: {
+    marginTop: 8,
+  },
+  budgetProgressText: {
+    color: '#78350f',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '600',
+  },
   budgetProgressTrack: {
     width: '100%',
     height: 8,
@@ -2091,6 +2696,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: 'center',
     fontStyle: 'italic',
+    paddingHorizontal: 8,
+  },
+  todaySummaryBox: {
+    backgroundColor: '#d1fae5',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  todaySummaryTitle: {
+    color: '#065f46',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  todaySummaryText: {
+    color: '#047857',
+    fontSize: 13,
+    marginBottom: 4,
   },
   smartRecsSubtitle: {
     color: '#065f46',

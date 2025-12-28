@@ -17,6 +17,10 @@ export type AuthUser = User;
  * Créer un nouveau compte utilisateur
  */
 export async function signUp(email: string, password: string, displayName: string): Promise<AuthUser> {
+  if (!auth || !db) {
+    throw new Error('Firebase n\'est pas correctement initialisé. Vérifiez que Authentication et Firestore sont activés dans Firebase Console.');
+  }
+
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     
@@ -24,12 +28,17 @@ export async function signUp(email: string, password: string, displayName: strin
     await updateProfile(userCredential.user, { displayName });
     
     // Créer le profil par défaut dans Firestore
+    // Utiliser le calcul de points au lieu d'une valeur hardcodée
+    const defaultWeeklyTarget = 10500; // Maintenance par défaut (~1500 cal/jour)
+    const defaultDailyPoints = Math.max(3, Math.round((defaultWeeklyTarget * 0.30 / 7) / 80)); // ~6 points
+    
     const defaultProfile: UserProfile = {
       userId: userCredential.user.uid,
       displayName,
       email: userCredential.user.email || email,
-      weeklyCalorieTarget: 10500, // Maintenance par défaut
-      dailyPointsBudget: 45,
+      weeklyCalorieTarget: defaultWeeklyTarget,
+      dailyPointsBudget: defaultDailyPoints,
+      maxPointsCap: Math.min(defaultDailyPoints * 4, 12),
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     };
@@ -38,7 +47,25 @@ export async function signUp(email: string, password: string, displayName: strin
     
     return userCredential.user;
   } catch (error: any) {
-    throw new Error(error.message);
+    // Messages d'erreur plus clairs
+    let errorMessage = error.message || 'Erreur lors de la création du compte';
+    
+    if (error.code === 'auth/email-already-in-use') {
+      errorMessage = 'Cet email est déjà utilisé. Essayez de vous connecter.';
+    } else if (error.code === 'auth/invalid-email') {
+      errorMessage = 'Email invalide. Vérifiez votre adresse email.';
+    } else if (error.code === 'auth/weak-password') {
+      errorMessage = 'Mot de passe trop faible. Utilisez au moins 6 caractères.';
+    } else if (error.code === 'auth/network-request-failed') {
+      errorMessage = 'Erreur de connexion. Vérifiez votre connexion internet.';
+    } else if (error.code === 'auth/too-many-requests') {
+      errorMessage = 'Trop de tentatives. Réessayez plus tard.';
+    } else if (error.message?.includes('identitytoolkit') || error.message?.includes('400')) {
+      errorMessage = 'Erreur Firebase: Authentication n\'est peut-être pas activé. Vérifiez Firebase Console > Authentication > Sign-in method et activez Email/Password.';
+    }
+    
+    console.error('[Firebase Auth] Erreur signUp:', error.code, error.message);
+    throw new Error(errorMessage);
   }
 }
 
@@ -46,11 +73,33 @@ export async function signUp(email: string, password: string, displayName: strin
  * Se connecter avec email/mot de passe
  */
 export async function signIn(email: string, password: string): Promise<AuthUser> {
+  if (!auth) {
+    throw new Error('Firebase n\'est pas correctement initialisé. Vérifiez que Authentication est activé dans Firebase Console.');
+  }
+
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
   } catch (error: any) {
-    throw new Error(error.message);
+    // Messages d'erreur plus clairs
+    let errorMessage = error.message || 'Erreur lors de la connexion';
+    
+    if (error.code === 'auth/user-not-found') {
+      errorMessage = 'Aucun compte trouvé avec cet email. Créez un compte d\'abord.';
+    } else if (error.code === 'auth/wrong-password') {
+      errorMessage = 'Mot de passe incorrect.';
+    } else if (error.code === 'auth/invalid-email') {
+      errorMessage = 'Email invalide. Vérifiez votre adresse email.';
+    } else if (error.code === 'auth/network-request-failed') {
+      errorMessage = 'Erreur de connexion. Vérifiez votre connexion internet.';
+    } else if (error.code === 'auth/too-many-requests') {
+      errorMessage = 'Trop de tentatives. Réessayez plus tard.';
+    } else if (error.message?.includes('identitytoolkit') || error.message?.includes('400')) {
+      errorMessage = 'Erreur Firebase: Authentication n\'est peut-être pas activé. Vérifiez Firebase Console > Authentication > Sign-in method et activez Email/Password.';
+    }
+    
+    console.error('[Firebase Auth] Erreur signIn:', error.code, error.message);
+    throw new Error(errorMessage);
   }
 }
 
@@ -95,8 +144,18 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
  */
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
   try {
+    // Filtrer les valeurs undefined pour Firestore (Firestore n'accepte pas undefined)
+    const cleanUpdates: any = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        cleanUpdates[key] = value;
+      }
+    }
+    // S'assurer que userId est toujours défini
+    cleanUpdates.userId = userId;
+    
     const docRef = doc(db, 'users', userId);
-    await setDoc(docRef, updates, { merge: true });
+    await setDoc(docRef, cleanUpdates, { merge: true });
   } catch (error) {
     console.error('Error updating user profile:', error);
     throw error;

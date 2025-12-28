@@ -58,7 +58,24 @@ export default function AuthScreen() {
         }
       }
     } catch (error: any) {
-      Alert.alert('Erreur', error.message);
+      console.error('[Auth Screen] Erreur:', error);
+      const errorMessage = error?.message || 'Une erreur est survenue. Vérifiez que Firebase Authentication est activé dans Firebase Console.';
+      Alert.alert(
+        'Erreur d\'authentification',
+        errorMessage,
+        [
+          { text: 'OK' },
+          ...(errorMessage.includes('Authentication') ? [{
+            text: 'Voir guide',
+            onPress: () => {
+              // Ouvrir le guide dans un nouvel onglet
+              if (typeof window !== 'undefined') {
+                window.open('https://firebase.google.com/docs/auth/web/start', '_blank');
+              }
+            }
+          }] : [])
+        ]
+      );
     } finally {
       setLoading(false);
     }

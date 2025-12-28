@@ -46,11 +46,49 @@ export async function parseMealDescription(
       'pizza', 'burger', 'frite', 'fries', 'poutine',
       'beigne', 'donut', 'dessert',
       'biere', 'beer', 'vin', 'wine',
+      'cigare', 'cigar', 'chou', 'choux', 'cabbage',
+      'dolma', 'feuille', 'vigne',
+      'toast', 'pain', 'bread', 'beurre', 'butter', 'peanut', 'arachide', 'peanut butter',
     ];
 
-    // Détecter les mentions d'aliments
+    // Détecter les plats composés d'abord (avant les mots-clés simples)
+    const composedDishes = [
+      { pattern: /cigare\s+au\s+chou/i, name: 'Cigare au chou' },
+      { pattern: /cigar\s+au\s+chou/i, name: 'Cigare au chou' },
+      { pattern: /dolma/i, name: 'Dolma' },
+      { pattern: /feuille\s+de\s+vigne/i, name: 'Dolma' },
+      { pattern: /poutine\s+au\s+poulet/i, name: 'Poutine au poulet frit' },
+      { pattern: /poutine\s+complète/i, name: 'Poutine complète' },
+      { pattern: /pâté\s+chinois/i, name: 'Pâté Chinois' },
+      { pattern: /pate\s+chinois/i, name: 'Pâté Chinois' },
+      { pattern: /toast\s+(?:au|avec|de)\s+beurre\s+(?:de\s+)?(?:peanut|arachide|peanut butter)/i, name: 'Toast au beurre de peanut' },
+      { pattern: /toast\s+(?:au|avec|de)\s+peanut/i, name: 'Toast au beurre de peanut' },
+      { pattern: /toast\s+(?:au|avec|de)\s+beurre/i, name: 'Toast au beurre' },
+    ];
+
+    for (const dish of composedDishes) {
+      if (dish.pattern.test(description)) {
+        // Extraire la quantité (nombre avant le nom du plat)
+        const quantityMatch = description.match(/(\d+)\s*(?:cigare|dolma|poutine|pâté|pate|toast)/i);
+        const quantity = quantityMatch ? `${quantityMatch[1]} ${quantityMatch[1] !== '1' ? 'portions' : 'portion'}` : undefined;
+        
+        items.push({
+          name: dish.name,
+          quantity,
+          confidence: 0.9, // Haute confiance pour plats composés
+        });
+        // Ne pas continuer à chercher des mots-clés simples si on a trouvé un plat composé
+        return { items };
+      }
+    }
+
+    // Détecter les mentions d'aliments simples
     for (const keyword of foodKeywords) {
       if (lowerDesc.includes(keyword)) {
+        // Vérifier que ce n'est pas déjà dans un plat composé
+        const isInComposedDish = composedDishes.some(dish => dish.pattern.test(description));
+        if (isInComposedDish) continue;
+
         // Essayer d'extraire une quantité si mentionnée
         const quantityMatch = description.match(new RegExp(`(\\d+\\s*(g|kg|ml|tasse|portion|pc|piece))`, 'i'));
         const quantity = quantityMatch ? quantityMatch[1] : undefined;
@@ -129,4 +167,5 @@ export async function parseMealDescriptionWithOpenAI(
  * (Réexport depuis nutrition-estimator pour cohérence)
  */
 export { estimateNutritionForUnknownFood, createEstimatedFoodItem } from './nutrition-estimator';
+
 

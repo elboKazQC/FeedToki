@@ -43,3 +43,4 @@ export function computeFoodPoints(fi: FoodItem): number {
   return Math.max(0, Math.round(baseCost));
 }
 
+

@@ -51,7 +51,8 @@ export async function localSignUp(email: string, password: string, displayName: 
       displayName,
       email,
       weeklyCalorieTarget: 10500,
-      dailyPointsBudget: 45,
+      dailyPointsBudget: 6, // Calculé: (10500 * 0.30 / 7) / 80 ≈ 6 pts
+      maxPointsCap: 12,
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     };

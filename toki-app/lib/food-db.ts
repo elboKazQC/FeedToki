@@ -134,6 +134,11 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'yaourt_grec', name: 'Yaourt grec nature', tags: ['dessert_sante', 'proteine_maigre'], baseScore: 75, protein_g: 17, carbs_g: 6, fat_g: 0, calories_kcal: 120, points: 0 },
   { id: 'pudding_chia', name: 'Pudding de chia', tags: ['dessert_sante'], baseScore: 70, protein_g: 6, carbs_g: 15, fat_g: 7, calories_kcal: 170, points: 1 },
   { id: 'pomme_cannelle', name: 'Pomme à la cannelle', tags: ['dessert_sante', 'legume'], baseScore: 80, protein_g: 0, carbs_g: 25, fat_g: 0.3, calories_kcal: 95, points: 0 },
+  // Plats libanais/moyen-orientaux
+  { id: 'cigare_chou', name: 'Cigare au chou', tags: ['proteine_maigre', 'legume'], baseScore: 70, protein_g: 18, carbs_g: 12, fat_g: 8, calories_kcal: 180, points: 1 },
+  { id: 'dolma', name: 'Dolma (feuille de vigne)', tags: ['proteine_maigre', 'legume'], baseScore: 75, protein_g: 15, carbs_g: 10, fat_g: 6, calories_kcal: 150, points: 1 },
+  { id: 'toast_beurre_peanut', name: 'Toast au beurre de peanut', tags: ['feculent_simple'], baseScore: 50, protein_g: 8, carbs_g: 30, fat_g: 16, calories_kcal: 280, points: 2 },
+  { id: 'toast_beurre', name: 'Toast au beurre', tags: ['feculent_simple'], baseScore: 55, protein_g: 4, carbs_g: 25, fat_g: 8, calories_kcal: 180, points: 1 },
 
   // ===== McDONALD'S MENU =====
   // Burgers

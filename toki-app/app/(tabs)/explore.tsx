@@ -163,6 +163,10 @@ export default function TabTwoScreen() {
           <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-custom-foods')}>
+          <Text style={styles.buttonText}>🍽️ Aliments personnalisés (Admin)</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.button, styles.buttonDanger]} onPress={handleSignOut}>
           <Text style={styles.buttonText}>🚪 Déconnexion</Text>
         </TouchableOpacity>

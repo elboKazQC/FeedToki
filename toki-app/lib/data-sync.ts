@@ -19,6 +19,26 @@ function isFirebaseAvailable(): boolean {
 }
 
 /**
+ * Sauvegarder un seul repas dans Firestore
+ */
+export async function syncMealEntryToFirestore(userId: string, entry: MealEntry): Promise<void> {
+  if (!isFirebaseAvailable()) return;
+
+  try {
+    const mealsRef = collection(db, 'users', userId, 'meals');
+    const mealRef = doc(mealsRef, entry.id);
+    await setDoc(mealRef, {
+      ...entry,
+      createdAt: entry.createdAt,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('[Sync] Erreur sync meal entry:', error);
+    // Ne pas throw - on continue avec AsyncStorage
+  }
+}
+
+/**
  * Sauvegarder les repas dans Firestore
  */
 export async function syncMealsToFirestore(userId: string, entries: MealEntry[]): Promise<void> {
@@ -203,38 +223,61 @@ export async function syncAllToFirestore(userId: string): Promise<void> {
 }
 
 /**
- * Restaurer depuis Firestore vers AsyncStorage (en cas de perte locale)
+ * Synchroniser les données entre Firestore et AsyncStorage (fusion intelligente)
+ * Fusionne les données des deux sources pour une vraie synchronisation multi-appareils
  */
-export async function restoreFromFirestore(userId: string): Promise<{
-  mealsRestored: number;
+export async function syncFromFirestore(userId: string): Promise<{
+  mealsMerged: number;
   pointsRestored: boolean;
   targetsRestored: boolean;
-  weightsRestored: number;
+  weightsMerged: number;
 }> {
   const result = {
-    mealsRestored: 0,
+    mealsMerged: 0,
     pointsRestored: false,
     targetsRestored: false,
-    weightsRestored: 0,
+    weightsMerged: 0,
   };
 
   if (!isFirebaseAvailable()) return result;
 
   try {
-    // 1. Restore meals
-    const meals = await loadMealsFromFirestore(userId);
-    if (meals.length > 0) {
-      const entriesKey = `feedtoki_entries_${userId}_v1`;
-      await AsyncStorage.setItem(entriesKey, JSON.stringify(meals));
-      result.mealsRestored = meals.length;
+    // 1. Synchroniser meals - FUSIONNER les deux sources
+    const entriesKey = `feedtoki_entries_${userId}_v1`;
+    const localEntriesRaw = await AsyncStorage.getItem(entriesKey);
+    const localEntries: MealEntry[] = localEntriesRaw ? JSON.parse(localEntriesRaw) : [];
+    const firestoreMeals = await loadMealsFromFirestore(userId);
+    
+    // Fusionner: créer un Map par ID, Firestore prend priorité (plus récent)
+    const mealsMap = new Map<string, MealEntry>();
+    
+    // D'abord ajouter les locaux
+    for (const entry of localEntries) {
+      mealsMap.set(entry.id, entry);
+    }
+    
+    // Ensuite ajouter/remplacer par Firestore (priorité)
+    for (const meal of firestoreMeals) {
+      mealsMap.set(meal.id, meal);
+    }
+    
+    const mergedMeals = Array.from(mealsMap.values());
+    // Trier par date décroissante (plus récent en premier)
+    mergedMeals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    if (mergedMeals.length > 0) {
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(mergedMeals));
+      result.mealsMerged = mergedMeals.length;
     }
 
-    // 2. Restore points
+    // 2. Synchroniser points - utiliser Firestore si disponible, sinon local
+    const pointsKey = `feedtoki_points_${userId}_v2`;
     const pointsRef = doc(db, 'users', userId, 'points', 'current');
     const pointsSnap = await getDoc(pointsRef);
+    
     if (pointsSnap.exists()) {
       const pointsData = pointsSnap.data();
-      const pointsKey = `feedtoki_points_${userId}_v2`;
+      // Toujours utiliser Firestore pour les points (source de vérité)
       await AsyncStorage.setItem(pointsKey, JSON.stringify({
         balance: pointsData.balance || 0,
         lastClaimDate: pointsData.lastClaimDate || '',
@@ -250,39 +293,56 @@ export async function restoreFromFirestore(userId: string): Promise<{
       result.pointsRestored = true;
     }
 
-    // 3. Restore targets
-    const targetsRef = doc(db, 'users', userId, 'targets', 'nutrition');
-    const targetsSnap = await getDoc(targetsRef);
-    if (targetsSnap.exists()) {
-      const targets = targetsSnap.data();
-      const targetsKey = `feedtoki_targets_${userId}_v1`;
-      await AsyncStorage.setItem(targetsKey, JSON.stringify(targets));
-      result.targetsRestored = true;
+    // 3. Restore targets - ne remplace que si local est vide
+    const targetsKey = `feedtoki_targets_${userId}_v1`;
+    const localTargetsRaw = await AsyncStorage.getItem(targetsKey);
+    
+    if (!localTargetsRaw) {
+      const targetsRef = doc(db, 'users', userId, 'targets', 'nutrition');
+      const targetsSnap = await getDoc(targetsRef);
+      if (targetsSnap.exists()) {
+        const targets = targetsSnap.data();
+        await AsyncStorage.setItem(targetsKey, JSON.stringify(targets));
+        result.targetsRestored = true;
+      }
     }
 
-    // 4. Restore weights
+    // 4. Synchroniser weights - fusionner les deux sources
+    const weightsKey = `feedtoki_weights_${userId}_v1`;
+    const localWeightsRaw = await AsyncStorage.getItem(weightsKey);
+    const localWeights: WeightEntry[] = localWeightsRaw ? JSON.parse(localWeightsRaw) : [];
+    
     const weightsRef = collection(db, 'users', userId, 'weights');
     const weightsSnap = await getDocs(weightsRef);
-    const weights: WeightEntry[] = [];
+    const firestoreWeights: WeightEntry[] = [];
     let baseline: WeightEntry | null = null;
 
     weightsSnap.docs.forEach((docSnap) => {
       if (docSnap.id === 'baseline') {
         baseline = docSnap.data() as WeightEntry;
       } else {
-        weights.push(docSnap.data() as WeightEntry);
+        firestoreWeights.push(docSnap.data() as WeightEntry);
       }
     });
 
-    if (weights.length > 0) {
-      const weightsKey = `feedtoki_weights_${userId}_v1`;
-      await AsyncStorage.setItem(weightsKey, JSON.stringify(weights));
-      result.weightsRestored = weights.length;
+    // Fusionner les poids par date
+    const weightsMap = new Map<string, WeightEntry>();
+    for (const w of localWeights) {
+      weightsMap.set(w.date, w);
     }
-
-    if (baseline) {
-      const baselineKey = `feedtoki_weight_baseline_${userId}_v1`;
-      await AsyncStorage.setItem(baselineKey, JSON.stringify(baseline));
+    for (const w of firestoreWeights) {
+      weightsMap.set(w.date, w); // Firestore prend priorité
+    }
+    
+    const mergedWeights = Array.from(weightsMap.values());
+    if (mergedWeights.length > 0 || baseline) {
+      await AsyncStorage.setItem(weightsKey, JSON.stringify(mergedWeights));
+      result.weightsMerged = mergedWeights.length;
+      
+      if (baseline) {
+        const baselineKey = `feedtoki_weight_baseline_${userId}_v1`;
+        await AsyncStorage.setItem(baselineKey, JSON.stringify(baseline));
+      }
     }
 
     return result;
@@ -291,4 +351,5 @@ export async function restoreFromFirestore(userId: string): Promise<{
     return result;
   }
 }
+
 

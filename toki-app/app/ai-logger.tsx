@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
 import { findBestMatch, createFoodItemRef, findMultipleMatches } from '../lib/food-matcher';
 import { createEstimatedFoodItem } from '../lib/nutrition-estimator';
@@ -20,6 +20,12 @@ import { FoodItem, FOOD_DB } from '../lib/food-db';
 import { FoodItemRef } from '../lib/stats';
 import { getPortionsForItem, getDefaultPortion } from '../lib/portions';
 import { computeFoodPoints } from '../lib/points-utils';
+import { useAuth } from '../lib/auth-context';
+import { addCustomFood, loadCustomFoods, mergeFoodsWithCustom } from '../lib/custom-foods';
+import { MealEntry } from '../lib/stats';
+import { classifyMealByItems } from '../lib/classifier';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { syncMealEntryToFirestore, syncPointsToFirestore } from '../lib/data-sync';
 
 type DetectedItem = {
   originalName: string;
@@ -31,7 +37,8 @@ type DetectedItem = {
 };
 
 export default function AILoggerScreen() {
-  const [description, setDescription] = useState('');
+  const params = useLocalSearchParams<{ initialText?: string }>();
+  const [description, setDescription] = useState(params.initialText || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [error, setError] = useState<string>('');
@@ -60,8 +67,8 @@ export default function AILoggerScreen() {
       const items: DetectedItem[] = [];
 
       for (const parsedItem of parseResult.items) {
-        // Essayer de trouver un match dans la DB
-        const match = findBestMatch(parsedItem.name, 0.5);
+        // Essayer de trouver un match dans la DB (threshold plus strict pour éviter faux positifs)
+        const match = findBestMatch(parsedItem.name, 0.7);
 
         let foodItem: FoodItem;
         let portion = getDefaultPortion([]);
@@ -100,23 +107,127 @@ export default function AILoggerScreen() {
     }
   };
 
-  const handleConfirm = () => {
+  const { profile, user } = useAuth();
+  const currentUserId = profile?.userId || (user as any)?.id || (user as any)?.uid || 'guest';
+
+  const handleConfirm = async () => {
     if (detectedItems.length === 0) {
       Alert.alert('Erreur', 'Aucun aliment à enregistrer');
       return;
     }
 
-    // Retourner vers l'écran précédent avec les items détectés
-    // On utilise les params de route pour passer les données
-    router.back();
-    
-    // TODO: Intégrer avec l'écran d'ajout de repas pour auto-remplir
-    // Pour l'instant, on affiche juste un message
-    Alert.alert(
-      'Repas détecté',
-      `${detectedItems.length} aliment(s) détecté(s). Fonctionnalité d'enregistrement automatique à venir.`,
-      [{ text: 'OK' }]
-    );
+    try {
+      // 1. Sauvegarder les aliments personnalisés (estimés) dans la DB
+      for (const item of detectedItems) {
+        if (item.estimatedItem && !item.matchedItem) {
+          // C'est un nouvel aliment, l'ajouter à la DB personnalisée
+          await addCustomFood(item.estimatedItem, currentUserId !== 'guest' ? currentUserId : undefined);
+        }
+      }
+
+      // 2. Créer l'entrée de repas
+      const items: FoodItemRef[] = detectedItems.map(item => item.itemRef);
+      const classification = classifyMealByItems(items);
+      
+      // Générer un label automatique
+      const label = detectedItems
+        .map(item => item.matchedItem?.name || item.estimatedItem?.name || item.originalName)
+        .join(', ');
+
+      const newEntry: MealEntry = {
+        id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        label,
+        category: classification.category,
+        score: classification.score,
+        items,
+      };
+
+      // 3. Sauvegarder dans AsyncStorage
+      const entriesKey = `feedtoki_entries_${currentUserId}_v1`;
+      const existingRaw = await AsyncStorage.getItem(entriesKey);
+      const existing: MealEntry[] = existingRaw ? JSON.parse(existingRaw) : [];
+      const updated = [newEntry, ...existing];
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(updated));
+
+      // 4. Synchroniser avec Firestore
+      if (currentUserId !== 'guest') {
+        await syncMealEntryToFirestore(currentUserId, newEntry);
+      }
+
+      // 5. Recharger les custom foods (incluant ceux qu'on vient de sauvegarder) et recalculer les points
+      const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+      const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+      
+      // Recalculer les points avec les custom foods à jour
+      const totalPoints = items.reduce((sum, itemRef) => {
+        const fi = allFoods.find(f => f.id === itemRef.foodId);
+        if (!fi) return sum;
+        const multiplier = itemRef.multiplier || 1.0;
+        const baseCost = computeFoodPoints(fi);
+        const cost = Math.round(baseCost * Math.sqrt(multiplier));
+        return sum + cost;
+      }, 0);
+      
+      if (totalPoints > 0) {
+        const pointsKey = `feedtoki_points_${currentUserId}_v2`;
+        const pointsRaw = await AsyncStorage.getItem(pointsKey);
+        const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+        const newBalance = Math.max(0, pointsData.balance - totalPoints);
+        await AsyncStorage.setItem(pointsKey, JSON.stringify({
+          ...pointsData,
+          balance: newBalance,
+        }));
+        
+        // Synchroniser les points avec Firestore
+        if (currentUserId !== 'guest') {
+          const totalPointsKey = `feedtoki_total_points_${currentUserId}_v1`;
+          const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
+          const totalPointsEarned = totalPointsRaw ? JSON.parse(totalPointsRaw) : 0;
+          await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
+        }
+        
+        // Logger l'événement
+        const { userLogger } = await import('../lib/user-logger');
+        await userLogger.info(
+          currentUserId,
+          `Repas enregistré via AI: ${detectedItems.length} item(s), -${totalPoints} pts`,
+          'ai-logger',
+          { itemsCount: detectedItems.length, pointsDeducted: totalPoints, newBalance }
+        );
+      } else {
+        const { userLogger } = await import('../lib/user-logger');
+        await userLogger.warn(
+          currentUserId,
+          `Repas enregistré via AI mais aucun point déduit`,
+          'ai-logger',
+          { itemsCount: detectedItems.length, items: items.map(i => i.foodId) }
+        );
+      }
+
+      // 6. Retourner à l'écran principal avec succès
+      Alert.alert(
+        '✅ Repas enregistré!',
+        `${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`,
+        [{ 
+          text: 'OK', 
+          onPress: () => {
+            // Forcer un rechargement de la page pour mettre à jour les données
+            if (typeof window !== 'undefined') {
+              window.location.href = '/(tabs)';
+            } else {
+              router.replace('/(tabs)');
+            }
+          }
+        }]
+      );
+    } catch (error: any) {
+      console.error('[AI Logger] Erreur enregistrement:', error);
+      Alert.alert(
+        'Erreur',
+        `Impossible d'enregistrer le repas: ${error.message || 'Erreur inconnue'}`
+      );
+    }
   };
 
   const handleEditItem = (index: number) => {
@@ -420,4 +531,5 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+
 

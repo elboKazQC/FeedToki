@@ -24,14 +24,23 @@ let db: Firestore | null = null;
 
 // Initialiser Firebase une seule fois (seulement si activé)
 if (FIREBASE_ENABLED) {
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApps()[0];
-  }
+  try {
+    if (getApps().length === 0) {
+      app = initializeApp(firebaseConfig);
+    } else {
+      app = getApps()[0];
+    }
 
-  auth = getAuth(app);
-  db = getFirestore(app);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    
+    console.log('[Firebase] Initialisé avec succès');
+  } catch (error: any) {
+    console.error('[Firebase] Erreur d\'initialisation:', error);
+    // Ne pas throw - on continue en mode local si Firebase échoue
+  }
+} else {
+  console.log('[Firebase] Désactivé - mode local');
 }
 
 export { app, auth, db };

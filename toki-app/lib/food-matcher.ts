@@ -6,7 +6,7 @@ import { FoodItemRef } from './stats';
 import { getDefaultPortion, PortionReference } from './portions';
 
 /**
- * Score de similarité entre deux chaînes (algorithme simple)
+ * Score de similarité entre deux chaînes (algorithme amélioré)
  */
 function similarityScore(str1: string, str2: string): number {
   const s1 = str1.toLowerCase().trim();
@@ -15,15 +15,36 @@ function similarityScore(str1: string, str2: string): number {
   // Match exact
   if (s1 === s2) return 1.0;
   
-  // Contient l'un ou l'autre
-  if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+  // Normaliser les variations communes
+  const normalize = (s: string) => s
+    .replace(/[àáâãäå]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ç]/g, 'c');
   
-  // Mots communs
-  const words1 = s1.split(/\s+/);
-  const words2 = s2.split(/\s+/);
+  const n1 = normalize(s1);
+  const n2 = normalize(s2);
+  
+  if (n1 === n2) return 0.95;
+  
+  // Contient l'un ou l'autre (mais seulement si significatif)
+  if (n1.length >= 5 && n2.length >= 5) {
+    if (n1.includes(n2) || n2.includes(n1)) return 0.8;
+  }
+  
+  // Mots communs (mais au moins 2 mots doivent matcher pour éviter faux positifs)
+  const words1 = n1.split(/\s+/).filter(w => w.length > 2); // Ignorer mots courts
+  const words2 = n2.split(/\s+/).filter(w => w.length > 2);
   const commonWords = words1.filter(w => words2.includes(w));
-  if (commonWords.length > 0) {
-    return 0.5 + (commonWords.length / Math.max(words1.length, words2.length)) * 0.3;
+  
+  if (commonWords.length >= 2) {
+    // Au moins 2 mots en commun
+    return 0.6 + (commonWords.length / Math.max(words1.length, words2.length)) * 0.3;
+  } else if (commonWords.length === 1 && words1.length <= 2 && words2.length <= 2) {
+    // Un seul mot en commun mais les deux sont courts (ex: "poulet" vs "poulet grillé")
+    return 0.7;
   }
   
   // Pas de match
@@ -35,7 +56,7 @@ function similarityScore(str1: string, str2: string): number {
  */
 export function findBestMatch(
   searchTerm: string,
-  threshold: number = 0.6
+  threshold: number = 0.7  // Plus strict pour éviter faux positifs
 ): FoodItem | null {
   if (!searchTerm || searchTerm.trim().length === 0) {
     return null;

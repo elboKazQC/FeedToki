@@ -206,3 +206,48 @@ export async function autoMigrateIfNeeded(userId: string): Promise<void> {
   }
 }
 
+/**
+ * Forcer la migration (ignore le flag de migration complétée)
+ * Utile si la migration a échoué ou si tu veux re-migrer
+ */
+export async function forceMigration(userId: string): Promise<MigrationResult> {
+  try {
+    if (!db) {
+      throw new Error('Firebase non activé');
+    }
+
+    // Réinitialiser le flag de migration
+    await AsyncStorage.removeItem(MIGRATION_FLAG_KEY);
+    console.log('[Migration] Flag de migration réinitialisé, lancement de la migration...');
+
+    // Lancer la migration
+    const result = await migrateToFirestore(userId);
+    
+    if (result.success) {
+      console.log('[Migration] ✅ Migration forcée réussie:', {
+        entries: result.entriesMigrated,
+        points: result.pointsMigrated,
+        targets: result.targetsMigrated,
+        weights: result.weightsMigrated,
+        profile: result.profileMigrated,
+      });
+    } else {
+      console.error('[Migration] ❌ Migration forcée échouée:', result.error);
+    }
+    
+    return result;
+  } catch (error: any) {
+    console.error('[Migration] Erreur migration forcée:', error);
+    return {
+      success: false,
+      entriesMigrated: 0,
+      pointsMigrated: false,
+      targetsMigrated: false,
+      weightsMigrated: 0,
+      profileMigrated: false,
+      error: error.message || 'Erreur inconnue',
+    };
+  }
+}
+
+
