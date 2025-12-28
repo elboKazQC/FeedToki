@@ -116,15 +116,32 @@ export default function App() {
     if (!authLoading && authProfile) {
       setUserProfile(authProfile);
       
-      // Mettre à jour les targets nutrition selon le profil
-      const dailyCalTarget = getDailyCalorieTarget(authProfile.weeklyCalorieTarget);
-      setTargets((prev) => ({
-        ...prev,
-        calories_kcal: dailyCalTarget,
-      }));
+      // Calculer les objectifs nutritionnels personnalisés basés sur le poids et les objectifs
+      (async () => {
+        try {
+          const { calculateNutritionTargets } = await import('../../lib/nutrition-calculator');
+          const calculatedTargets = calculateNutritionTargets(authProfile);
+          
+          setTargets(calculatedTargets);
+          
+          // Sauvegarder les objectifs calculés dans AsyncStorage et Firestore
+          if (currentUserId && currentUserId !== 'guest') {
+            try {
+              const targetsKey = getTargetsKey();
+              await AsyncStorage.setItem(targetsKey, JSON.stringify(calculatedTargets));
+              await syncAllToFirestore(currentUserId);
+              console.log('[Index] Objectifs nutritionnels mis à jour:', calculatedTargets);
+            } catch (e) {
+              console.log('[Index] Erreur sauvegarde targets calculés:', e);
+            }
+          }
+        } catch (e) {
+          console.error('[Index] Erreur calcul objectifs nutritionnels:', e);
+        }
+      })();
     }
     // Note: Ne pas rediriger ici - AuthProvider gère le routage
-  }, [authProfile, authLoading]);
+  }, [authProfile, authLoading, currentUserId]);
 
   // Helpers: clés par compte - Debug log
   const currentUserId = (authProfile?.userId || (authUser as any)?.id || 'guest');

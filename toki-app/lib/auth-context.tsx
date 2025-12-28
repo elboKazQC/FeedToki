@@ -94,6 +94,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             
             let userProfile = await getUserProfile(authUser.uid);
             
+            // Mettre à jour les objectifs nutritionnels si le profil a un poids mais pas d'objectifs personnalisés
+            if (userProfile && userProfile.currentWeight) {
+              try {
+                const { calculateNutritionTargets, updateUserNutritionTargets } = await import('./nutrition-calculator');
+                const calculatedTargets = calculateNutritionTargets(userProfile);
+                
+                // Vérifier si les objectifs actuels sont les valeurs par défaut (100g protéines)
+                // Si oui, les mettre à jour avec les valeurs calculées
+                const targetsKey = `feedtoki_targets_${authUser.uid}_v1`;
+                const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+                const currentTargetsRaw = await AsyncStorage.getItem(targetsKey);
+                
+                if (!currentTargetsRaw || currentTargetsRaw.includes('"protein_g":100')) {
+                  // Objectifs par défaut ou absents, mettre à jour
+                  await updateUserNutritionTargets(authUser.uid, userProfile);
+                  console.log('[AuthContext] Objectifs nutritionnels mis à jour:', calculatedTargets);
+                }
+              } catch (error) {
+                console.error('[AuthContext] Erreur mise à jour objectifs nutritionnels:', error);
+                // Continue même si la mise à jour échoue
+              }
+            }
+            
             // Corriger les profils avec dailyPointsBudget = 45 (ancienne valeur incorrecte)
             // MAIS seulement si onboardingCompleted est true (pour éviter de rediriger vers onboarding)
             if (userProfile && userProfile.dailyPointsBudget === 45 && userProfile.onboardingCompleted) {
@@ -177,14 +200,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return;
               }
               
-              // Seulement maintenant, décider où aller
-              if (userProfile && !userProfile.onboardingCompleted) {
-                console.log('[AuthContext] Profil non complété, redirection vers onboarding');
-                router.replace('/onboarding');
-              } else if (userProfile) {
-                console.log('[AuthContext] Profil complété, redirection vers app principale');
-                router.replace('/(tabs)');
-              }
+              // Ne pas naviguer directement depuis ici - laisser Expo Router gérer via les routes
+              // La navigation sera gérée par les composants qui utilisent useAuth()
+              // On marque juste que le routing initial est fait pour éviter les redirections multiples
+              console.log('[AuthContext] Profil chargé, routing initial marqué comme fait');
             }
             
             setLoading(false);

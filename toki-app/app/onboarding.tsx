@@ -87,6 +87,20 @@ export default function OnboardingScreen() {
     
     console.log('[Onboarding] Profil sauvegardé:', profileKey);
 
+    // Calculer et sauvegarder les objectifs nutritionnels personnalisés
+    try {
+      const { calculateNutritionTargets, updateUserNutritionTargets } = await import('../lib/nutrition-calculator');
+      const calculatedTargets = calculateNutritionTargets(fullProfile);
+      
+      if (firebaseUserId) {
+        await updateUserNutritionTargets(firebaseUserId, fullProfile);
+        console.log('[Onboarding] Objectifs nutritionnels calculés:', calculatedTargets);
+      }
+    } catch (error) {
+      console.error('[Onboarding] Erreur calcul objectifs nutritionnels:', error);
+      // Continue même si ça échoue
+    }
+
     // Si Firebase est activé, sauvegarder aussi dans Firestore
     if (FIREBASE_ENABLED && user && (user as any).uid) {
       try {
