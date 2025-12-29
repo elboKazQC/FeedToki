@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +20,7 @@ import {
 import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dragon-levels';
 import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry, loadBaseline, getWeeklyAverageSeries } from '../lib/weight';
 import { WeightChart } from '../components/weight-chart';
+import { validateWeight } from '../lib/validation';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
@@ -260,9 +261,20 @@ export default function StatsScreen() {
                 style={styles.saveBtn}
                 onPress={async () => {
                   const v = parseFloat(weightInput);
-                  if (!isNaN(v)) {
-                    await saveWeightEntry(toKg(v, weightUnit));
+                  if (isNaN(v)) {
+                    Alert.alert('Erreur', 'Veuillez entrer un poids valide');
+                    return;
                   }
+                  
+                  // Validation du poids
+                  const validation = validateWeight(v, weightUnit);
+                  if (!validation.isValid) {
+                    Alert.alert('Erreur', validation.error || 'Poids invalide');
+                    return;
+                  }
+                  
+                  await saveWeightEntry(toKg(v, weightUnit));
+                  setWeightInput(''); // Clear input après sauvegarde
                 }}
               >
                 <Text style={styles.saveBtnText}>Enregistrer</Text>

@@ -1,0 +1,60 @@
+🐉 INSTRUCTIONS POUR GÉNÉRER LES SPRITES DRAGON
+================================================
+
+MÉTHODE RAPIDE: Utilise ChatGPT (DALL-E 3) ou Bing Image Creator
+
+ÉTAPE 1: Ouvre https://chat.openai.com (ChatGPT Plus) ou https://www.bing.com/images/create
+
+ÉTAPE 2: Pour chaque niveau, copie-colle le prompt ci-dessous:
+
+--- NIVEAU 1: Oeuf Mystérieux ---
+Prompt: Cute kawaii dragon egg, simple design, subtle patterns, golden accents, white and cream colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 2: Éclosion ---
+Prompt: Cute kawaii dragon hatching from egg, cracked shell, baby dragon head visible, happy expression, pastel colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 3: Bébé Dragon ---
+Prompt: Cute kawaii baby dragon, small size, big eyes, happy expression, tiny wings, pastel colors (pink, blue, green), front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 4: Dragon Enfant ---
+Prompt: Cute kawaii young dragon, growing up, curious eyes, playful expression, small wings developing, vibrant pastel colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 5: Dragon Adolescent ---
+Prompt: Cute kawaii teenage dragon, wings growing, confident expression, medium size, vibrant colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 6: Jeune Dragon ---
+Prompt: Cute kawaii young adult dragon, fully developed wings, majestic pose, confident expression, rich colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 7: Dragon Adulte ---
+Prompt: Cute kawaii adult dragon, fully grown, majestic and balanced, wise expression, deep rich colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 8: Dragon Sage ---
+Prompt: Cute kawaii wise dragon, sage expression, subtle glow or halo, noble colors (gold, purple, deep blue), front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 9: Dragon Ancien ---
+Prompt: Cute kawaii ancient dragon, majestic and impressive, elaborate details, royal colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 10: Dragon Légendaire ---
+Prompt: Cute kawaii legendary dragon, imposing presence, subtle light effects, glowing details, bright colors, front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 11: Dragon Mythique ---
+Prompt: Cute kawaii mythical dragon, cosmic theme, stars and galaxy patterns, ultra-rare appearance, cosmic colors (purple, deep blue, stars), front view, transparent background, game asset, PNG, 512x512
+
+--- NIVEAU 12: Dragon Divin ---
+Prompt: Cute kawaii divine dragon, transcendent appearance, ultra majestic, perfect form, divine colors (gold, white, light), glowing aura, front view, transparent background, game asset, PNG, 512x512
+
+ÉTAPE 3: Télécharge chaque image et renomme-la:
+  - level-1.png
+  - level-2.png
+  - ... (jusqu'à level-12.png)
+
+ÉTAPE 4: Place toutes les images dans:
+  C:\Users\ptivi\OneDrive\Documents\GitHub\FeedToki\toki-app\assets\images\dragon
+
+ÉTAPE 5: Décommente DRAGON_IMAGES dans components/dragon-display.tsx
+
+ALTERNATIVE GRATUITE:
+- Bing Image Creator: https://www.bing.com/images/create (gratuit)
+- Leonardo.ai: https://leonardo.ai (150 crédits gratuits/jour)
+- Hugging Face: https://huggingface.co/spaces/stabilityai/stable-diffusion
+

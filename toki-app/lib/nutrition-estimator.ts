@@ -190,11 +190,11 @@ export function createEstimatedFoodItem(
 
   // Calculer points en utilisant la fonction existante
   const tempItem: FoodItem = {
+    ...estimated,
     id: `estimated_${Date.now()}`,
     name: foodName,
     tags: estimated.tags,
     baseScore,
-    ...estimated,
   };
 
   // Calculer points (utiliser la logique existante)

@@ -137,7 +137,7 @@ export const FOOD_DB: FoodItem[] = [
   // Plats libanais/moyen-orientaux
   { id: 'cigare_chou', name: 'Cigare au chou', tags: ['proteine_maigre', 'legume'], baseScore: 70, protein_g: 18, carbs_g: 12, fat_g: 8, calories_kcal: 180, points: 0 },
   { id: 'dolma', name: 'Dolma (feuille de vigne)', tags: ['proteine_maigre', 'legume'], baseScore: 75, protein_g: 15, carbs_g: 10, fat_g: 6, calories_kcal: 150, points: 0 },
-  { id: 'toast_beurre_peanut', name: 'Toast au beurre de peanut', tags: ['feculent_simple'], baseScore: 50, protein_g: 8, carbs_g: 30, fat_g: 16, calories_kcal: 280, points: 2 },
+  { id: 'toast_beurre_peanut', name: 'Toast au beurre de peanut', tags: ['feculent_simple'], baseScore: 50, protein_g: 16, carbs_g: 46, fat_g: 20, calories_kcal: 390, points: 2 },
   { id: 'toast_beurre', name: 'Toast au beurre', tags: ['feculent_simple'], baseScore: 55, protein_g: 4, carbs_g: 25, fat_g: 8, calories_kcal: 180, points: 1 },
 
   // ===== McDONALD'S MENU =====

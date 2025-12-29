@@ -6,6 +6,7 @@ import { addFoodRequest } from '../lib/requests-store';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
+import { validateFoodName, validateOptionalNutrition } from '../lib/validation';
 
 export type FoodRequest = {
   id: string;
@@ -42,8 +43,35 @@ export default function FoodRequestScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!foodName.trim()) {
-      Alert.alert('Erreur', 'Le nom de l\'aliment est requis');
+    // Validation du nom
+    const nameValidation = validateFoodName(foodName);
+    if (!nameValidation.isValid) {
+      Alert.alert('Erreur', nameValidation.error || 'Le nom de l\'aliment est requis');
+      return;
+    }
+
+    // Validation des valeurs nutritionnelles optionnelles
+    const caloriesValidation = validateOptionalNutrition(calories, 'calories');
+    if (!caloriesValidation.isValid) {
+      Alert.alert('Erreur', caloriesValidation.error || 'Valeur de calories invalide');
+      return;
+    }
+
+    const proteinValidation = validateOptionalNutrition(protein, 'protein');
+    if (!proteinValidation.isValid) {
+      Alert.alert('Erreur', proteinValidation.error || 'Valeur de protéines invalide');
+      return;
+    }
+
+    const carbsValidation = validateOptionalNutrition(carbs, 'carbs');
+    if (!carbsValidation.isValid) {
+      Alert.alert('Erreur', carbsValidation.error || 'Valeur de glucides invalide');
+      return;
+    }
+
+    const fatValidation = validateOptionalNutrition(fat, 'fat');
+    if (!fatValidation.isValid) {
+      Alert.alert('Erreur', fatValidation.error || 'Valeur de lipides invalide');
       return;
     }
 

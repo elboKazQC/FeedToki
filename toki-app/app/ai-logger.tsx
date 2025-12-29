@@ -17,6 +17,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
 import { findBestMatch, createFoodItemRef, findMultipleMatches } from '../lib/food-matcher';
 import { createEstimatedFoodItem } from '../lib/nutrition-estimator';
+import { validateMealDescription } from '../lib/validation';
 import { FoodItem, FOOD_DB } from '../lib/food-db';
 import { FoodItemRef } from '../lib/stats';
 import { getPortionsForItem, getDefaultPortion } from '../lib/portions';
@@ -45,8 +46,10 @@ export default function AILoggerScreen() {
   const [error, setError] = useState<string>('');
 
   const handleParse = async () => {
-    if (!description.trim()) {
-      setError('Veuillez décrire ce que vous avez mangé');
+    // Validation de la description
+    const validation = validateMealDescription(description);
+    if (!validation.isValid) {
+      setError(validation.error || 'Veuillez décrire ce que vous avez mangé');
       return;
     }
 
@@ -92,7 +95,7 @@ export default function AILoggerScreen() {
 
         items.push({
           originalName: parsedItem.name,
-          matchedItem: match || undefined,
+          matchedItem: match || null,
           estimatedItem: match ? undefined : foodItem,
           portion,
           itemRef,

@@ -41,6 +41,8 @@ import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
 import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference, PortionSize } from '../../lib/portions';
 import { DragonSprite } from '../../components/dragon-sprite';
+import { DragonDisplay } from '../../components/dragon-display';
+import { getLevelUpMessage } from '../../lib/dragon-levels';
 import { useAuth } from '../../lib/auth-context';
 import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
@@ -205,18 +207,36 @@ export default function App() {
         console.log('[Index] Loading entries for key:', key);
         const json = await AsyncStorage.getItem(key);
         if (json) {
-          const parsed = JSON.parse(json);
-          console.log('[Index] Loaded entries count:', parsed?.length);
-          if (Array.isArray(parsed)) {
-            const normalized: MealEntry[] = (parsed as any[]).map((e) => ({
-              id: e.id ?? Date.now().toString(),
-              label: e.label ?? '',
-              category: e.category ?? 'ok',
-              score: typeof e.score === 'number' ? e.score : mapManualCategoryToScore(e.category ?? 'ok'),
-              createdAt: e.createdAt ?? e.date ?? new Date().toISOString(),
-              items: e.items,
-            }));
-            setEntries(normalized);
+          try {
+            const parsed = JSON.parse(json);
+            console.log('[Index] Loaded entries count:', parsed?.length);
+            if (Array.isArray(parsed)) {
+              const normalized: MealEntry[] = (parsed as any[]).map((e, idx) => {
+                // Validation et nettoyage de chaque entrée
+                const entry: MealEntry = {
+                  id: typeof e.id === 'string' && e.id.length > 0 ? e.id : `entry_${Date.now()}_${idx}`,
+                  label: typeof e.label === 'string' ? e.label.substring(0, 200) : '',
+                  category: typeof e.category === 'string' && ['ok', 'warning', 'danger'].includes(e.category) 
+                    ? e.category 
+                    : 'ok',
+                  score: typeof e.score === 'number' && !isNaN(e.score) && e.score >= 0 && e.score <= 100
+                    ? e.score
+                    : mapManualCategoryToScore(e.category ?? 'ok'),
+                  createdAt: typeof e.createdAt === 'string' && e.createdAt.length > 0
+                    ? e.createdAt
+                    : (typeof e.date === 'string' ? e.date : new Date().toISOString()),
+                  items: Array.isArray(e.items) ? e.items : [],
+                };
+                return entry;
+              });
+              setEntries(normalized);
+            } else {
+              console.warn('[Index] Données non-array, initialisation vide');
+              setEntries([]);
+            }
+          } catch (parseError) {
+            console.error('[Index] Erreur parsing JSON, initialisation vide:', parseError);
+            setEntries([]);
           }
         } else {
           console.log('[Index] No entries found for this user, starting fresh');
@@ -1207,11 +1227,16 @@ function HomeScreen({
       )}
 
       {/* Dragon avec système de niveaux */}
-      <DragonSprite 
+      <DragonDisplay 
         streakDays={streak.currentStreakDays}
         mood={dragonState.mood}
         showInfo={true}
         size={140}
+        onLevelUp={(newLevel) => {
+          // Afficher un message de félicitations quand le niveau augmente
+          const message = getLevelUpMessage(newLevel);
+          Alert.alert('🎉 Nouveau Niveau!', message);
+        }}
       />
       
       {/* Budget Points Personnalisé */}
