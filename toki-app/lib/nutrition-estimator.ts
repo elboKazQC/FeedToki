@@ -26,6 +26,10 @@ const KEYWORD_MAPPING: Record<string, FoodTag[]> = {
   // Protéines
   'beef': ['proteine_maigre'],
   'boeuf': ['proteine_maigre'],
+  'steak': ['proteine_maigre'],
+  'haché': ['proteine_maigre'],
+  'hache': ['proteine_maigre'],
+  'hamburger': ['proteine_maigre'], // Le steak haché est une protéine maigre, même s'il est souvent utilisé dans les hamburgers
   'poulet': ['proteine_maigre'],
   'chicken': ['proteine_maigre'],
   'dinde': ['proteine_maigre'],
@@ -170,15 +174,99 @@ export function estimateNutritionForUnknownFood(
 }
 
 /**
+ * Convertir une catégorie OpenAI en tags FoodTag
+ */
+function categoryToTags(category: string | undefined): FoodTag[] {
+  if (!category) return [];
+  
+  const upperCategory = category.toUpperCase();
+  
+  if (upperCategory.includes('PROTEINE_MAIGRE') || upperCategory.includes('PROTEINE')) {
+    return ['proteine_maigre'];
+  }
+  if (upperCategory.includes('LEGUME') || upperCategory.includes('VEGETABLE') || upperCategory.includes('FRUIT')) {
+    return ['legume'];
+  }
+  if (upperCategory.includes('FECULENT') || upperCategory.includes('STARCH') || upperCategory.includes('FECULENT_SIMPLE')) {
+    return ['feculent_simple'];
+  }
+  if (upperCategory.includes('ULTRA_TRANSFORME') || upperCategory.includes('ULTRA')) {
+    return ['ultra_transforme'];
+  }
+  if (upperCategory.includes('GRAS_FRIT') || upperCategory.includes('FRIT') || upperCategory.includes('FRIED')) {
+    return ['gras_frit'];
+  }
+  if (upperCategory.includes('SUCRE') || upperCategory.includes('SUGAR') || upperCategory.includes('SWEET')) {
+    return ['sucre'];
+  }
+  
+  return [];
+}
+
+/**
  * Créer un FoodItem temporaire depuis une estimation
+ * @param foodName Nom de l'aliment
+ * @param context Contexte optionnel (description complète)
+ * @param openAICategory Catégorie retournée par OpenAI (optionnelle, prioritaire si fournie)
+ * @param openAINutrition Valeurs nutritionnelles retournées par OpenAI (optionnelles, prioritaires si fournies)
  */
 export function createEstimatedFoodItem(
   foodName: string,
-  context?: string
+  context?: string,
+  openAICategory?: string,
+  openAINutrition?: {
+    calories_kcal?: number;
+    protein_g?: number;
+    carbs_g?: number;
+    fat_g?: number;
+  }
 ): FoodItem {
-  const estimated = estimateNutritionForUnknownFood(foodName, context);
+  // Si OpenAI a fourni une catégorie, l'utiliser en priorité
+  const openAITags = categoryToTags(openAICategory);
+  const useOpenAICategory = openAITags.length > 0;
   
-  // Calculer baseScore basé sur les tags (simplifié)
+  let estimated: Omit<FoodItem, 'id' | 'name' | 'baseScore' | 'points'>;
+  
+  if (useOpenAICategory) {
+    // Utiliser la catégorie OpenAI pour déterminer les tags
+    const primaryTag = openAITags[0];
+    const baseMacros = CATEGORY_AVERAGES[primaryTag] || CATEGORY_AVERAGES.feculent_simple;
+    
+    // Si OpenAI a fourni des valeurs nutritionnelles, les utiliser en priorité
+    estimated = {
+      tags: openAITags,
+      protein_g: openAINutrition?.protein_g !== undefined 
+        ? Math.round(openAINutrition.protein_g) 
+        : Math.round(baseMacros.protein_g),
+      carbs_g: openAINutrition?.carbs_g !== undefined 
+        ? Math.round(openAINutrition.carbs_g) 
+        : Math.round(baseMacros.carbs_g),
+      fat_g: openAINutrition?.fat_g !== undefined 
+        ? Math.round(openAINutrition.fat_g * 10) / 10 
+        : Math.round(baseMacros.fat_g * 10) / 10,
+      calories_kcal: openAINutrition?.calories_kcal !== undefined 
+        ? Math.round(openAINutrition.calories_kcal) 
+        : Math.round(baseMacros.calories_kcal),
+    };
+  } else {
+    // Fallback sur la détection automatique
+    const fallbackEstimated = estimateNutritionForUnknownFood(foodName, context);
+    
+    // Si OpenAI a fourni des valeurs nutritionnelles, les utiliser même sans catégorie
+    if (openAINutrition) {
+      estimated = {
+        ...fallbackEstimated,
+        protein_g: openAINutrition.protein_g !== undefined ? Math.round(openAINutrition.protein_g) : fallbackEstimated.protein_g,
+        carbs_g: openAINutrition.carbs_g !== undefined ? Math.round(openAINutrition.carbs_g) : fallbackEstimated.carbs_g,
+        fat_g: openAINutrition.fat_g !== undefined ? Math.round(openAINutrition.fat_g * 10) / 10 : fallbackEstimated.fat_g,
+        calories_kcal: openAINutrition.calories_kcal !== undefined ? Math.round(openAINutrition.calories_kcal) : fallbackEstimated.calories_kcal,
+      };
+    } else {
+      estimated = fallbackEstimated;
+    }
+  }
+  
+  // Calculer baseScore basé sur les tags
   let baseScore = 50; // Par défaut
   if (estimated.tags.includes('proteine_maigre') || estimated.tags.includes('legume')) {
     baseScore = 80;

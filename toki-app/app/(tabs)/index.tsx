@@ -43,6 +43,7 @@ import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionRefer
 import { DragonSprite } from '../../components/dragon-sprite';
 import { DragonDisplay } from '../../components/dragon-display';
 import { getLevelUpMessage } from '../../lib/dragon-levels';
+import { StreakCalendarDuolingo } from '../../components/streak-calendar-duolingo';
 import { useAuth } from '../../lib/auth-context';
 import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
@@ -51,6 +52,12 @@ import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } f
 import { loadCustomFoods, mergeFoodsWithCustom } from '../../lib/custom-foods';
 import { userLogger, logError } from '../../lib/user-logger';
 import { trackMealLogged, trackStreakMilestone, trackTargetUpdated } from '../../lib/analytics';
+import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
+import { ProgressBar } from '../../components/ui/ProgressBar';
+import { Badge } from '../../components/ui/Badge';
+import { spacing, typography, borderRadius, darkTheme, lightTheme } from '../../constants/design-tokens';
+import { useTheme as useAppTheme } from '../../lib/theme-context';
 
 type StatsUI = {
   scorePct: number;
@@ -309,7 +316,7 @@ export default function App() {
       map[dateKey] = dayTotals.calories_kcal;
     }
     return map;
-  }, [entries]);
+  }, [entries, customFoods]);
   
   // Utiliser les nouvelles fonctions avec validation des calories
   const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
@@ -1006,6 +1013,7 @@ export default function App() {
           setPreselectedItem={setPreselectedItem}
           lastClaimDate={lastClaimDate}
           customFoods={customFoods}
+          dayCaloriesMap={dayCaloriesMap}
         />
       )}
 
@@ -1048,6 +1056,7 @@ function HomeScreen({
   setPreselectedItem,
   lastClaimDate,
   customFoods,
+  dayCaloriesMap,
 }: {
   entries: MealEntry[];
   onPressAdd: () => void;
@@ -1065,6 +1074,7 @@ function HomeScreen({
   setPreselectedItem: (item: { item: FoodItem; portion: PortionReference } | null) => void;
   lastClaimDate: string;
   customFoods: typeof FOOD_DB;
+  dayCaloriesMap: Record<string, number>;
 }) {
   // Calculer le coût en points d'une entrée
   const calculateEntryCost = (entry: MealEntry): number => {
@@ -1080,6 +1090,8 @@ function HomeScreen({
     }, 0);
   };
   
+  const { activeTheme } = useAppTheme();
+  const theme = activeTheme === 'dark' ? darkTheme : lightTheme;
   const [isEditingTargets, setIsEditingTargets] = useState(false);
   const [draftTargets, setDraftTargets] = useState({
     protein_g: targets.protein_g.toString(),
@@ -1203,7 +1215,7 @@ function HomeScreen({
               <Text style={styles.settingsOptionIcon}>🎯</Text>
               <View style={styles.settingsOptionContent}>
                 <Text style={styles.settingsOptionTitle}>Modifier mes objectifs</Text>
-                <Text style={styles.settingsOptionDesc}>Poids, objectif de perte, niveau d'activité</Text>
+                <Text style={styles.settingsOptionDesc}>Poids, objectif de perte, niveau d&apos;activité</Text>
               </View>
             </TouchableOpacity>
 
@@ -1257,7 +1269,7 @@ function HomeScreen({
           <Text style={styles.warningTitle}>⚠️ Profil à vérifier</Text>
           <Text style={styles.warningText}>
             Tes objectifs semblent incorrects ({Math.round((weeklyCalTarget || 0) / 7)} cal/jour).
-            Tu as probablement entré ton poids en livres mais l'ancien système l'a interprété en kg.
+            Tu as probablement entré ton poids en livres mais l&apos;ancien système l&apos;a interprété en kg.
           </Text>
           <TouchableOpacity 
             style={styles.warningButton}
@@ -1291,6 +1303,13 @@ function HomeScreen({
             </Text>
           )}
           
+          {/* Indicateur de nouveau jour */}
+          {lastClaimDate !== getTodayLocal() && (
+            <View style={styles.newDayBanner}>
+              <Text style={styles.newDayBannerText}>✨ Nouveau jour ! Points quotidiens reçus</Text>
+            </View>
+          )}
+          
           {/* Points disponibles - Mise en avant */}
           <View style={styles.budgetCurrentBox}>
             <Text style={styles.budgetCurrentLabel}>Points disponibles</Text>
@@ -1299,12 +1318,17 @@ function HomeScreen({
             </Text>
             {points === 0 && (
               <Text style={styles.budgetHint}>
-                Tu as utilisé tous tes points aujourd'hui. Tu recevras {dailyBudget} nouveaux points demain matin.
+                Tu as utilisé tous tes points aujourd&apos;hui. Tu recevras {dailyBudget} nouveaux points demain matin.
               </Text>
             )}
             {points > 0 && lastClaimDate === getTodayLocal() && (
               <Text style={styles.budgetHint}>
                 Reçu ce matin : {dailyBudget} pts
+              </Text>
+            )}
+            {lastClaimDate !== getTodayLocal() && (
+              <Text style={styles.budgetHint}>
+                Nouveau jour ! +{dailyBudget} pts ajoutés
               </Text>
             )}
           </View>
@@ -1343,6 +1367,15 @@ function HomeScreen({
       <Text style={styles.statsText}>
         7 derniers jours : {stats.label} ({stats.scorePct}%)
       </Text>
+
+      {/* Calendrier de Streak style Duolingo */}
+      <StreakCalendarDuolingo
+        currentStreakDays={streak.currentStreakDays}
+        dayFeeds={buildDayFeeds(entries)}
+        dayCaloriesMap={dayCaloriesMap}
+        minCalories={MIN_CALORIES_FOR_COMPLETE_DAY}
+        daysToShow={10}
+      />
 
       {/* Bouton Streak - ouvre la page stats */}
       <TouchableOpacity 
@@ -1404,7 +1437,7 @@ function HomeScreen({
           
           {/* Résumé de ce qui a été mangé aujourd'hui */}
           <View style={styles.todaySummaryBox}>
-            <Text style={styles.todaySummaryTitle}>📊 Ce que tu as mangé aujourd'hui:</Text>
+            <Text style={styles.todaySummaryTitle}>📊 Ce que tu as mangé aujourd&apos;hui:</Text>
             <Text style={styles.todaySummaryText}>
               • {todayTotals.calories_kcal.toFixed(0)} / {targets.calories_kcal.toFixed(0)} calories ({((todayTotals.calories_kcal / targets.calories_kcal) * 100).toFixed(0)}%)
             </Text>
@@ -1428,7 +1461,7 @@ function HomeScreen({
           {/* Choix du goût (sucré ou salé) */}
           {!tastePreference ? (
             <View style={styles.tasteChoiceBox}>
-              <Text style={styles.tasteChoiceTitle}>🍽️ Qu'est-ce qui te ferait plaisir ?</Text>
+              <Text style={styles.tasteChoiceTitle}>🍽️ Qu&apos;est-ce qui te ferait plaisir ?</Text>
               <View style={styles.tasteButtonsRow}>
                 <TouchableOpacity
                   style={[styles.tasteButton, styles.tasteButtonSweet]}
@@ -1460,7 +1493,7 @@ function HomeScreen({
           
           {!tastePreference ? (
             <Text style={styles.smartRecsEmpty}>
-              Choisis d'abord si tu préfères sucré ou salé ! 👆
+              Choisis d&apos;abord si tu préfères sucré ou salé ! 👆
             </Text>
           ) : smartRecs.length === 0 ? (
             <Text style={styles.smartRecsEmpty}>
@@ -1602,20 +1635,35 @@ function HomeScreen({
       </View>
 
       <View style={styles.historyBox}>
-        <Text style={styles.historyTitle}>Dernières entrées</Text>
+        <Text style={styles.historyTitle}>📅 Repas d&apos;aujourd&apos;hui</Text>
         {entries.length === 0 ? (
           <Text style={styles.historyEmpty}>{"Aucune entrée pour l'instant."}</Text>
         ) : (
           <FlatList
             data={(() => {
-              // Trier par date (plus récent en premier) et limiter à 10 pour ne pas surcharger l'interface
-              return entries
+              const today = getTodayLocal();
+              // Séparer les repas d'aujourd'hui des repas précédents
+              const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
+              const otherEntries = entries.filter(e => normalizeDate(e.createdAt) !== today)
                 .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .slice(0, 10);
+                .slice(0, 5); // Limiter à 5 repas précédents
+              
+              // Afficher d'abord les repas d'aujourd'hui, puis les précédents
+              return [...todayEntries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), ...otherEntries];
             })()}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
               const entryCost = calculateEntryCost(item);
+              const entryDate = normalizeDate(item.createdAt);
+              const today = getTodayLocal();
+              const todayDate = new Date();
+              const yesterdayDate = new Date(todayDate);
+              yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+              const yesterday = normalizeDate(yesterdayDate.toISOString());
+              
+              const isToday = entryDate === today;
+              const isYesterday = entryDate === yesterday;
+              
               // Calculer les totaux nutritionnels pour cette entrée
               const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
               const entryNutrition = item.items?.reduce((acc, itemRef) => {
@@ -1630,12 +1678,48 @@ function HomeScreen({
                 };
               }, { calories: 0, protein: 0, carbs: 0, fat: 0 }) || { calories: 0, protein: 0, carbs: 0, fat: 0 };
               
+              // Formater la date pour l'affichage
+              const dateObj = new Date(item.createdAt);
+              const timeStr = dateObj.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+              let dateStr = '';
+              if (isToday) {
+                dateStr = `Aujourd'hui ${timeStr}`;
+              } else if (isYesterday) {
+                dateStr = `Hier ${timeStr}`;
+              } else {
+                dateStr = dateObj.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ` ${timeStr}`;
+              }
+              
+              // Déterminer le style selon la date
+              let rowStyle = styles.historyItemRow;
+              let textStyle = styles.historyItem;
+              let dateStyle = styles.historyItemDate;
+              
+              if (isToday) {
+                rowStyle = styles.historyItemRowToday;
+                textStyle = styles.historyItemToday;
+                dateStyle = styles.historyItemDateToday;
+              } else if (isYesterday) {
+                rowStyle = styles.historyItemRowYesterday;
+                textStyle = styles.historyItemYesterday;
+                dateStyle = styles.historyItemDateYesterday;
+              } else {
+                rowStyle = styles.historyItemRowOther;
+                textStyle = styles.historyItemOther;
+                dateStyle = styles.historyItemDateOther;
+              }
+              
               return (
-              <View style={styles.historyItemRow}>
+              <View style={rowStyle}>
                 <View style={styles.historyItemContent}>
-                  <Text style={styles.historyItem}>
-                    • [{item.category}] {item.label}
-                  </Text>
+                  <View style={styles.historyItemHeader}>
+                    <Text style={textStyle}>
+                      {isToday ? '✨' : isYesterday ? '📅' : '•'} [{item.category}] {item.label}
+                    </Text>
+                    <Text style={dateStyle}>
+                      {dateStr}
+                    </Text>
+                  </View>
                   <View style={styles.historyItemNutrition}>
                     <Text style={styles.historyItemNutritionText}>
                       🔥 {Math.round(entryNutrition.calories)} cal
@@ -2395,6 +2479,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginVertical: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#0b1220',
+  },
+  historyItemRowToday: {
+    backgroundColor: '#1e3a8a',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  historyItemRowYesterday: {
+    backgroundColor: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#374151',
+    opacity: 0.7,
+  },
+  historyItemRowOther: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    opacity: 0.5,
   },
   historyItemContent: {
     flex: 1,
@@ -2402,9 +2512,39 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   historyItem: {
-    color: '#d1d5db',
+    color: '#e5e7eb',
     fontSize: 14,
     flex: 1,
+    fontWeight: '500',
+  },
+  historyItemToday: {
+    color: '#fbbf24',
+    fontWeight: '700',
+  },
+  historyItemYesterday: {
+    color: '#d1d5db',
+    fontWeight: '500',
+  },
+  historyItemOther: {
+    color: '#9ca3af',
+    fontWeight: '400',
+  },
+  historyItemDate: {
+    color: '#9ca3af',
+    fontSize: 11,
+    marginLeft: 8,
+  },
+  historyItemDateToday: {
+    color: '#93c5fd',
+    fontWeight: '600',
+  },
+  historyItemDateYesterday: {
+    color: '#6b7280',
+    fontWeight: '400',
+  },
+  historyItemDateOther: {
+    color: '#4b5563',
+    fontWeight: '400',
   },
   historyItemNutrition: {
     flexDirection: 'row',

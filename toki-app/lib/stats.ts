@@ -204,7 +204,24 @@ export function computeStreakWithCalories(
   const completeDaysSet = new Set(completeDays);
 
   let current = 0;
-  let cursor = today;
+  
+  // Toujours commencer depuis hier (ou aujourd'hui si complet)
+  // Le streak continue tant qu'il y a des jours consécutifs complets
+  // On commence par vérifier si aujourd'hui est complet, sinon on commence depuis hier
+  let cursor: string;
+  const todayCalories = dayCaloriesMap[today] || 0;
+  
+  if (todayCalories >= minCalories) {
+    // Aujourd'hui est complet, commencer depuis aujourd'hui
+    cursor = today;
+  } else {
+    // Aujourd'hui n'est pas encore complet, commencer depuis hier
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    cursor = normalizeDate(yesterday.toISOString());
+  }
+  
+  // Compter les jours consécutifs depuis le cursor
   while (completeDaysSet.has(cursor)) {
     current += 1;
     const prevDay = new Date(cursor);

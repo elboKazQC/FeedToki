@@ -30,8 +30,22 @@ function similarityScore(str1: string, str2: string): number {
   if (n1 === n2) return 0.95;
   
   // Contient l'un ou l'autre (mais seulement si significatif)
+  // IMPORTANT: Ne pas matcher si un terme est beaucoup plus court que l'autre
+  // (ex: "beurre de peanut" ne doit PAS matcher avec "toast au beurre de peanut")
   if (n1.length >= 5 && n2.length >= 5) {
-    if (n1.includes(n2) || n2.includes(n1)) return 0.8;
+    const lengthRatio = Math.min(n1.length, n2.length) / Math.max(n1.length, n2.length);
+    // Si la différence de longueur est trop grande (> 40% de différence), ne pas matcher
+    if (lengthRatio < 0.6) return 0;
+    
+    if (n1.includes(n2) || n2.includes(n1)) {
+      // Pénaliser si l'un contient l'autre mais avec des mots supplémentaires significatifs
+      const words1 = n1.split(/\s+/).filter(w => w.length > 2);
+      const words2 = n2.split(/\s+/).filter(w => w.length > 2);
+      const diff = Math.abs(words1.length - words2.length);
+      // Si différence de 2+ mots, réduire le score
+      if (diff >= 2) return 0.6;
+      return 0.8;
+    }
   }
   
   // Mots communs (mais au moins 2 mots doivent matcher pour éviter faux positifs)
@@ -40,8 +54,12 @@ function similarityScore(str1: string, str2: string): number {
   const commonWords = words1.filter(w => words2.includes(w));
   
   if (commonWords.length >= 2) {
-    // Au moins 2 mots en commun
-    return 0.6 + (commonWords.length / Math.max(words1.length, words2.length)) * 0.3;
+    // Au moins 2 mots en commun, mais pénaliser si le nombre total de mots diffère beaucoup
+    const totalWordsDiff = Math.abs(words1.length - words2.length);
+    let score = 0.6 + (commonWords.length / Math.max(words1.length, words2.length)) * 0.3;
+    // Réduire le score si différence de 2+ mots
+    if (totalWordsDiff >= 2) score *= 0.7;
+    return score;
   } else if (commonWords.length === 1 && words1.length <= 2 && words2.length <= 2) {
     // Un seul mot en commun mais les deux sont courts (ex: "poulet" vs "poulet grillé")
     return 0.7;

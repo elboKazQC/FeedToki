@@ -39,7 +39,11 @@ export function computeDailyTotals(entries: MealEntry[], dateIso: string, custom
     for (const ref of items) {
       const f = allFoods.find((x) => x.id === ref.foodId);
       if (!f) {
-        console.warn(`[Nutrition] Aliment non trouvé pour foodId: ${ref.foodId} (total foods: ${allFoods.length}, custom: ${customFoods.length})`);
+        // Log seulement en mode développement pour éviter le bruit en production
+        // Les aliments estimated_* peuvent être absents temporairement jusqu'à synchronisation
+        if (process.env.NODE_ENV === 'development') {
+          console.debug(`[Nutrition] Aliment non trouvé pour foodId: ${ref.foodId} (total foods: ${allFoods.length}, custom: ${customFoods.length})`);
+        }
         continue;
       }
       

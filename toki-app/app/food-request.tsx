@@ -125,7 +125,7 @@ export default function FoodRequestScreen() {
       <View style={styles.content}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.push('/(tabs)')}>
             <Text style={[styles.backButtonText, { color: colors.tint }]}>← Retour</Text>
           </TouchableOpacity>
         </View>

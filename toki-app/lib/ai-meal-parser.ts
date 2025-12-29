@@ -5,8 +5,13 @@ export type ParsedFoodItem = {
   name: string;
   quantity?: string; // Ex: "200g", "1 tasse", "2 portions"
   quantityNumber?: number; // Nombre extrait (ex: 2 pour "2 toasts")
-  category?: string; // Ex: "protein", "starch", "vegetable"
+  category?: string; // Ex: "PROTEINE_MAIGRE", "LEGUME", "FECULENT_SIMPLE"
+  calories_kcal?: number; // Calories (pour 100g ou portion standard)
+  protein_g?: number; // Protéines en grammes (pour 100g ou portion standard)
+  carbs_g?: number; // Glucides en grammes (pour 100g ou portion standard)
+  fat_g?: number; // Lipides en grammes (pour 100g ou portion standard)
   confidence?: number; // 0-1, confiance du parsing
+  isComposite?: boolean; // true si c'est un plat composé, false si c'est un ingrédient simple
 };
 
 export type ParsedMealResult = {
@@ -95,11 +100,27 @@ function extractQuantity(text: string, foodName: string): { quantity?: string; q
 
 /**
  * Parser une description de repas avec IA améliorée
- * Utilise des règles améliorées pour détecter aliments, quantités et plats composés
+ * Utilise OpenAI si disponible, sinon utilise des règles améliorées pour détecter aliments, quantités et plats composés
  */
 export async function parseMealDescription(
   description: string
 ): Promise<ParsedMealResult> {
+  // Essayer d'abord avec OpenAI si disponible
+  if (process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
+    try {
+      const { parseMealWithOpenAI } = await import('./openai-parser');
+      const result = await parseMealWithOpenAI(description);
+      if (result.items.length > 0 && !result.error) {
+        return result; // Utiliser le résultat OpenAI si disponible
+      }
+      // Si OpenAI échoue mais qu'il n'y a pas d'erreur critique, continuer avec le parser basique
+    } catch (error) {
+      console.warn('[AI Parser] Erreur OpenAI, utilisation du parser basique:', error);
+      // Continuer avec le parser basique en cas d'erreur
+    }
+  }
+
+  // Parser basique (règles améliorées)
   if (!description || description.trim().length === 0) {
     return {
       items: [],

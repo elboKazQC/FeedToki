@@ -80,7 +80,7 @@ export default function HelpScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.backButton}>
           <Text style={styles.backButtonText}>← Retour</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Aide & FAQ</Text>

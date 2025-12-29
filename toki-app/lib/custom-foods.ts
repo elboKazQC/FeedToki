@@ -13,19 +13,19 @@ const getCustomFoodsKey = (userId?: string) =>
  */
 export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
   try {
-    const storageKey = getCustomFoodsKey(userId);
+    // Utiliser une clé globale pour le cache local (partagée par tous les utilisateurs)
+    const storageKey = 'feedtoki_custom_foods_global_v1';
     
-    // D'abord charger depuis AsyncStorage (par utilisateur si userId fourni)
+    // D'abord charger depuis AsyncStorage (cache local global)
     const raw = await AsyncStorage.getItem(storageKey);
     const localFoods: FoodItem[] = raw ? JSON.parse(raw) : [];
     
     console.log(`[Custom Foods] Chargés depuis AsyncStorage (${storageKey}):`, localFoods.length, 'aliments');
     
-    // Si on a un userId et Firebase est activé, charger depuis Firestore aussi
-    if (userId && FIREBASE_ENABLED && db) {
+    // Charger depuis Firestore (collection globale partagée)
+    if (FIREBASE_ENABLED && db) {
       try {
-        const firestoreFoods = await loadCustomFoodsFromFirestore(userId);
-        console.log(`[Custom Foods] Chargés depuis Firestore (${userId}):`, firestoreFoods.length, 'aliments');
+        const firestoreFoods = await loadCustomFoodsFromFirestore();
         
         // Fusionner: Firestore prend priorité (plus récent)
         const foodMap = new Map<string, FoodItem>();
@@ -64,14 +64,14 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
 }
 
 /**
- * Charger les aliments personnalisés depuis Firestore
+ * Charger les aliments personnalisés depuis Firestore (collection globale partagée)
  */
-export async function loadCustomFoodsFromFirestore(userId: string): Promise<FoodItem[]> {
+export async function loadCustomFoodsFromFirestore(): Promise<FoodItem[]> {
   if (!FIREBASE_ENABLED || !db) return [];
 
   try {
-    const customFoodsRef = collection(db, 'users', userId, 'customFoods');
-    const snapshot = await getDocs(customFoodsRef);
+    const globalFoodsRef = collection(db, 'globalFoods');
+    const snapshot = await getDocs(globalFoodsRef);
     return snapshot.docs.map(doc => doc.data() as FoodItem);
   } catch (error) {
     console.error('[Custom Foods] Erreur chargement Firestore:', error);
@@ -80,29 +80,30 @@ export async function loadCustomFoodsFromFirestore(userId: string): Promise<Food
 }
 
 /**
- * Ajouter un aliment personnalisé
+ * Ajouter un aliment personnalisé (dans la collection globale partagée)
  */
 export async function addCustomFood(food: FoodItem, userId?: string): Promise<void> {
-  const storageKey = getCustomFoodsKey(userId);
+  // Utiliser une clé globale pour le cache local (partagée par tous les utilisateurs)
+  const storageKey = 'feedtoki_custom_foods_global_v1';
   
-  // Charger les aliments existants (incluant Firestore si userId fourni)
+  // Charger les aliments existants (collection globale)
   const existing = await loadCustomFoods(userId);
   const updated = [...existing.filter(f => f.id !== food.id), food];
   
   console.log(`[Custom Foods] Ajout de "${food.name}" (${food.id}), total:`, updated.length, 'aliments');
   
-  // Sauvegarder dans AsyncStorage (par utilisateur)
+  // Sauvegarder dans AsyncStorage (cache local global)
   await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
 
-  // Sauvegarder dans Firestore si disponible
-  if (FIREBASE_ENABLED && db && userId) {
+  // Sauvegarder dans Firestore (collection globale partagée)
+  if (FIREBASE_ENABLED && db) {
     try {
-      const customFoodRef = doc(db, 'users', userId, 'customFoods', food.id);
-      await setDoc(customFoodRef, {
+      const globalFoodRef = doc(db, 'globalFoods', food.id);
+      await setDoc(globalFoodRef, {
         ...food,
         createdAt: new Date().toISOString(), // Ajouter timestamp pour référence
       });
-      console.log(`[Custom Foods] Sauvegardé dans Firestore: ${food.id}`);
+      console.log(`[Custom Foods] Sauvegardé dans Firestore (globalFoods): ${food.id}`);
     } catch (error) {
       console.error('[Custom Foods] Erreur sauvegarde Firestore:', error);
       // Continue même si Firestore échoue

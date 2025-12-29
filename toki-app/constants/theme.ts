@@ -1,31 +1,53 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Theme colors based on design tokens
+ * Uses the centralized design token system for consistency
  */
 
-import { Platform } from 'react-native';
+import { lightTheme, darkTheme } from './design-tokens';
 
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: lightTheme.text.primary,
+    background: lightTheme.background,
+    tint: lightTheme.primary,
+    icon: lightTheme.text.secondary,
+    tabIconDefault: lightTheme.text.tertiary,
+    tabIconSelected: lightTheme.primary,
+    // Extended colors from design tokens
+    surface: lightTheme.surface,
+    surfaceElevated: lightTheme.surfaceElevated,
+    border: lightTheme.border,
+    success: lightTheme.success,
+    warning: lightTheme.warning,
+    error: lightTheme.error,
+    primary: lightTheme.primary,
+    secondary: lightTheme.secondary,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: darkTheme.text.primary,
+    background: darkTheme.background,
+    tint: darkTheme.primary,
+    icon: darkTheme.text.secondary,
+    tabIconDefault: darkTheme.text.tertiary,
+    tabIconSelected: darkTheme.primary,
+    // Extended colors from design tokens
+    surface: darkTheme.surface,
+    surfaceElevated: darkTheme.surfaceElevated,
+    border: darkTheme.border,
+    success: darkTheme.success,
+    warning: darkTheme.warning,
+    error: darkTheme.error,
+    primary: darkTheme.primary,
+    secondary: darkTheme.secondary,
   },
 };
+
+// Re-export design tokens for convenience
+export { spacing, borderRadius, borderWidth, typography, shadows, colors, breakpoints } from './design-tokens';
+export { lightTheme, darkTheme } from './design-tokens';
 
 export const Fonts = Platform.select({
   ios: {

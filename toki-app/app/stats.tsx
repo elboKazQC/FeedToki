@@ -21,6 +21,9 @@ import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dr
 import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry, loadBaseline, getWeeklyAverageSeries } from '../lib/weight';
 import { WeightChart } from '../components/weight-chart';
 import { validateWeight } from '../lib/validation';
+import { BestDays } from '../components/best-days';
+import { loadCustomFoods } from '../lib/custom-foods';
+import { FOOD_DB } from '../lib/food-db';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
@@ -43,6 +46,7 @@ export default function StatsScreen() {
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('lbs');
   const [weightInput, setWeightInput] = useState('');
   const [baseline, setBaseline] = useState<WeightEntry | null>(null);
+  const [customFoods, setCustomFoods] = useState<typeof FOOD_DB>([]);
 
   const currentUserId = profile?.userId || (user as any)?.id || 'guest';
 
@@ -79,6 +83,20 @@ export default function StatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId]);
 
+  // Charger custom foods
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const foods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        setCustomFoods(foods || []);
+      } catch (error) {
+        console.error('Erreur chargement custom foods:', error);
+        setCustomFoods([]);
+      }
+    };
+    load();
+  }, [currentUserId]);
+
   // Calculer les stats
   useEffect(() => {
     const dayFeeds = entries.reduce((acc, entry) => {
@@ -113,7 +131,7 @@ export default function StatsScreen() {
       <View style={styles.content}>
         {/* Header avec bouton retour */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.push('/(tabs)')}>
             <Text style={[styles.backButtonText, { color: colors.tint }]}>← Retour</Text>
           </TouchableOpacity>
         </View>
@@ -366,6 +384,14 @@ export default function StatsScreen() {
             )}
           </View>
         </View>
+
+        {/* Meilleurs jours */}
+        {entries.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>🏆 Meilleurs jours</Text>
+            <BestDays entries={entries} customFoods={customFoods} daysToShow={3} />
+          </View>
+        )}
 
         {/* Calendrier des streaks */}
         <View style={styles.section}>

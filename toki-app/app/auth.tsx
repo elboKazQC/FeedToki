@@ -29,8 +29,40 @@ export default function AuthScreen() {
         // Mode Firebase
         if (mode === 'signup') {
           await signUp(email, password, displayName);
+          // Après inscription réussie, attendre un peu pour que le contexte se mette à jour
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Redirection vers onboarding (nouveau compte)
+          router.replace('/onboarding');
         } else {
-          await signIn(email, password);
+          const user = await signIn(email, password);
+          console.log('[Auth Screen] Connexion réussie, user:', user?.uid);
+          
+          // Attendre que le contexte d'authentification charge le profil
+          // Le contexte devrait mettre à jour le profil via onAuthStateChanged
+          // On attend un peu plus longtemps pour s'assurer que le profil est chargé
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Vérifier si le profil existe dans Firestore
+          try {
+            const { getUserProfile } = await import('../lib/firebase-auth');
+            const profile = await getUserProfile(user.uid);
+            console.log('[Auth Screen] Profil chargé:', profile ? 'oui' : 'non');
+            
+            if (profile && profile.onboardingCompleted) {
+              // Profil complété, aller directement aux tabs
+              router.replace('/(tabs)');
+            } else if (profile && !profile.onboardingCompleted) {
+              // Profil non complété, aller à onboarding
+              router.replace('/onboarding');
+            } else {
+              // Pas de profil, rediriger vers index qui gérera la navigation
+              router.replace('/');
+            }
+          } catch (profileError) {
+            console.error('[Auth Screen] Erreur chargement profil:', profileError);
+            // En cas d'erreur, rediriger vers index qui gérera la navigation
+            router.replace('/');
+          }
         }
       } else {
         // Mode local
@@ -59,13 +91,24 @@ export default function AuthScreen() {
       }
     } catch (error: any) {
       console.error('[Auth Screen] Erreur:', error);
-      const errorMessage = error?.message || 'Une erreur est survenue. Vérifiez que Firebase Authentication est activé dans Firebase Console.';
+      console.error('[Auth Screen] Error code:', error?.code);
+      console.error('[Auth Screen] Error message:', error?.message);
+      console.error('[Auth Screen] Full error:', JSON.stringify(error, null, 2));
+      
+      // Toujours afficher l'erreur, même si elle semble silencieuse
+      const errorMessage = error?.message || error?.code || 'Une erreur est survenue. Vérifiez que Firebase Authentication est activé dans Firebase Console.';
+      
+      // Sur mobile, utiliser Alert.alert, sur web utiliser window.alert aussi pour être sûr
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Erreur d'authentification: ${errorMessage}`);
+      }
+      
       Alert.alert(
         'Erreur d\'authentification',
         errorMessage,
         [
           { text: 'OK' },
-          ...(errorMessage.includes('Authentication') ? [{
+          ...(errorMessage.includes('Authentication') || errorMessage.includes('Firebase') ? [{
             text: 'Voir guide',
             onPress: () => {
               // Ouvrir le guide dans un nouvel onglet

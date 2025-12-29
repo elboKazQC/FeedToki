@@ -46,6 +46,7 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'pates', name: 'Pâtes', tags: ['feculent_simple'], baseScore: 55, protein_g: 7, carbs_g: 42, fat_g: 1.5, calories_kcal: 210, points: 2 },
   { id: 'patate', name: 'Patate', tags: ['feculent_simple'], baseScore: 55, protein_g: 4, carbs_g: 37, fat_g: 0.2, calories_kcal: 160, points: 2 },
   { id: 'toasts', name: 'Toasts', tags: ['feculent_simple'], baseScore: 50, protein_g: 4, carbs_g: 20, fat_g: 2, calories_kcal: 120, points: 1 },
+  { id: 'pain_carbone', name: 'Pain carbone', tags: ['grain_complet'], baseScore: 65, protein_g: 4, carbs_g: 15, fat_g: 1, calories_kcal: 40, points: 0 },
   { id: 'quinoa', name: 'Quinoa', tags: ['feculent_simple'], baseScore: 70, protein_g: 8, carbs_g: 39, fat_g: 3.5, calories_kcal: 220, points: 2 },
   { id: 'avoine', name: "Flocons d'avoine", tags: ['feculent_simple'], baseScore: 65, protein_g: 6, carbs_g: 27, fat_g: 3, calories_kcal: 150, points: 1 },
   { id: 'pain_complet', name: 'Pain complet', tags: ['grain_complet'], baseScore: 70, protein_g: 6, carbs_g: 20, fat_g: 2, calories_kcal: 120, points: 1 },

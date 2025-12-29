@@ -29,6 +29,9 @@ import { classifyMealByItems } from '../lib/classifier';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { syncMealEntryToFirestore, syncPointsToFirestore } from '../lib/data-sync';
 import { trackAIParserUsed, trackMealLogged } from '../lib/analytics';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { spacing } from '../constants/design-tokens';
 
 type DetectedItem = {
   originalName: string;
@@ -62,64 +65,113 @@ export default function AILoggerScreen() {
       // 1. Parser la description avec IA
       const parseResult = await parseMealDescription(description);
 
-      if (parseResult.error || parseResult.items.length === 0) {
+      if (!parseResult || parseResult.error || parseResult.items.length === 0) {
         // Tracker échec du parser
-        trackAIParserUsed({
-          description,
-          itemsDetected: 0,
-          success: false,
-        });
-        setError(parseResult.error || 'Aucun aliment détecté. Essayez de décrire plus précisément.');
+        try {
+          trackAIParserUsed({
+            description: description,
+            itemsDetected: 0,
+            success: false,
+          });
+        } catch (trackError) {
+          console.warn('Erreur tracking:', trackError);
+        }
+        setError(parseResult?.error || 'Aucun aliment détecté. Essayez de décrire plus précisément.');
         setIsProcessing(false);
         return;
       }
       
       // Tracker succès du parser
-      trackAIParserUsed({
-        description,
-        itemsDetected: parseResult.items.length,
-        success: true,
-      });
+      try {
+        trackAIParserUsed({
+          description: description,
+          itemsDetected: parseResult.items.length,
+          success: true,
+        });
+      } catch (trackError) {
+        console.warn('Erreur tracking:', trackError);
+      }
 
       // 2. Pour chaque item détecté, essayer de matcher avec la DB
       const items: DetectedItem[] = [];
 
       for (const parsedItem of parseResult.items) {
-        // Essayer de trouver un match dans la DB (threshold plus strict pour éviter faux positifs)
-        const match = findBestMatch(parsedItem.name, 0.7);
+        try {
+          // Matching intelligent : si isComposite = false, être très strict pour éviter les faux positifs
+          // (ex: "beurre de peanut" ne doit PAS matcher avec "toast au beurre de peanut")
+          let match: FoodItem | null = null;
+          
+          if (parsedItem.isComposite === false) {
+            // Pour un ingrédient simple, être très strict (threshold élevé)
+            // et vérifier que le match n'est pas un plat composé
+            const strictMatch = findBestMatch(parsedItem.name, 0.85);
+            if (strictMatch) {
+              // Vérifier que le nom du match n'est pas beaucoup plus long (signe d'un plat composé)
+              const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
+              const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
+              // Si le match a 2+ mots de plus, c'est probablement un plat composé, ne pas matcher
+              if (matchWords <= searchWords + 1) {
+                match = strictMatch;
+              }
+            }
+          } else {
+            // Pour un plat composé, utiliser le threshold normal
+            match = findBestMatch(parsedItem.name, 0.7);
+          }
 
-        let foodItem: FoodItem;
-        let portion = getDefaultPortion([]);
+          let foodItem: FoodItem;
+          let portion = getDefaultPortion([]);
 
-        if (match) {
-          // Item trouvé dans la DB
-          foodItem = match;
-          portion = getDefaultPortion(match.tags);
-        } else {
-          // Item non trouvé, créer une estimation
-          foodItem = createEstimatedFoodItem(parsedItem.name, description);
-          portion = getDefaultPortion(foodItem.tags);
+          if (match) {
+            // Item trouvé dans la DB
+            foodItem = match;
+            portion = getDefaultPortion(match.tags);
+          } else {
+            // Item non trouvé, créer une estimation en utilisant la catégorie et valeurs nutritionnelles OpenAI si disponibles
+            foodItem = createEstimatedFoodItem(
+              parsedItem.name,
+              description,
+              parsedItem.category,
+              parsedItem.calories_kcal !== undefined || parsedItem.protein_g !== undefined
+                ? {
+                    calories_kcal: parsedItem.calories_kcal,
+                    protein_g: parsedItem.protein_g,
+                    carbs_g: parsedItem.carbs_g,
+                    fat_g: parsedItem.fat_g,
+                  }
+                : undefined
+            );
+            portion = getDefaultPortion(foodItem.tags);
+          }
+
+          // Créer le FoodItemRef
+          const itemRef = createFoodItemRef(foodItem, portion);
+
+          // Calculer le coût en points
+          const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
+
+          items.push({
+            originalName: parsedItem.name || 'Aliment inconnu',
+            matchedItem: match || null,
+            estimatedItem: match ? undefined : foodItem,
+            portion,
+            itemRef,
+            pointsCost: Math.round(pointsCost),
+          });
+        } catch (itemError: any) {
+          console.error('Erreur traitement item:', itemError);
+          // Continuer avec les autres items même si un échoue
         }
-
-        // Créer le FoodItemRef
-        const itemRef = createFoodItemRef(foodItem, portion);
-
-        // Calculer le coût en points
-        const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
-
-        items.push({
-          originalName: parsedItem.name,
-          matchedItem: match || null,
-          estimatedItem: match ? undefined : foodItem,
-          portion,
-          itemRef,
-          pointsCost: Math.round(pointsCost),
-        });
       }
 
-      setDetectedItems(items);
+      if (items.length === 0) {
+        setError('Impossible d\'analyser les aliments. Essayez une autre description.');
+      } else {
+        setDetectedItems(items);
+      }
     } catch (err: any) {
-      setError(err.message || 'Erreur lors du parsing');
+      console.error('Erreur parsing:', err);
+      setError(err?.message || 'Erreur lors du parsing. Veuillez réessayer.');
     } finally {
       setIsProcessing(false);
     }
@@ -269,10 +321,165 @@ export default function AILoggerScreen() {
     setDetectedItems(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleRerollItem = async (index: number) => {
+    const item = detectedItems[index];
+    if (!item) return;
+
+    // Demander à l'utilisateur ce qui ne va pas
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const problem = window.prompt(
+        `Que veut-tu améliorer pour "${item.originalName}"?\n\n` +
+        `1 = Ce n'est pas le bon aliment/match\n` +
+        `2 = Les valeurs nutritionnelles sont incorrectes\n` +
+        `3 = Les deux\n\n` +
+        `Tape 1, 2 ou 3:`
+      );
+      
+      if (!problem || !['1', '2', '3'].includes(problem)) return;
+      
+      await rerollSingleItem(index, item.originalName, parseInt(problem));
+    } else {
+      Alert.alert(
+        'Améliorer cet aliment',
+        `Que veut-tu améliorer pour "${item.originalName}"?`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Le match est incorrect',
+            onPress: () => rerollSingleItem(index, item.originalName, 1),
+          },
+          {
+            text: 'Les valeurs nutritionnelles',
+            onPress: () => rerollSingleItem(index, item.originalName, 2),
+          },
+          {
+            text: 'Les deux',
+            onPress: () => rerollSingleItem(index, item.originalName, 3),
+          },
+        ]
+      );
+    }
+  };
+
+  const rerollSingleItem = async (index: number, foodName: string, problemType: number) => {
+    setIsProcessing(true);
+    setError('');
+
+    try {
+      // Réanalyser seulement cet aliment
+      const parseResult = await parseMealDescription(foodName);
+
+      if (!parseResult || parseResult.error || parseResult.items.length === 0) {
+        setError(`Impossible de réanalyser "${foodName}"`);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Prendre le premier item analysé
+      const parsedItem = parseResult.items[0];
+      
+      // Essayer de trouver un meilleur match si le problème est le match (1 ou 3)
+      let match: FoodItem | null = null;
+      if (problemType === 1 || problemType === 3) {
+        // Matching intelligent : si isComposite = false, être très strict
+        if (parsedItem.isComposite === false) {
+          const strictMatch = findBestMatch(parsedItem.name, 0.85);
+          if (strictMatch) {
+            const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
+            const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
+            if (matchWords <= searchWords + 1) {
+              match = strictMatch;
+            }
+          }
+        } else {
+          // Pour un plat composé, chercher avec threshold normal
+          match = findBestMatch(parsedItem.name, 0.7);
+        }
+        
+        // Si toujours pas de match, essayer avec threshold plus bas
+        if (!match) {
+          const matches = findMultipleMatches(parsedItem.name, 5, 0.4);
+          // Filtrer les matches qui sont trop longs (plats composés pour ingrédients simples)
+          const filteredMatches = parsedItem.isComposite === false
+            ? matches.filter(m => {
+                const matchWords = m.item.name.toLowerCase().split(/\s+/).length;
+                const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
+                return matchWords <= searchWords + 1;
+              })
+            : matches;
+          match = filteredMatches.length > 0 ? filteredMatches[0].item : null;
+        }
+      } else {
+        // Garder le match actuel si le problème est juste les valeurs nutritionnelles
+        match = detectedItems[index].matchedItem || null;
+      }
+
+      let foodItem: FoodItem;
+      let portion = getDefaultPortion([]);
+
+      if (match) {
+        foodItem = match;
+        portion = getDefaultPortion(match.tags);
+        
+        // Si le problème inclut les valeurs nutritionnelles (2 ou 3), utiliser celles d'OpenAI
+        if ((problemType === 2 || problemType === 3) && parsedItem.calories_kcal !== undefined) {
+          // Créer un item avec les valeurs nutritionnelles d'OpenAI mais garder les tags du match
+          foodItem = {
+            ...match,
+            calories_kcal: parsedItem.calories_kcal,
+            protein_g: parsedItem.protein_g,
+            carbs_g: parsedItem.carbs_g,
+            fat_g: parsedItem.fat_g,
+          };
+        }
+      } else {
+        // Créer une estimation avec les valeurs d'OpenAI
+        foodItem = createEstimatedFoodItem(
+          parsedItem.name,
+          foodName,
+          parsedItem.category,
+          parsedItem.calories_kcal !== undefined || parsedItem.protein_g !== undefined
+            ? {
+                calories_kcal: parsedItem.calories_kcal,
+                protein_g: parsedItem.protein_g,
+                carbs_g: parsedItem.carbs_g,
+                fat_g: parsedItem.fat_g,
+              }
+            : undefined
+        );
+        portion = getDefaultPortion(foodItem.tags);
+      }
+
+      // Créer le FoodItemRef
+      const itemRef = createFoodItemRef(foodItem, portion);
+
+      // Calculer le coût en points
+      const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
+
+      // Remplacer l'item à l'index donné
+      const updatedItems = [...detectedItems];
+      updatedItems[index] = {
+        originalName: parsedItem.name || foodName,
+        matchedItem: match || null,
+        estimatedItem: match ? undefined : foodItem,
+        portion,
+        itemRef,
+        pointsCost: Math.round(pointsCost),
+      };
+
+      setDetectedItems(updatedItems);
+    } catch (err: any) {
+      console.error('Erreur reroll item:', err);
+      setError(`Erreur lors de la réanalyse: ${err.message || 'Erreur inconnue'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.backButton}>
           <Text style={styles.backButtonText}>← Retour</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Log avec IA 🧠</Text>
@@ -317,51 +524,70 @@ export default function AILoggerScreen() {
 
       {detectedItems.length > 0 && (
         <View style={styles.resultsContainer}>
-          <Text style={styles.resultsTitle}>Aliments détectés ({detectedItems.length})</Text>
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsTitle}>Aliments détectés ({detectedItems.length})</Text>
+            <TouchableOpacity
+              style={styles.rerollButton}
+              onPress={handleParse}
+              disabled={isProcessing}
+            >
+              <Text style={styles.rerollButtonText}>🔄 Réanalyser</Text>
+            </TouchableOpacity>
+          </View>
 
-          {detectedItems.map((item, index) => (
-            <View key={index} style={styles.itemCard}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.itemName}>{item.originalName}</Text>
-                <Text style={styles.itemPoints}>{item.pointsCost} pts</Text>
-              </View>
+              {detectedItems.map((item, index) => (
+                <Card key={index} variant="outlined" style={{ marginBottom: spacing.md }}>
+                  <View style={styles.itemHeader}>
+                    <Text style={styles.itemName}>{item.originalName}</Text>
+                    <Text style={styles.itemPoints}>{item.pointsCost} pts</Text>
+                  </View>
 
-              {item.matchedItem ? (
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemMatch}>
-                    ✓ Match: {item.matchedItem.name}
-                  </Text>
-                  <Text style={styles.itemDetails}>
-                    {item.matchedItem.calories_kcal || 0} cal · {item.matchedItem.protein_g || 0}g prot
-                  </Text>
-                </View>
-              ) : item.estimatedItem ? (
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemEstimate}>
-                    ⚠ Estimé (non trouvé dans la DB)
-                  </Text>
-                  <Text style={styles.itemDetails}>
-                    {item.estimatedItem.calories_kcal || 0} cal · {item.estimatedItem.protein_g || 0}g prot
-                  </Text>
-                </View>
-              ) : null}
+                  {item.matchedItem ? (
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemMatch}>
+                        ✓ Match: {item.matchedItem.name}
+                      </Text>
+                      <Text style={styles.itemDetails}>
+                        🔥 {item.matchedItem.calories_kcal || 0} cal · 💪 {item.matchedItem.protein_g || 0}g prot · 🍞 {item.matchedItem.carbs_g || 0}g gluc · 🧈 {item.matchedItem.fat_g || 0}g lipides
+                      </Text>
+                    </View>
+                  ) : item.estimatedItem ? (
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemEstimate}>
+                        ⚠ Estimé (non trouvé dans la DB)
+                      </Text>
+                      <Text style={styles.itemDetails}>
+                        🔥 {item.estimatedItem.calories_kcal || 0} cal · 💪 {item.estimatedItem.protein_g || 0}g prot · 🍞 {item.estimatedItem.carbs_g || 0}g gluc · 🧈 {item.estimatedItem.fat_g || 0}g lipides
+                      </Text>
+                    </View>
+                  ) : null}
 
-              <View style={styles.itemActions}>
-                <TouchableOpacity
-                  style={styles.editButton}
-                  onPress={() => handleEditItem(index)}
-                >
-                  <Text style={styles.editButtonText}>✏️ Modifier</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => handleRemoveItem(index)}
-                >
-                  <Text style={styles.removeButtonText}>✕ Retirer</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
+                  <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+                    <Button
+                      label="🔄 Réanalyser"
+                      variant="secondary"
+                      size="small"
+                      onPress={() => handleRerollItem(index)}
+                      style={{ flex: 1 }}
+                      isDisabled={isProcessing}
+                    />
+                    <Button
+                      label="✏️ Modifier"
+                      variant="ghost"
+                      size="small"
+                      onPress={() => handleEditItem(index)}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      label="🗑️ Supprimer"
+                      variant="danger"
+                      size="small"
+                      onPress={() => handleRemoveItem(index)}
+                      style={{ flex: 1 }}
+                    />
+                  </View>
+                </Card>
+              ))}
 
           <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
             <Text style={styles.confirmButtonText}>
@@ -455,11 +681,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 24,
   },
+  resultsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   resultsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#e5e7eb',
-    marginBottom: 16,
+    flex: 1,
+  },
+  rerollButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#60a5fa',
+  },
+  rerollButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   itemCard: {
     backgroundColor: '#111827',
