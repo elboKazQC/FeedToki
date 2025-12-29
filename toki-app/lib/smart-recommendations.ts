@@ -15,6 +15,169 @@ export type SmartRecommendation = {
 };
 
 /**
+ * Get smart food suggestions filtered by taste preference (sweet or salty)
+ * Takes into account: points, calories, protein, carbs, fat remaining
+ */
+export function getSmartRecommendationsByTaste(
+  currentTotals: DailyNutritionTotals,
+  targets: NutritionTargets,
+  availablePoints: number,
+  tastePreference: 'sweet' | 'salty' | null,
+  timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
+): SmartRecommendation[] {
+  // Calculate what's remaining
+  const remaining = {
+    calories: Math.max(0, targets.calories_kcal - currentTotals.calories_kcal),
+    protein: Math.max(0, targets.protein_g - currentTotals.protein_g),
+    carbs: Math.max(0, targets.carbs_g - currentTotals.carbs_g),
+    fat: Math.max(0, targets.fat_g - currentTotals.fat_g),
+  };
+
+  // Calculate percentages
+  const proteinPct = currentTotals.protein_g / targets.protein_g;
+  const caloriesPct = currentTotals.calories_kcal / targets.calories_kcal;
+  const carbsPct = currentTotals.carbs_g / targets.carbs_g;
+
+  const needsProtein = proteinPct < 0.7;
+  const needsCalories = caloriesPct < 0.8;
+  const nearCalorieLimit = caloriesPct > 0.9;
+  const tooManyCarbs = carbsPct > 0.9; // Si trop de glucides, éviter les aliments riches en glucides
+
+  const recommendations: SmartRecommendation[] = [];
+
+  // Filter items by taste preference
+  const filteredItems = tastePreference 
+    ? FOOD_DB.filter(item => {
+        if (tastePreference === 'sweet') {
+          // Sweet: desserts, fruits, shakes, anything with sugar tag
+          return item.tags.includes('dessert_sante') || 
+                 item.tags.includes('sucre') || 
+                 item.id.includes('shake') ||
+                 item.id.includes('baies') ||
+                 item.id.includes('fruit') ||
+                 item.name.toLowerCase().includes('chocolat') ||
+                 item.name.toLowerCase().includes('vanille');
+        } else {
+          // Salty: proteins, vegetables, grains, savory items
+          return item.tags.includes('proteine_maigre') ||
+                 item.tags.includes('legume') ||
+                 item.tags.includes('feculent_simple') ||
+                 item.tags.includes('grain_complet') ||
+                 (!item.tags.includes('sucre') && !item.tags.includes('dessert_sante'));
+        }
+      })
+    : FOOD_DB;
+
+  filteredItems.forEach((item) => {
+    const itemProtein = item.protein_g || 0;
+    const itemCalories = item.calories_kcal || 0;
+    const itemCarbs = item.carbs_g || 0;
+    const itemFat = item.fat_g || 0;
+
+    // Skip if item would exceed remaining calories significantly
+    if (itemCalories > remaining.calories * 1.2 && !nearCalorieLimit) {
+      return;
+    }
+
+    // Skip if too many carbs and item is high in carbs
+    if (tooManyCarbs && itemCarbs > 20 && !item.tags.includes('proteine_maigre')) {
+      return;
+    }
+
+    let priority = 0;
+    let reasons: string[] = [];
+
+    const estimatedCost = estimatePointsCost(item);
+    
+    // Can't afford it
+    if (estimatedCost > availablePoints) {
+      return;
+    }
+
+    // Priority boost for items that fit remaining budget perfectly
+    if (itemCalories <= remaining.calories && itemCalories >= remaining.calories * 0.3) {
+      priority += 2;
+      reasons.push(`Parfait pour ${Math.round(remaining.calories)} cal restantes`);
+    }
+
+    // High-protein items when protein is needed (especially for sweet desserts)
+    if (needsProtein && itemProtein > 15) {
+      priority += 3;
+      reasons.push(`Boost protéines (+${itemProtein}g)`);
+    }
+
+    // Protein desserts are great when craving sweet
+    if (tastePreference === 'sweet' && item.tags.includes('proteine_maigre') && itemProtein > 20) {
+      priority += 4;
+      reasons.push(`Dessert protéiné sain!`);
+    }
+
+    // Free/low-cost items are always good
+    if (estimatedCost === 0) {
+      priority += 2;
+      reasons.push('Gratuit en points!');
+    } else if (estimatedCost <= availablePoints && estimatedCost <= 2) {
+      priority += 1;
+      reasons.push(`Seulement ${estimatedCost} point${estimatedCost > 1 ? 's' : ''}`);
+    }
+
+    // Vegetables are always recommended (for salty)
+    if (tastePreference === 'salty' && item.tags.includes('legume')) {
+      priority += 2;
+      reasons.push('Légumes nutritifs');
+    }
+
+    // Match remaining macros
+    if (itemProtein <= remaining.protein * 1.2 && itemProtein > 0) {
+      priority += 1;
+    }
+    if (itemCarbs <= remaining.carbs * 1.2 && !tooManyCarbs && itemCarbs > 0) {
+      priority += 1;
+    }
+
+    // Healthy desserts when craving sweet
+    if (tastePreference === 'sweet' && item.tags.includes('dessert_sante')) {
+      priority += 3;
+      reasons.push('Dessert santé');
+    }
+
+    // Penalize ultra-processed (unless it's a real cheat)
+    if (item.tags.includes('ultra_transforme') && estimatedCost < 3) {
+      priority -= 1;
+    }
+
+    // Penalize high-calorie items if near limit
+    if (nearCalorieLimit && itemCalories > 300) {
+      priority -= 2;
+    }
+
+    // Only recommend if priority > 0
+    if (priority > 0 && reasons.length > 0) {
+      const defaultPortion = getDefaultPortion(item.tags);
+      recommendations.push({
+        item,
+        reason: reasons.join(' · '),
+        priority,
+        pointsCost: estimatedCost,
+        suggestedGrams: defaultPortion.grams,
+        suggestedVisualRef: defaultPortion.visualRef,
+        portion: defaultPortion,
+      });
+    }
+  });
+
+  // Sort by priority (highest first), then by points cost (lowest first)
+  return recommendations
+    .sort((a, b) => {
+      if (b.priority !== a.priority) {
+        return b.priority - a.priority;
+      }
+      return a.pointsCost - b.pointsCost;
+    })
+    .slice(0, 8); // Return top 8 suggestions
+}
+
+/**
  * Get smart food suggestions when user is hungry
  * Analyzes what's missing (protein, calories, etc.) and suggests accordingly
  */

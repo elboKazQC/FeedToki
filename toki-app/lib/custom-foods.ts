@@ -4,7 +4,6 @@ import { FoodItem } from './food-db';
 import { db } from './firebase-config';
 import { collection, doc, setDoc, getDocs, query, where } from 'firebase/firestore';
 import { FIREBASE_ENABLED } from './firebase-config';
-import { useAuth } from './auth-context';
 
 const getCustomFoodsKey = (userId?: string) => 
   userId ? `feedtoki_custom_foods_${userId}_v1` : 'feedtoki_custom_foods_v1';

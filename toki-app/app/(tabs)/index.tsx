@@ -35,7 +35,7 @@ import {
   requestNotifPermission,
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
-import { getSmartRecommendations, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
+import { getSmartRecommendations, getSmartRecommendationsByTaste, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
@@ -94,6 +94,15 @@ function scoreToCategory(score: number): MealEntry['category'] {
   return 'cheat';
 }
 
+// Helper pour obtenir la date d'aujourd'hui en heure locale (évite les problèmes de fuseau horaire)
+function getTodayLocal(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // ---- Composant principal ----
 export default function App() {
   const { profile: authProfile, user: authUser, loading: authLoading } = useAuth();
@@ -110,6 +119,9 @@ export default function App() {
   // TEMPORAIRE: Désactiver le modal dragon pour fixer le bug
   // const [showDragonDeadModal, setShowDragonDeadModal] = useState(false);
   const [isDragonDead, setIsDragonDead] = useState(false);
+
+  // IMPORTANT: Déclarer currentUserId AVANT les useEffect qui l'utilisent
+  const currentUserId = (authProfile?.userId || (authUser as any)?.id || 'guest');
 
   // Utiliser le profil du contexte Auth
   useEffect(() => {
@@ -142,9 +154,6 @@ export default function App() {
     }
     // Note: Ne pas rediriger ici - AuthProvider gère le routage
   }, [authProfile, authLoading, currentUserId]);
-
-  // Helpers: clés par compte - Debug log
-  const currentUserId = (authProfile?.userId || (authUser as any)?.id || 'guest');
   
   // Log userId à chaque render pour debug
   useEffect(() => {
@@ -338,7 +347,7 @@ export default function App() {
         return;
       }
       
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getTodayLocal();
       const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
       const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
       
@@ -377,45 +386,7 @@ export default function App() {
             await AsyncStorage.setItem(totalKey, JSON.stringify(newTotal));
           } else {
             console.log('[Index] Points déjà crédités aujourd\'hui. Balance actuelle:', balance);
-            
-            // Si le solde est à 0 mais qu'on devrait avoir des points, vérifier s'il y a eu un problème
-            // Calculer combien on devrait avoir en fonction des dépenses d'aujourd'hui
-            if (balance === 0) {
-              const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
-              const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
-              const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
-              let totalSpentToday = 0;
-              
-              for (const entry of todayEntries) {
-                if (entry.items && entry.items.length > 0) {
-                  const entryCost = entry.items.reduce((sum, itemRef) => {
-                    const fi = allFoods.find(f => f.id === itemRef.foodId);
-                    if (!fi) return sum;
-                    const multiplier = itemRef.multiplier || 1.0;
-                    const baseCost = computeFoodPoints(fi);
-                    const cost = Math.round(baseCost * Math.sqrt(multiplier));
-                    return sum + cost;
-                  }, 0);
-                  totalSpentToday += entryCost;
-                }
-              }
-              
-              // Calculer le solde attendu : points du jour - dépenses
-              const expectedBalance = Math.max(0, Math.min(maxCapFromProfile, dailyPointsFromProfile - totalSpentToday));
-              
-              // Si le solde attendu est différent du solde actuel, corriger
-              if (expectedBalance !== balance) {
-                console.log('[Index] Correction automatique des points:', {
-                  dailyPoints: dailyPointsFromProfile,
-                  totalSpent: totalSpentToday,
-                  expectedBalance,
-                  currentBalance: balance,
-                });
-                balance = expectedBalance;
-                await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance, lastClaimDate: today }));
-                console.log('[Index] Solde corrigé automatiquement:', balance);
-              }
-            }
+            // Le recalcul se fera dans un useEffect séparé après le chargement des entrées
           }
           setPoints(balance);
           setLastClaimDate(today);
@@ -440,6 +411,129 @@ export default function App() {
     loadPoints();
   }, [userProfile, currentUserId, authLoading]); // Relancer quand le profil ou userId change
 
+  // Recalculer les points après chargement des entrées (pour corriger les incohérences)
+  useEffect(() => {
+    const recalculatePointsFromEntries = async () => {
+      console.log('[Recalc] Déclenchement recalcul - Conditions:', { 
+        userProfile: !!userProfile, 
+        currentUserId, 
+        isReady, 
+        entriesCount: entries.length 
+      });
+      
+      if (!userProfile || !currentUserId || currentUserId === 'guest' || !isReady) {
+        console.log('[Recalc] Conditions non remplies, skip');
+        return;
+      }
+
+      // Attendre un peu pour s'assurer que tout est chargé (synchronisation Firestore terminée)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const today = getTodayLocal();
+      const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
+
+      try {
+        // Charger les points actuels
+        const pointsKey = getPointsKey();
+        const pointsRaw = await AsyncStorage.getItem(pointsKey);
+        if (!pointsRaw) {
+          console.log('[Recalc] Pas de points trouvés');
+          return;
+        }
+        
+        const pointsData = JSON.parse(pointsRaw);
+        const currentBalance = pointsData.balance ?? 0;
+        const lastClaimDate = pointsData.lastClaimDate ?? '';
+
+        // Ne recalculer que si c'est aujourd'hui
+        if (lastClaimDate !== today) {
+          console.log('[Recalc] Pas aujourd\'hui, skip. lastClaimDate:', lastClaimDate, 'today:', today);
+          return;
+        }
+
+        // Charger les custom foods pour calculer les coûts
+        const customFoods = await loadCustomFoods(currentUserId);
+        const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+
+        // Filtrer les entrées d'aujourd'hui
+        const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
+        let totalSpentToday = 0;
+
+        console.log('[Recalc] Recalcul des points - Total entrées:', entries.length, 'Entrées d\'aujourd\'hui:', todayEntries.length);
+        console.log('[Recalc] Date aujourd\'hui:', today);
+        console.log('[Recalc] Dates des entrées:', entries.map(e => ({ 
+          label: e.label, 
+          createdAt: e.createdAt,
+          normalizedDate: normalizeDate(e.createdAt),
+          isToday: normalizeDate(e.createdAt) === today
+        })));
+        
+        if (todayEntries.length === 0) {
+          console.log('[Recalc] Aucune entrée d\'aujourd\'hui, pas de recalcul nécessaire');
+          return;
+        }
+
+        for (const entry of todayEntries) {
+          if (entry.items && entry.items.length > 0) {
+            const entryCost = entry.items.reduce((sum, itemRef) => {
+              const fi = allFoods.find(f => f.id === itemRef.foodId);
+              if (!fi) {
+                console.log('[Recalc] Aliment non trouvé:', itemRef.foodId);
+                return sum;
+              }
+              const multiplier = itemRef.multiplier || 1.0;
+              const baseCost = computeFoodPoints(fi);
+              const cost = Math.round(baseCost * Math.sqrt(multiplier));
+              console.log(`[Recalc] ${entry.label || 'Entrée'} - ${fi.name}: ${cost} pts`);
+              return sum + cost;
+            }, 0);
+            totalSpentToday += entryCost;
+          }
+        }
+
+        // Calculer le solde attendu : points du jour - dépenses
+        const expectedBalance = Math.max(0, dailyPointsFromProfile - totalSpentToday);
+
+        console.log('[Recalc] Recalcul des points:', {
+          dailyPoints: dailyPointsFromProfile,
+          totalSpent: totalSpentToday,
+          expectedBalance,
+          currentBalance,
+        });
+
+        // Si le solde attendu est différent du solde actuel, corriger
+        if (expectedBalance !== currentBalance) {
+          console.log('[Recalc] ✅ Correction automatique des points:', {
+            dailyPoints: dailyPointsFromProfile,
+            totalSpent: totalSpentToday,
+            expectedBalance,
+            currentBalance,
+          });
+
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: expectedBalance, lastClaimDate: today }));
+          setPoints(expectedBalance);
+          console.log('[Recalc] Points mis à jour localement:', expectedBalance);
+
+          // Synchroniser vers Firestore pour écraser l'ancienne valeur
+          if (currentUserId !== 'guest') {
+            const totalPointsKey = getTotalPointsKey();
+            const totalRaw = await AsyncStorage.getItem(totalPointsKey);
+            const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
+            console.log('[Recalc] Synchronisation vers Firestore...');
+            await syncPointsToFirestore(currentUserId, expectedBalance, today, totalPointsVal);
+            console.log('[Recalc] Points synchronisés vers Firestore avec succès');
+          }
+
+          console.log('[Recalc] ✅ Solde corrigé automatiquement:', expectedBalance, 'pts');
+        }
+      } catch (error) {
+        console.error('[Recalc] Erreur recalcul points:', error);
+      }
+    };
+
+    recalculatePointsFromEntries();
+  }, [entries, isReady, userProfile, currentUserId]); // Se déclenche après chargement des entrées
+
   // Charger les aliments personnalisés (depuis AsyncStorage + Firestore)
   const loadCustomFoodsData = async () => {
     if (!currentUserId || currentUserId === 'guest') {
@@ -450,6 +544,88 @@ export default function App() {
     const custom = await loadCustomFoods(currentUserId);
     setCustomFoods(custom);
   };
+
+  // Vérification et correction automatique des points au chargement initial seulement
+  // (Désactivé pour éviter les race conditions - la déduction se fait directement dans handleAddEntry)
+  // TODO: Réactiver avec une logique plus robuste si nécessaire
+  /*
+  useEffect(() => {
+    const verifyAndFixPoints = async () => {
+      if (!userProfile || !currentUserId || currentUserId === 'guest' || entries.length === 0 || !isReady) {
+        return;
+      }
+
+      const today = getTodayLocal();
+      const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
+
+      try {
+        // Charger les custom foods pour calculer les coûts
+        const customFoodsForCalc = await loadCustomFoods(currentUserId);
+        const allFoodsForCalc = mergeFoodsWithCustom(FOOD_DB, customFoodsForCalc);
+
+        // Filtrer les entrées d'aujourd'hui
+        const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
+        let totalSpentToday = 0;
+
+        console.log('[AutoFix] Vérification des points - Entrées d\'aujourd\'hui:', todayEntries.length);
+        
+        for (const entry of todayEntries) {
+          if (entry.items && entry.items.length > 0) {
+            const entryCost = entry.items.reduce((sum, itemRef) => {
+              const fi = allFoodsForCalc.find(f => f.id === itemRef.foodId);
+              if (!fi) {
+                console.log('[AutoFix] Aliment non trouvé:', itemRef.foodId);
+                return sum;
+              }
+              const multiplier = itemRef.multiplier || 1.0;
+              const baseCost = computeFoodPoints(fi);
+              const cost = Math.round(baseCost * Math.sqrt(multiplier));
+              console.log(`[AutoFix] ${entry.label || 'Entrée'} - ${fi.name}: ${cost} pts (base: ${baseCost}, mult: ${multiplier})`);
+              return sum + cost;
+            }, 0);
+            console.log(`[AutoFix] Coût total entrée "${entry.label || entry.id}": ${entryCost} pts`);
+            totalSpentToday += entryCost;
+          }
+        }
+
+        // Calculer le solde correct
+        const correctBalance = Math.max(0, dailyPointsFromProfile - totalSpentToday);
+
+        console.log('[AutoFix] Résumé:', {
+          dailyPoints: dailyPointsFromProfile,
+          totalSpent: totalSpentToday,
+          currentBalance: points,
+          correctBalance,
+          expectedCalculation: `${dailyPointsFromProfile} - ${totalSpentToday} = ${correctBalance}`,
+        });
+
+        // Si le solde actuel est différent du solde calculé, corriger silencieusement
+        if (correctBalance !== points && lastClaimDate === today) {
+          console.log('[AutoFix] ✅ Correction automatique des points:', {
+            dailyPoints: dailyPointsFromProfile,
+            totalSpent: totalSpentToday,
+            currentBalance: points,
+            correctBalance,
+          });
+
+          const pointsKey = getPointsKey();
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: correctBalance, lastClaimDate: today }));
+          setPoints(correctBalance);
+
+          // Synchroniser vers Firestore
+          const totalPointsKey = getTotalPointsKey();
+          const totalRaw = await AsyncStorage.getItem(totalPointsKey);
+          const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
+          await syncPointsToFirestore(currentUserId, correctBalance, today, totalPointsVal);
+        }
+      } catch (error) {
+        console.error('[AutoFix] Erreur vérification points:', error);
+      }
+    };
+
+    verifyAndFixPoints();
+  }, [entries, isReady, userProfile, currentUserId, points, lastClaimDate]);
+  */
 
   useEffect(() => {
     if (currentUserId) {
@@ -552,7 +728,13 @@ export default function App() {
           
           // Synchroniser les points avec Firestore
           if (currentUserId !== 'guest') {
+            console.log('[Index] Synchronisation points vers Firestore:', {
+              newBalance,
+              lastClaimDate: pointsData.lastClaimDate,
+              totalPointsEarned,
+            });
             await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
+            console.log('[Index] Points synchronisés vers Firestore avec succès');
           }
           
           await userLogger.info(
@@ -591,9 +773,11 @@ export default function App() {
       // Trouver l'entrée à supprimer
       const entryToDelete = entries.find(e => e.id === entryId);
       if (!entryToDelete) {
-        console.error('Entrée non trouvée:', entryId);
+        console.error('[Delete] Entrée non trouvée:', entryId);
         return;
       }
+      
+      console.log('[Delete] Suppression entrée:', entryToDelete.label, 'ID:', entryId);
 
       // Calculer le coût en points de cette entrée pour remboursement
       let refundPoints = 0;
@@ -637,6 +821,11 @@ export default function App() {
       const key = getEntriesKey();
       await AsyncStorage.setItem(key, JSON.stringify(updated));
       if (currentUserId !== 'guest') {
+        // Supprimer explicitement de Firestore
+        const { deleteMealEntryFromFirestore } = await import('../../lib/data-sync');
+        await deleteMealEntryFromFirestore(currentUserId, entryId);
+        // Synchroniser aussi pour être sûr que tout est à jour
+        const { syncAllToFirestore } = await import('../../lib/data-sync');
         await syncAllToFirestore(currentUserId);
       }
       
@@ -672,7 +861,7 @@ export default function App() {
     }
     
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getTodayLocal();
       const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
       const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
       
@@ -757,8 +946,6 @@ export default function App() {
           dragonState={dragonState}
           streak={streak}
           recommendations={smartRecommendations}
-          hungerAnalysis={hungerAnalysis}
-          timeOfDay={timeOfDay}
           todayTotals={todayTotals}
           targets={targets}
           onSaveTargets={async (next) => {
@@ -771,7 +958,6 @@ export default function App() {
           setPreselectedItem={setPreselectedItem}
           lastClaimDate={lastClaimDate}
           customFoods={customFoods}
-          fixPointsBalance={fixPointsBalance}
         />
       )}
 
@@ -822,7 +1008,6 @@ function HomeScreen({
   dragonState: DragonStatus;
   streak: ReturnType<typeof computeStreak>;
   recommendations: SmartRecommendation[];
-  hungerAnalysis: string;
   todayTotals: ReturnType<typeof computeDailyTotals>;
   targets: typeof DEFAULT_TARGETS;
   onSaveTargets: (next: typeof DEFAULT_TARGETS) => void | Promise<void>;
@@ -832,7 +1017,6 @@ function HomeScreen({
   setPreselectedItem: (item: { item: FoodItem; portion: PortionReference } | null) => void;
   lastClaimDate: string;
   customFoods: typeof FOOD_DB;
-  fixPointsBalance: () => Promise<void>;
 }) {
   // Calculer le coût en points d'une entrée
   const calculateEntryCost = (entry: MealEntry): number => {
@@ -914,6 +1098,7 @@ function HomeScreen({
   
   // Smart recommendations state
   const [showHungryMode, setShowHungryMode] = useState(false);
+  const [tastePreference, setTastePreference] = useState<'sweet' | 'salty' | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   // Get time of day for context-aware suggestions
@@ -925,8 +1110,11 @@ function HomeScreen({
   };
   
   const timeOfDay = getTimeOfDay();
+  
   const smartRecs = showHungryMode 
-    ? getSmartRecommendations(todayTotals, targets, points, timeOfDay)
+    ? (tastePreference 
+        ? getSmartRecommendationsByTaste(todayTotals, targets, points, tastePreference, timeOfDay)
+        : getSmartRecommendations(todayTotals, targets, points, timeOfDay))
     : [];
   const hungerAnalysis = getHungerAnalysis(todayTotals, targets, timeOfDay);
 
@@ -1047,19 +1235,10 @@ function HomeScreen({
                 Tu as utilisé tous tes points aujourd'hui. Tu recevras {dailyBudget} nouveaux points demain matin.
               </Text>
             )}
-            {points > 0 && lastClaimDate === new Date().toISOString().slice(0, 10) && (
+            {points > 0 && lastClaimDate === getTodayLocal() && (
               <Text style={styles.budgetHint}>
                 Reçu ce matin : {dailyBudget} pts
               </Text>
-            )}
-            {/* Bouton pour corriger les points si nécessaire */}
-            {points === 0 && entries.length > 0 && (
-              <TouchableOpacity 
-                style={styles.fixPointsButton}
-                onPress={() => fixPointsBalance()}
-              >
-                <Text style={styles.fixPointsButtonText}>🔧 Corriger mes points</Text>
-              </TouchableOpacity>
             )}
           </View>
 
@@ -1137,7 +1316,14 @@ function HomeScreen({
       {/* Bouton "J'ai faim" */}
       <TouchableOpacity 
         style={styles.hungryButton} 
-        onPress={() => setShowHungryMode(!showHungryMode)}
+        onPress={() => {
+          if (showHungryMode) {
+            setShowHungryMode(false);
+            setTastePreference(null); // Reset taste preference when closing
+          } else {
+            setShowHungryMode(true);
+          }
+        }}
       >
         <Text style={styles.hungryButtonText}>
           {showHungryMode ? '✕ Fermer' : '🍴 J\'ai faim - Aide-moi à choisir!'}
@@ -1161,19 +1347,62 @@ function HomeScreen({
             <Text style={styles.todaySummaryText}>
               • {todayTotals.carbs_g.toFixed(0)} / {targets.carbs_g.toFixed(0)}g glucides ({((todayTotals.carbs_g / targets.carbs_g) * 100).toFixed(0)}%)
             </Text>
+            <Text style={styles.todaySummaryText}>
+              • {todayTotals.fat_g.toFixed(0)} / {targets.fat_g.toFixed(0)}g lipides ({((todayTotals.fat_g / targets.fat_g) * 100).toFixed(0)}%)
+            </Text>
+            <Text style={styles.todaySummaryText}>
+              • Points restants : {points} pts
+            </Text>
           </View>
           
           {/* Analyse de la faim avec contexte temporel */}
           <Text style={styles.smartRecsAnalysis}>{hungerAnalysis}</Text>
           
-          {smartRecs.length === 0 ? (
+          {/* Choix du goût (sucré ou salé) */}
+          {!tastePreference ? (
+            <View style={styles.tasteChoiceBox}>
+              <Text style={styles.tasteChoiceTitle}>🍽️ Qu'est-ce qui te ferait plaisir ?</Text>
+              <View style={styles.tasteButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.tasteButton, styles.tasteButtonSweet]}
+                  onPress={() => setTastePreference('sweet')}
+                >
+                  <Text style={styles.tasteButtonText}>🍰 Sucré</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tasteButton, styles.tasteButtonSalty]}
+                  onPress={() => setTastePreference('salty')}
+                >
+                  <Text style={styles.tasteButtonText}>🍗 Salé</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.tasteSelectedBox}>
+              <Text style={styles.tasteSelectedText}>
+                {tastePreference === 'sweet' ? '🍰 Mode sucré' : '🍗 Mode salé'}
+              </Text>
+              <TouchableOpacity
+                style={styles.tasteChangeButton}
+                onPress={() => setTastePreference(null)}
+              >
+                <Text style={styles.tasteChangeButtonText}>Changer</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {!tastePreference ? (
+            <Text style={styles.smartRecsEmpty}>
+              Choisis d'abord si tu préfères sucré ou salé ! 👆
+            </Text>
+          ) : smartRecs.length === 0 ? (
             <Text style={styles.smartRecsEmpty}>
               Aucune suggestion pour l&apos;instant. Tu es peut-être proche de ton objectif! 🎯
             </Text>
           ) : (
             <>
               <Text style={styles.smartRecsSubtitle}>
-                💡 Recommandé pour toi ({timeOfDay === 'morning' ? 'matin' : timeOfDay === 'afternoon' ? 'après-midi' : 'soir'}):
+                💡 Recommandé pour toi ({tastePreference === 'sweet' ? 'sucré' : 'salé'}, {timeOfDay === 'morning' ? 'matin' : timeOfDay === 'afternoon' ? 'après-midi' : 'soir'}):
               </Text>
               {smartRecs.map((rec, idx) => (
                 <TouchableOpacity
@@ -1311,7 +1540,12 @@ function HomeScreen({
           <Text style={styles.historyEmpty}>{"Aucune entrée pour l'instant."}</Text>
         ) : (
           <FlatList
-            data={entries.slice(0, 5)}
+            data={(() => {
+              // Trier par date (plus récent en premier) et limiter à 10 pour ne pas surcharger l'interface
+              return entries
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                .slice(0, 10);
+            })()}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => {
               const entryCost = calculateEntryCost(item);
@@ -2745,6 +2979,74 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  tasteChoiceBox: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+  },
+  tasteChoiceTitle: {
+    color: '#92400e',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  tasteButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 12,
+  },
+  tasteButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  tasteButtonSweet: {
+    backgroundColor: '#fce7f3',
+    borderColor: '#ec4899',
+  },
+  tasteButtonSalty: {
+    backgroundColor: '#dbeafe',
+    borderColor: '#3b82f6',
+  },
+  tasteButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  tasteSelectedBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+  },
+  tasteSelectedText: {
+    color: '#92400e',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  tasteChangeButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#fbbf24',
+    borderRadius: 6,
+  },
+  tasteChangeButtonText: {
+    color: '#78350f',
+    fontSize: 12,
+    fontWeight: '600',
   },
   smartRecItem: {
     backgroundColor: 'white',

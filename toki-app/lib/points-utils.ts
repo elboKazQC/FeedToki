@@ -44,3 +44,6 @@ export function computeFoodPoints(fi: FoodItem): number {
 }
 
 
+
+
+

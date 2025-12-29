@@ -1,9 +1,8 @@
 // Context Provider pour l'authentification
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
-import { onAuthChange, getCurrentUser, getUserProfile, updateUserProfile, AuthUser } from '../lib/firebase-auth';
-import { UserProfile } from '../lib/types';
+import { onAuthChange, getCurrentUser, getUserProfile, updateUserProfile, AuthUser } from './firebase-auth';
+import { UserProfile } from './types';
 import { FIREBASE_ENABLED } from './firebase-config';
 import { getCurrentLocalUser, getLocalUserProfile, LocalUser, localSignOut } from './local-auth';
 import { migrateIncorrectWeights } from './migrate-profile';
@@ -103,7 +102,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 // Vérifier si les objectifs actuels sont les valeurs par défaut (100g protéines)
                 // Si oui, les mettre à jour avec les valeurs calculées
                 const targetsKey = `feedtoki_targets_${authUser.uid}_v1`;
-                const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
                 const currentTargetsRaw = await AsyncStorage.getItem(targetsKey);
                 
                 if (!currentTargetsRaw || currentTargetsRaw.includes('"protein_g":100')) {
@@ -183,25 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (!initialRoutingDone) {
               setInitialRoutingDone(true);
               
-              // Toujours vérifier le chemin actuel avant de rediriger
-              const currentPath = router.pathname || '';
-              
-              // Si on est déjà sur l'app principale, ne JAMAIS rediriger vers l'onboarding
-              if (currentPath.includes('(tabs)')) {
-                console.log('[AuthContext] Déjà sur l\'app principale, pas de redirection');
-                setLoading(false);
-                return;
-              }
-              
-              // Si on est déjà sur l'onboarding, ne pas rediriger
-              if (currentPath.includes('onboarding')) {
-                console.log('[AuthContext] Déjà sur l\'onboarding, pas de redirection');
-                setLoading(false);
-                return;
-              }
-              
-              // Ne pas naviguer directement depuis ici - laisser Expo Router gérer via les routes
-              // La navigation sera gérée par les composants qui utilisent useAuth()
+              // La navigation sera gérée par NavigationHandler dans _layout.tsx
               // On marque juste que le routing initial est fait pour éviter les redirections multiples
               console.log('[AuthContext] Profil chargé, routing initial marqué comme fait');
             }
@@ -209,13 +189,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
           } else {
             setProfile(null);
-            // Seulement rediriger vers auth si on n'y est pas déjà
+            // La navigation sera gérée par NavigationHandler dans _layout.tsx
             if (!initialRoutingDone) {
               setInitialRoutingDone(true);
-              const currentPath = router.pathname || '';
-              if (!currentPath.includes('auth')) {
-                router.replace('/auth');
-              }
             }
           }
           
@@ -231,11 +207,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(currentUser);
         
         if (currentUser) {
-          // Vérifier si l'email est vérifié
+          // Vérifier si l'email est vérifié - stocker l'info pour que index.tsx puisse rediriger
           if (!currentUser.emailVerified) {
-            console.log('[AuthContext] Email non vérifié, redirect to verify-email');
-            setInitialRoutingDone(true);
-            router.replace('/verify-email');
+            console.log('[AuthContext] Email non vérifié');
+            // Le profile sera null, index.tsx redirigera vers /auth
+            // On crée un profil temporaire pour indiquer qu'il faut vérifier l'email
+            setProfile({ emailVerified: false } as any);
             setLoading(false);
             return;
           }
@@ -243,41 +220,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userProfile = await getLocalUserProfile(currentUser.id);
           console.log('[AuthContext] initAuth - userProfile:', JSON.stringify(userProfile, null, 2));
           setProfile(userProfile);
-          
-          // Routing initial seulement si pas déjà fait
-          if (!initialRoutingDone) {
-            setInitialRoutingDone(true);
-            if (!userProfile || !userProfile.onboardingCompleted) {
-              console.log('[AuthContext] Routing to /onboarding');
-              router.replace('/onboarding');
-            } else {
-              console.log('[AuthContext] Routing to /(tabs)');
-              router.replace('/(tabs)');
-            }
-          }
+          // La navigation sera gérée par app/index.tsx
         } else {
           // Aucun compte local connecté
-          // Fallback: si un profil invité (v1) existe et est complété, démarrer directement l'app
+          // Fallback: si un profil invité (v1) existe et est complété, charger le profil
           const raw = await AsyncStorage.getItem('toki_user_profile_v1');
           if (raw) {
             const guestProfile = JSON.parse(raw);
+            console.log('[AuthContext] Guest profile found');
             setProfile(guestProfile);
-            if (!initialRoutingDone) {
-              setInitialRoutingDone(true);
-              if (!guestProfile.onboardingCompleted) {
-                console.log('[AuthContext] Guest profile found, routing to /onboarding');
-                router.replace('/onboarding');
-              } else {
-                console.log('[AuthContext] Guest profile found, routing to /(tabs)');
-                router.replace('/(tabs)');
-              }
-            }
           } else {
-            console.log('[AuthContext] No user, routing to /auth');
-            if (!initialRoutingDone) {
-              setInitialRoutingDone(true);
-              router.replace('/auth');
-            }
+            console.log('[AuthContext] No user found');
+            // profile reste null, index.tsx redirigera vers /auth
           }
         }
         
@@ -293,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setProfile(null);
     await localSignOut();
-    router.replace('/auth');
+    // La redirection sera gérée par app/index.tsx quand profile devient null
   };
 
   return (

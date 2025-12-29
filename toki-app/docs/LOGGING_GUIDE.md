@@ -124,3 +124,6 @@ Si les logs n'apparaissent pas dans Firestore :
 
 Les logs sont accessibles de la même manière via Firebase Console, peu importe la plateforme (web, iOS, Android).
 
+
+
+

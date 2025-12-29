@@ -35,3 +35,6 @@ Cette fonction **fusionne** intelligemment les données locales et Firestore :
 - Les données Firestore prennent **priorité** en cas de conflit (plus récent)
 - La synchronisation se fait automatiquement, pas besoin d'action manuelle
 
+
+
+

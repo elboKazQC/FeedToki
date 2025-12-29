@@ -143,3 +143,6 @@ Object.keys(await AsyncStorage.getAllKeys()).filter(k => k.includes('feedtoki'))
 3. **Backup :** Firebase fait des backups automatiques, mais tu peux exporter manuellement depuis Firebase Console
 4. **Migration :** Faire la migration une seule fois, puis toutes les nouvelles données vont automatiquement dans Firestore
 
+
+
+

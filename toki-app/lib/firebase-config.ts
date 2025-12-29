@@ -19,8 +19,8 @@ const firebaseConfig = {
 };
 
 let app: FirebaseApp | null = null;
-let auth: Auth | null = null;
-let db: Firestore | null = null;
+let authInstance: Auth | null = null;
+let dbInstance: Firestore | null = null;
 
 // Initialiser Firebase une seule fois (seulement si activé)
 if (FIREBASE_ENABLED) {
@@ -31,8 +31,8 @@ if (FIREBASE_ENABLED) {
       app = getApps()[0];
     }
 
-    auth = getAuth(app);
-    db = getFirestore(app);
+    authInstance = getAuth(app);
+    dbInstance = getFirestore(app);
     
     console.log('[Firebase] Initialisé avec succès');
   } catch (error: any) {
@@ -43,4 +43,7 @@ if (FIREBASE_ENABLED) {
   console.log('[Firebase] Désactivé - mode local');
 }
 
-export { app, auth, db };
+// Exporter avec des noms différents pour éviter les conflits
+export { app };
+export const auth = authInstance;
+export const db = dbInstance;

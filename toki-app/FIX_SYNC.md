@@ -35,3 +35,6 @@ Une fois le code déployé:
 2. Vérifie que les données apparaissent sur les deux
 3. Si ça ne fonctionne toujours pas, regarde les logs dans la console
 
+
+
+

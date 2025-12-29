@@ -11,6 +11,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
@@ -206,21 +207,23 @@ export default function AILoggerScreen() {
       }
 
       // 6. Retourner à l'écran principal avec succès
-      Alert.alert(
-        '✅ Repas enregistré!',
-        `${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`,
-        [{ 
-          text: 'OK', 
-          onPress: () => {
-            // Forcer un rechargement de la page pour mettre à jour les données
-            if (typeof window !== 'undefined') {
-              window.location.href = '/(tabs)';
-            } else {
+      // Sur le web, Alert.alert ne fonctionne pas, donc on redirige directement
+      if (typeof window !== 'undefined' && Platform.OS === 'web') {
+        // Sur le web, afficher un message puis rediriger
+        window.alert(`✅ Repas enregistré!\n${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`);
+        router.replace('/');
+      } else {
+        Alert.alert(
+          '✅ Repas enregistré!',
+          `${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`,
+          [{ 
+            text: 'OK', 
+            onPress: () => {
               router.replace('/(tabs)');
             }
-          }
-        }]
-      );
+          }]
+        );
+      }
     } catch (error: any) {
       console.error('[AI Logger] Erreur enregistrement:', error);
       Alert.alert(

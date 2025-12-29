@@ -64,3 +64,6 @@ firebase deploy --only hosting
 2. Vérifier que tu es connecté : `firebase login`
 3. Vérifier les erreurs dans la console pendant le build
 
+
+
+
