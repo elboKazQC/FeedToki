@@ -9,6 +9,7 @@ import { FIREBASE_ENABLED } from '../lib/firebase-config';
 
 import { useAuth } from '../lib/auth-context';
 import { updateUserProfile } from '../lib/firebase-auth';
+import { trackOnboardingCompleted } from '../lib/analytics';
 
 const PROFILE_KEY = 'toki_user_profile_v1';
 
@@ -124,6 +125,13 @@ export default function OnboardingScreen() {
       }
     }
 
+    // Tracker l'événement analytics
+    trackOnboardingCompleted({
+      weightGoal: goal,
+      weightKg: weightInKg,
+      activityLevel,
+    });
+    
     // Recharger le profil dans le contexte et attendre
     await refreshProfile();
     console.log('[Onboarding] refreshProfile done');

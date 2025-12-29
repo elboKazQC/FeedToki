@@ -77,6 +77,8 @@ export function computeStreak(dayFeeds: Record<string, DayFeed>): StreakStats {
       totalFedDays: 0,
       evolutionsUnlocked: 0,
       progressToNextEvolution: 0,
+      streakBonusEarned: 0,
+      isStreakBonusDay: false,
     };
   }
 

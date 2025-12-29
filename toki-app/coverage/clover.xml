@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1766981586317" clover="3.2.0">
+  <project timestamp="1766981586317" name="All files">
+    <metrics statements="152" coveredstatements="100" conditionals="131" coveredconditionals="56" methods="26" coveredmethods="16" elements="309" coveredelements="172" complexity="0" loc="152" ncloc="152" packages="1" files="2" classes="2"/>
+    <file name="ai-meal-parser.ts" path="C:\GitHub\FeedToki\toki-app\lib\ai-meal-parser.ts">
+      <metrics statements="125" coveredstatements="73" conditionals="114" coveredconditionals="42" methods="22" coveredmethods="12"/>
+      <line num="23" count="37" type="stmt"/>
+      <line num="24" count="37" type="stmt"/>
+      <line num="27" count="37" type="stmt"/>
+      <line num="33" count="37" type="stmt"/>
+      <line num="37" count="4" type="cond" truecount="1" falsecount="1"/>
+      <line num="42" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="47" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="52" count="1" type="stmt"/>
+      <line num="57" count="37" type="stmt"/>
+      <line num="58" count="131" type="stmt"/>
+      <line num="59" count="131" type="cond" truecount="2" falsecount="0"/>
+      <line num="60" count="8" type="stmt"/>
+      <line num="61" count="8" type="cond" truecount="3" falsecount="1"/>
+      <line num="62" count="8" type="stmt"/>
+      <line num="63" count="8" type="stmt"/>
+      <line num="72" count="29" type="stmt"/>
+      <line num="73" count="302" type="stmt"/>
+      <line num="74" count="302" type="cond" truecount="2" falsecount="0"/>
+      <line num="75" count="2" type="stmt"/>
+      <line num="83" count="27" type="stmt"/>
+      <line num="84" count="297" type="stmt"/>
+      <line num="85" count="297" type="cond" truecount="1" falsecount="1"/>
+      <line num="86" count="0" type="stmt"/>
+      <line num="93" count="27" type="stmt"/>
+      <line num="100" count="1" type="stmt"/>
+      <line num="103" count="35" type="cond" truecount="4" falsecount="0"/>
+      <line num="104" count="2" type="stmt"/>
+      <line num="110" count="33" type="stmt"/>
+      <line num="111" count="33" type="stmt"/>
+      <line num="112" count="33" type="stmt"/>
+      <line num="113" count="33" type="stmt"/>
+      <line num="116" count="33" type="stmt"/>
+      <line num="171" count="33" type="stmt"/>
+      <line num="176" count="0" type="stmt"/>
+      <line num="177" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="184" count="0" type="stmt"/>
+      <line num="185" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="192" count="0" type="stmt"/>
+      <line num="193" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="200" count="0" type="stmt"/>
+      <line num="201" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="208" count="0" type="stmt"/>
+      <line num="209" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="216" count="0" type="stmt"/>
+      <line num="217" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="225" count="3" type="stmt"/>
+      <line num="226" count="3" type="cond" truecount="1" falsecount="1"/>
+      <line num="227" count="3" type="stmt"/>
+      <line num="228" count="3" type="cond" truecount="1" falsecount="1"/>
+      <line num="231" count="0" type="stmt"/>
+      <line num="232" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="233" count="0" type="stmt"/>
+      <line num="234" count="0" type="stmt"/>
+      <line num="235" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="236" count="0" type="stmt"/>
+      <line num="240" count="0" type="stmt"/>
+      <line num="241" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="242" count="0" type="stmt"/>
+      <line num="243" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="245" count="0" type="stmt"/>
+      <line num="252" count="0" type="stmt"/>
+      <line num="253" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="254" count="0" type="stmt"/>
+      <line num="255" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="257" count="0" type="stmt"/>
+      <line num="258" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="259" count="0" type="stmt"/>
+      <line num="260" count="0" type="stmt"/>
+      <line num="261" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="262" count="0" type="stmt"/>
+      <line num="265" count="0" type="stmt"/>
+      <line num="266" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="267" count="0" type="stmt"/>
+      <line num="268" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="270" count="0" type="stmt"/>
+      <line num="277" count="1" type="stmt"/>
+      <line num="278" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="279" count="1" type="stmt"/>
+      <line num="280" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="282" count="0" type="stmt"/>
+      <line num="283" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="284" count="0" type="stmt"/>
+      <line num="285" count="0" type="stmt"/>
+      <line num="286" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="287" count="0" type="stmt"/>
+      <line num="290" count="0" type="stmt"/>
+      <line num="296" count="33" type="stmt"/>
+      <line num="297" count="33" type="stmt"/>
+      <line num="298" count="295" type="cond" truecount="2" falsecount="0"/>
+      <line num="299" count="3" type="cond" truecount="1" falsecount="1"/>
+      <line num="300" count="3" type="stmt"/>
+      <line num="306" count="3" type="stmt"/>
+      <line num="309" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="310" count="1" type="stmt"/>
+      <line num="316" count="32" type="cond" truecount="3" falsecount="1"/>
+      <line num="318" count="39" type="stmt"/>
+      <line num="320" count="32" type="cond" truecount="2" falsecount="0"/>
+      <line num="322" count="39" type="stmt"/>
+      <line num="323" count="39" type="stmt"/>
+      <line num="324" count="349" type="cond" truecount="2" falsecount="0"/>
+      <line num="325" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="326" count="1" type="stmt"/>
+      <line num="332" count="1" type="stmt"/>
+      <line num="333" count="1" type="stmt"/>
+      <line num="337" count="39" type="cond" truecount="2" falsecount="0"/>
+      <line num="339" count="38" type="stmt"/>
+      <line num="340" count="324" type="stmt"/>
+      <line num="341" count="750" type="stmt"/>
+      <line num="344" count="324" type="cond" truecount="2" falsecount="0"/>
+      <line num="346" count="37" type="stmt"/>
+      <line num="347" count="37" type="cond" truecount="1" falsecount="1"/>
+      <line num="348" count="37" type="stmt"/>
+      <line num="349" count="37" type="stmt"/>
+      <line num="355" count="37" type="stmt"/>
+      <line num="364" count="32" type="cond" truecount="2" falsecount="0"/>
+      <line num="365" count="1" type="stmt"/>
+      <line num="371" count="32" type="stmt"/>
+      <line num="375" count="0" type="stmt"/>
+      <line num="385" count="1" type="stmt"/>
+      <line num="389" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="391" count="0" type="stmt"/>
+      <line num="394" count="0" type="stmt"/>
+      <line num="415" count="0" type="stmt"/>
+      <line num="417" count="0" type="stmt"/>
+      <line num="428" count="1" type="stmt"/>
+    </file>
+    <file name="nutrition.ts" path="C:\GitHub\FeedToki\toki-app\lib\nutrition.ts">
+      <metrics statements="27" coveredstatements="27" conditionals="17" coveredconditionals="14" methods="4" coveredmethods="4"/>
+      <line num="1" count="1" type="stmt"/>
+      <line num="2" count="1" type="stmt"/>
+      <line num="18" count="1" type="stmt"/>
+      <line num="25" count="1" type="cond" truecount="1" falsecount="0"/>
+      <line num="26" count="11" type="stmt"/>
+      <line num="27" count="12" type="stmt"/>
+      <line num="30" count="11" type="stmt"/>
+      <line num="32" count="11" type="stmt"/>
+      <line num="33" count="11" type="stmt"/>
+      <line num="34" count="11" type="stmt"/>
+      <line num="35" count="11" type="stmt"/>
+      <line num="37" count="11" type="stmt"/>
+      <line num="38" count="11" type="cond" truecount="1" falsecount="1"/>
+      <line num="39" count="11" type="stmt"/>
+      <line num="40" count="1915" type="stmt"/>
+      <line num="41" count="11" type="cond" truecount="2" falsecount="0"/>
+      <line num="42" count="1" type="stmt"/>
+      <line num="43" count="1" type="stmt"/>
+      <line num="47" count="10" type="cond" truecount="2" falsecount="0"/>
+      <line num="49" count="10" type="cond" truecount="1" falsecount="1"/>
+      <line num="50" count="10" type="cond" truecount="2" falsecount="0"/>
+      <line num="51" count="10" type="cond" truecount="1" falsecount="1"/>
+      <line num="52" count="10" type="cond" truecount="2" falsecount="0"/>
+      <line num="56" count="11" type="stmt"/>
+      <line num="59" count="1" type="stmt"/>
+      <line num="60" count="13" type="cond" truecount="2" falsecount="0"/>
+      <line num="61" count="10" type="stmt"/>
+    </file>
+  </project>
+</coverage>

@@ -16,18 +16,18 @@ type DragonDisplayProps = {
 
 // Mapping des images dragon
 const DRAGON_IMAGES: Record<number, any> = {
-  1: require('../../assets/images/dragon/level-1.png'),
-  2: require('../../assets/images/dragon/level-2.png'),
-  3: require('../../assets/images/dragon/level-3.png'),
-  4: require('../../assets/images/dragon/level-4.png'),
-  5: require('../../assets/images/dragon/level-5.png'),
-  6: require('../../assets/images/dragon/level-6.png'),
-  7: require('../../assets/images/dragon/level-7.png'),
-  8: require('../../assets/images/dragon/level-8.png'),
-  9: require('../../assets/images/dragon/level-9.png'),
-  10: require('../../assets/images/dragon/level-10.png'),
-  11: require('../../assets/images/dragon/level-11.png'),
-  12: require('../../assets/images/dragon/level-12.png'),
+  1: require('../assets/images/dragon/level-1.png'),
+  2: require('../assets/images/dragon/level-2.png'),
+  3: require('../assets/images/dragon/level-3.png'),
+  4: require('../assets/images/dragon/level-4.png'),
+  5: require('../assets/images/dragon/level-5.png'),
+  6: require('../assets/images/dragon/level-6.png'),
+  7: require('../assets/images/dragon/level-7.png'),
+  8: require('../assets/images/dragon/level-8.png'),
+  9: require('../assets/images/dragon/level-9.png'),
+  10: require('../assets/images/dragon/level-10.png'),
+  11: require('../assets/images/dragon/level-11.png'),
+  12: require('../assets/images/dragon/level-12.png'),
 };
 
 /**
@@ -64,6 +64,13 @@ export function DragonDisplay({
     if (level.level > previousLevel) {
       // Nouveau niveau atteint!
       setShowLevelUpAnimation(true);
+      
+      // Tracker l'événement analytics
+      trackDragonEvolved({
+        level: level.level,
+        streakDays: streakDays,
+      });
+      
       if (onLevelUp) {
         onLevelUp(level.level);
       }

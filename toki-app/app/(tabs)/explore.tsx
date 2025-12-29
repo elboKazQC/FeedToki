@@ -155,6 +155,10 @@ export default function TabTwoScreen() {
           <Text style={styles.buttonText}>✏️ Modifier mes objectifs</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/help')}>
+          <Text style={styles.buttonText}>❓ Aide & FAQ</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.button} onPress={() => router.push('/food-request')}>
           <Text style={styles.buttonText}>🍽️ Demander un aliment</Text>
         </TouchableOpacity>

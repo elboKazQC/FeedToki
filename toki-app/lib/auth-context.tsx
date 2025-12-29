@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthChange, getCurrentUser, getUserProfile, updateUserProfile, AuthUser } from './firebase-auth';
 import { UserProfile } from './types';
 import { FIREBASE_ENABLED } from './firebase-config';
+import { setUserId as setAnalyticsUserId, setUserProps } from './analytics';
 import { getCurrentLocalUser, getLocalUserProfile, LocalUser, localSignOut } from './local-auth';
 import { migrateIncorrectWeights } from './migrate-profile';
 import { autoMigrateIfNeeded } from './migrate-to-firestore';
@@ -73,6 +74,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Mode Firebase
         const unsubscribe = onAuthChange(async (authUser) => {
           setUser(authUser);
+          
+          // Mettre à jour l'ID utilisateur pour analytics
+          if (authUser) {
+            setAnalyticsUserId(authUser.uid);
+            setUserProps({
+              email: authUser.email || null,
+            });
+          } else {
+            setAnalyticsUserId(null);
+          }
           
           if (authUser) {
             // Migration automatique des données locales vers Firestore

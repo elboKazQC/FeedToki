@@ -50,6 +50,7 @@ import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
 import { loadCustomFoods, mergeFoodsWithCustom } from '../../lib/custom-foods';
 import { userLogger, logError } from '../../lib/user-logger';
+import { trackMealLogged, trackStreakMilestone, trackTargetUpdated } from '../../lib/analytics';
 
 type StatsUI = {
   scorePct: number;
@@ -314,6 +315,16 @@ export default function App() {
   const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
   const streak = computeStreakWithCalories(dayFeeds, dayCaloriesMap);
   const todayTotals = computeDailyTotals(entries, new Date().toISOString(), customFoods);
+  
+  // Tracker les milestones de streak
+  useEffect(() => {
+    if (streak.isStreakBonusDay && streak.currentStreakDays > 0) {
+      trackStreakMilestone({
+        streakDays: streak.currentStreakDays,
+        milestoneType: 'monthly',
+      });
+    }
+  }, [streak.isStreakBonusDay, streak.currentStreakDays]);
   
   // Déterminer l'heure de la journée pour les recommandations intelligentes
   const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
@@ -714,11 +725,12 @@ export default function App() {
       }
       
       // Calculer et déduire les points si l'entrée a des items
+      let totalPoints = 0;
       if (entry.items && entry.items.length > 0) {
         const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
         const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
         
-        const totalPoints = entry.items.reduce((sum, itemRef) => {
+        totalPoints = entry.items.reduce((sum, itemRef) => {
           const fi = allFoods.find(f => f.id === itemRef.foodId);
           if (!fi) {
             console.warn(`[Index] Aliment non trouvé pour itemRef.foodId: ${itemRef.foodId}`);
@@ -732,6 +744,16 @@ export default function App() {
         }, 0);
         
         console.log(`[Index] Total points calculés pour entrée ${newEntry.id}: ${totalPoints} pts`);
+        
+        // Tracker l'événement analytics
+        trackMealLogged({
+          mealId: newEntry.id,
+          category: newEntry.category,
+          itemsCount: entry.items.length,
+          score: newEntry.score,
+          pointsCost: totalPoints,
+          hasAiParser: false, // Sera mis à jour si nécessaire
+        });
         
         if (totalPoints > 0) {
           const pointsKey = getPointsKey();
@@ -969,6 +991,12 @@ export default function App() {
           todayTotals={todayTotals}
           targets={targets}
           onSaveTargets={async (next) => {
+            // Tracker la mise à jour des objectifs
+            trackTargetUpdated({
+              targetType: 'nutrition',
+              oldValue: targets.calories_kcal,
+              newValue: next.calories_kcal,
+            });
             setTargets(next);
             await AsyncStorage.setItem(getTargetsKey(), JSON.stringify(next));
           }}
@@ -1176,6 +1204,20 @@ function HomeScreen({
               <View style={styles.settingsOptionContent}>
                 <Text style={styles.settingsOptionTitle}>Modifier mes objectifs</Text>
                 <Text style={styles.settingsOptionDesc}>Poids, objectif de perte, niveau d'activité</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.settingsOption}
+              onPress={() => {
+                setShowSettingsModal(false);
+                router.push('/help');
+              }}
+            >
+              <Text style={styles.settingsOptionIcon}>❓</Text>
+              <View style={styles.settingsOptionContent}>
+                <Text style={styles.settingsOptionTitle}>Aide & FAQ</Text>
+                <Text style={styles.settingsOptionDesc}>Réponses aux questions fréquentes</Text>
               </View>
             </TouchableOpacity>
 

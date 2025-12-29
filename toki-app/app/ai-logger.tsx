@@ -28,6 +28,7 @@ import { MealEntry } from '../lib/stats';
 import { classifyMealByItems } from '../lib/classifier';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { syncMealEntryToFirestore, syncPointsToFirestore } from '../lib/data-sync';
+import { trackAIParserUsed, trackMealLogged } from '../lib/analytics';
 
 type DetectedItem = {
   originalName: string;
@@ -62,10 +63,23 @@ export default function AILoggerScreen() {
       const parseResult = await parseMealDescription(description);
 
       if (parseResult.error || parseResult.items.length === 0) {
+        // Tracker échec du parser
+        trackAIParserUsed({
+          description,
+          itemsDetected: 0,
+          success: false,
+        });
         setError(parseResult.error || 'Aucun aliment détecté. Essayez de décrire plus précisément.');
         setIsProcessing(false);
         return;
       }
+      
+      // Tracker succès du parser
+      trackAIParserUsed({
+        description,
+        itemsDetected: parseResult.items.length,
+        success: true,
+      });
 
       // 2. Pour chaque item détecté, essayer de matcher avec la DB
       const items: DetectedItem[] = [];
@@ -172,6 +186,16 @@ export default function AILoggerScreen() {
         const cost = Math.round(baseCost * Math.sqrt(multiplier));
         return sum + cost;
       }, 0);
+      
+      // Tracker le repas logué avec IA
+      trackMealLogged({
+        mealId: newEntry.id,
+        category: classification.category,
+        itemsCount: items.length,
+        score: classification.score,
+        pointsCost: totalPoints,
+        hasAiParser: true,
+      });
       
       if (totalPoints > 0) {
         const pointsKey = `feedtoki_points_${currentUserId}_v2`;
