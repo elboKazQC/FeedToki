@@ -152,11 +152,6 @@ export default function App() {
   useEffect(() => {
     setIsClient(true);
   }, []);
-  
-  // États pour synchronisation manuelle
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [lastSyncResult, setLastSyncResult] = useState<{mealsMerged: number; pointsRestored: boolean} | null>(null);
 
   // IMPORTANT: Déclarer currentUserId AVANT les useEffect qui l'utilisent
   // Utiliser authUser.uid pour Firebase (pas authUser.id qui n'existe pas)
@@ -269,13 +264,6 @@ export default function App() {
             pointsRestored: syncResult.pointsRestored,
             targetsRestored: syncResult.targetsRestored,
             weightsMerged: syncResult.weightsMerged,
-          });
-          
-          // Sauvegarder le résultat de la sync
-          setLastSyncTime(new Date());
-          setLastSyncResult({
-            mealsMerged: syncResult.mealsMerged,
-            pointsRestored: syncResult.pointsRestored,
           });
           
           // FORCER le rechargement des entrées après la sync
@@ -1029,65 +1017,6 @@ export default function App() {
     }
   };
 
-  // Fonction pour forcer la synchronisation manuelle
-  const handleManualSync = async () => {
-    if (currentUserId === 'guest') {
-      Alert.alert(
-        'Non connecté',
-        'Vous devez être connecté pour synchroniser vos données.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    setIsSyncing(true);
-    try {
-      console.log('[Index] 🔄 Synchronisation manuelle démarrée...');
-      const { syncFromFirestore } = await import('../../lib/data-sync');
-      const syncResult = await syncFromFirestore(currentUserId);
-      
-      setLastSyncTime(new Date());
-      setLastSyncResult({
-        mealsMerged: syncResult.mealsMerged,
-        pointsRestored: syncResult.pointsRestored,
-      });
-      
-      // Recharger les entrées
-      const key = getEntriesKey();
-      const json = await AsyncStorage.getItem(key);
-      if (json) {
-        const parsed = JSON.parse(json);
-        if (Array.isArray(parsed)) {
-          setEntries(parsed);
-        }
-      }
-      
-      // Recharger les points
-      const pointsKey = getPointsKey();
-      const pointsRaw = await AsyncStorage.getItem(pointsKey);
-      if (pointsRaw) {
-        const pointsData = JSON.parse(pointsRaw);
-        setPoints(pointsData.balance || 0);
-        setLastClaimDate(pointsData.lastClaimDate || '');
-      }
-      
-      Alert.alert(
-        '✅ Synchronisation réussie',
-        `${syncResult.mealsMerged} repas synchronisés\nPoints: ${syncResult.pointsRestored ? 'mis à jour' : 'inchangés'}`,
-        [{ text: 'OK' }]
-      );
-    } catch (error) {
-      console.error('[Index] ❌ Erreur synchronisation manuelle:', error);
-      Alert.alert(
-        '❌ Erreur',
-        'Impossible de synchroniser. Vérifiez votre connexion internet.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-  
   // Fonction pour corriger les points après les changements du système
   const fixPointsBalance = async () => {
     if (!userProfile || !currentUserId) {
@@ -1657,52 +1586,6 @@ function HomeScreen({
           </TouchableOpacity>
         </View>
       )}
-      
-      {/* Bandeau de statut de synchronisation */}
-      <View style={[
-        styles.syncBanner,
-        currentUserId === 'guest' && styles.syncBannerGuest
-      ]}>
-        <View style={styles.syncBannerContent}>
-          {currentUserId === 'guest' ? (
-            <>
-              <Text style={styles.syncBannerIcon}>⚠️</Text>
-              <View style={styles.syncBannerTextContainer}>
-                <Text style={styles.syncBannerTitle}>Non connecté</Text>
-                <Text style={styles.syncBannerSubtitle}>
-                  Vos données ne sont pas synchronisées
-                </Text>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.syncBannerIcon}>✅</Text>
-              <View style={styles.syncBannerTextContainer}>
-                <Text style={styles.syncBannerTitle}>
-                  {authUser?.email || 'Connecté'}
-                </Text>
-                <Text style={styles.syncBannerSubtitle}>
-                  {lastSyncTime 
-                    ? `Sync: ${lastSyncResult?.mealsMerged || 0} repas · ${new Date(lastSyncTime).toLocaleTimeString()}`
-                    : 'En attente de synchronisation...'}
-                </Text>
-              </View>
-            </>
-          )}
-        </View>
-        <TouchableOpacity 
-          style={[
-            styles.syncBannerButton,
-            (isSyncing || currentUserId === 'guest') && styles.syncBannerButtonDisabled
-          ]}
-          onPress={handleManualSync}
-          disabled={isSyncing || currentUserId === 'guest'}
-        >
-          <Text style={styles.syncBannerButtonText}>
-            {isSyncing ? '⏳' : '🔄'}
-          </Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Dragon avec système de niveaux */}
       <DragonDisplay 
@@ -5252,59 +5135,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     marginLeft: 8,
-  },
-  syncBanner: {
-    backgroundColor: '#d1fae5',
-    borderRadius: 12,
-    padding: 12,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#86efac',
-  },
-  syncBannerGuest: {
-    backgroundColor: '#fee2e2',
-    borderColor: '#fca5a5',
-  },
-  syncBannerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  syncBannerIcon: {
-    fontSize: 24,
-  },
-  syncBannerTextContainer: {
-    flex: 1,
-  },
-  syncBannerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#065f46',
-    marginBottom: 2,
-  },
-  syncBannerSubtitle: {
-    fontSize: 11,
-    color: '#047857',
-  },
-  syncBannerButton: {
-    backgroundColor: '#10b981',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  syncBannerButtonDisabled: {
-    backgroundColor: '#9ca3af',
-    opacity: 0.5,
-  },
-  syncBannerButtonText: {
-    fontSize: 20,
   },
 });
 
