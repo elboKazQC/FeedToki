@@ -81,7 +81,7 @@ export default function AuthScreen() {
       setResendCooldown(30); // Cooldown de 30 secondes
       
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert('✅ Courriel envoyé !\n\nVérifiez votre boîte mail (et vos spams).');
+        window.alert('✅ Courriel envoyé !\n\n⚠️ IMPORTANT : Vérifiez votre dossier SPAM/COURRIER INDÉSIRABLE. L\'email s\'y trouve très probablement.');
       }
     } catch (error: any) {
       let errorMessage = 'Erreur lors de l\'envoi de l\'email';
@@ -145,7 +145,7 @@ export default function AuthScreen() {
           setLoading(false);
           
           // Email de vérification envoyé automatiquement par signUp
-          const message = `Un email de vérification a été envoyé à ${email}.\n\nVeuillez vérifier votre boîte mail (et vos spams) et cliquer sur le lien de vérification.\n\nVous pouvez continuer, mais certaines fonctionnalités (comme l'IA) nécessitent une vérification email.`;
+          const message = `Un email de vérification a été envoyé à ${email}.\n\n⚠️ IMPORTANT : L'email se trouve très probablement dans votre dossier SPAM/COURRIER INDÉSIRABLE.\n\nVeuillez aller le chercher et cliquer sur le lien de vérification. Vous pouvez continuer, mais certaines fonctionnalités (comme l'IA) nécessitent une vérification email.`;
           
           console.log('[Auth Screen] Affichage de l\'alerte de confirmation...');
           
@@ -279,6 +279,10 @@ export default function AuthScreen() {
             <Text style={styles.verificationText}>
               Un email de vérification a été envoyé à :{'\n'}
               <Text style={styles.verificationEmail}>{userEmail}</Text>
+              {'\n\n'}
+              <Text style={styles.spamWarning}>
+                🔍 IMPORTANT : L'email se trouve très probablement dans ton dossier SPAM/COURRIER INDÉSIRABLE. Va le chercher là-bas !
+              </Text>
             </Text>
             
             {resendSuccess && (
@@ -481,6 +485,13 @@ const styles = StyleSheet.create({
   verificationEmail: {
     fontWeight: '600',
     color: '#fbbf24',
+  },
+  spamWarning: {
+    color: '#fbbf24',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 12,
+    lineHeight: 20,
   },
   successBox: {
     backgroundColor: '#065f46',

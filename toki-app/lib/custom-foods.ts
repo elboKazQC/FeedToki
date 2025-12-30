@@ -20,7 +20,7 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
     const raw = await AsyncStorage.getItem(storageKey);
     const localFoods: FoodItem[] = raw ? JSON.parse(raw) : [];
     
-    console.log(`[Custom Foods] Chargés depuis AsyncStorage (${storageKey}):`, localFoods.length, 'aliments');
+    if (__DEV__) console.log(`[Custom Foods] Chargés depuis AsyncStorage (${storageKey}):`, localFoods.length, 'aliments');
     
     // Charger depuis Firestore (collection globale partagée)
     if (FIREBASE_ENABLED && db) {
@@ -41,7 +41,7 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
         }
         
         const mergedFoods = Array.from(foodMap.values());
-        console.log(`[Custom Foods] Après fusion:`, mergedFoods.length, 'aliments');
+        if (__DEV__) console.log(`[Custom Foods] Après fusion:`, mergedFoods.length, 'aliments');
         
         // Sauvegarder la version fusionnée dans AsyncStorage pour la prochaine fois
         if (mergedFoods.length > 0) {
@@ -90,7 +90,7 @@ export async function addCustomFood(food: FoodItem, userId?: string): Promise<vo
   const existing = await loadCustomFoods(userId);
   const updated = [...existing.filter(f => f.id !== food.id), food];
   
-  console.log(`[Custom Foods] Ajout de "${food.name}" (${food.id}), total:`, updated.length, 'aliments');
+  if (__DEV__) console.log(`[Custom Foods] Ajout de "${food.name}" (${food.id}), total:`, updated.length, 'aliments');
   
   // Sauvegarder dans AsyncStorage (cache local global)
   await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
@@ -103,7 +103,7 @@ export async function addCustomFood(food: FoodItem, userId?: string): Promise<vo
         ...food,
         createdAt: new Date().toISOString(), // Ajouter timestamp pour référence
       });
-      console.log(`[Custom Foods] Sauvegardé dans Firestore (globalFoods): ${food.id}`);
+      if (__DEV__) console.log(`[Custom Foods] Sauvegardé dans Firestore (globalFoods): ${food.id}`);
     } catch (error) {
       console.error('[Custom Foods] Erreur sauvegarde Firestore:', error);
       // Continue même si Firestore échoue

@@ -94,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { syncFromFirestore } = await import('./data-sync');
               const syncResult = await syncFromFirestore(authUser.uid);
               if (syncResult.mealsMerged > 0 || syncResult.pointsRestored || syncResult.targetsRestored || syncResult.weightsMerged > 0) {
-                console.log('[AuthContext] Données synchronisées depuis Firestore:', syncResult);
+                if (__DEV__) console.log('[AuthContext] Données synchronisées depuis Firestore:', syncResult);
                 // Les composants se rechargeront via leurs useEffect qui dépendent de currentUserId
               }
             } catch (error) {
@@ -194,7 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               
               // La navigation sera gérée par NavigationHandler dans _layout.tsx
               // On marque juste que le routing initial est fait pour éviter les redirections multiples
-              console.log('[AuthContext] Profil chargé, routing initial marqué comme fait');
+              if (__DEV__) console.log('[AuthContext] Profil chargé, routing initial marqué comme fait');
             }
             
             setLoading(false);

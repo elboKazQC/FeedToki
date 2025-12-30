@@ -157,9 +157,9 @@ export default function App() {
               const targetsKey = getTargetsKey();
               await AsyncStorage.setItem(targetsKey, JSON.stringify(calculatedTargets));
               await syncAllToFirestore(currentUserId);
-              console.log('[Index] Objectifs nutritionnels mis à jour:', calculatedTargets);
+              if (__DEV__) console.log('[Index] Objectifs nutritionnels mis à jour:', calculatedTargets);
             } catch (e) {
-              console.log('[Index] Erreur sauvegarde targets calculés:', e);
+              if (__DEV__) console.log('[Index] Erreur sauvegarde targets calculés:', e);
             }
           }
         } catch (e) {
@@ -172,10 +172,13 @@ export default function App() {
   
   // Log userId à chaque render pour debug
   useEffect(() => {
-    console.log('[Index] === USER DEBUG ===');
-    console.log('[Index] authUser:', JSON.stringify(authUser, null, 2));
-    console.log('[Index] authProfile?.userId:', authProfile?.userId);
-    console.log('[Index] currentUserId computed:', currentUserId);
+    // Debug logs seulement en développement
+    if (__DEV__) {
+      console.log('[Index] === USER DEBUG ===');
+      console.log('[Index] authUser:', JSON.stringify(authUser, null, 2));
+      console.log('[Index] authProfile?.userId:', authProfile?.userId);
+      console.log('[Index] currentUserId computed:', currentUserId);
+    }
   }, [authUser, authProfile, currentUserId]);
   
   const getEntriesKey = () => `feedtoki_entries_${currentUserId}_v1`;
@@ -188,9 +191,9 @@ export default function App() {
   
   useEffect(() => {
     // Si l'userId a changé ET que ce n'est pas la première fois (undefined → valeur initiale), réinitialiser
-    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId && currentUserId !== 'guest') {
-      console.log('[Index] ⚠️ Changement de compte détecté:', prevUserIdRef.current, '→', currentUserId);
-      console.log('[Index] Réinitialisation des données locales pour éviter mélange');
+      if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId && currentUserId !== 'guest') {
+      if (__DEV__) console.log('[Index] ⚠️ Changement de compte détecté:', prevUserIdRef.current, '→', currentUserId);
+      if (__DEV__) console.log('[Index] Réinitialisation des données locales pour éviter mélange');
       
       // Réinitialiser les états pour forcer le rechargement avec les bonnes données
       setEntries([]);
@@ -208,7 +211,7 @@ export default function App() {
   }, [currentUserId]);
   useEffect(() => {
     if (currentUserId && currentUserId !== 'guest') {
-      console.log('[Index] User changed, resetting data for:', currentUserId);
+      if (__DEV__) console.log('[Index] User changed, resetting data for:', currentUserId);
       // Reset pour forcer le rechargement des données du nouveau compte
       setEntries([]);
       setPoints(0);
@@ -222,7 +225,7 @@ export default function App() {
   useEffect(() => {
     // Attendre que le profil soit chargé
     if (authLoading || !currentUserId || currentUserId === 'guest') {
-      console.log('[Index] Waiting for user, currentUserId:', currentUserId);
+      if (__DEV__) console.log('[Index] Waiting for user, currentUserId:', currentUserId);
       return;
     }
     
@@ -232,19 +235,19 @@ export default function App() {
         try {
           const { syncFromFirestore } = await import('../../lib/data-sync');
           const syncResult = await syncFromFirestore(currentUserId);
-          console.log('[Index] Sync depuis Firestore terminée:', syncResult);
+          if (__DEV__) console.log('[Index] Sync depuis Firestore terminée:', syncResult);
         } catch (syncError) {
           console.warn('[Index] Erreur sync Firestore, utilisation locale:', syncError);
         }
         
         // Après synchronisation, charger depuis AsyncStorage (qui contient maintenant les données fusionnées)
         const key = getEntriesKey();
-        console.log('[Index] Loading entries for key:', key);
+        if (__DEV__) console.log('[Index] Loading entries for key:', key);
         const json = await AsyncStorage.getItem(key);
         if (json) {
           try {
             const parsed = JSON.parse(json);
-            console.log('[Index] Loaded entries count:', parsed?.length);
+            if (__DEV__) console.log('[Index] Loaded entries count:', parsed?.length);
             if (Array.isArray(parsed)) {
               const normalized: MealEntry[] = (parsed as any[]).map((e, idx) => {
                 // Validation et nettoyage de chaque entrée
@@ -274,7 +277,7 @@ export default function App() {
             setEntries([]);
           }
         } else {
-          console.log('[Index] No entries found for this user, starting fresh');
+          if (__DEV__) console.log('[Index] No entries found for this user, starting fresh');
           setEntries([]);
         }
       } catch (e) {
@@ -309,7 +312,7 @@ export default function App() {
     const loadTargets = async () => {
       try {
         const key = getTargetsKey();
-        console.log('[Index] Loading targets for key:', key);
+        if (__DEV__) console.log('[Index] Loading targets for key:', key);
         const raw = await AsyncStorage.getItem(key);
         if (raw) {
           const parsed = JSON.parse(raw);
@@ -408,7 +411,7 @@ export default function App() {
   useEffect(() => {
     const loadPoints = async () => {
       if (!userProfile || authLoading || !currentUserId) {
-        console.log('[Index] loadPoints waiting - userProfile:', !!userProfile, 'currentUserId:', currentUserId);
+        if (__DEV__) console.log('[Index] loadPoints waiting - userProfile:', !!userProfile, 'currentUserId:', currentUserId);
         return;
       }
       
@@ -419,7 +422,7 @@ export default function App() {
       try {
         const pointsKey = getPointsKey();
         const totalKey = getTotalPointsKey();
-        console.log('[Index] Loading points for keys:', pointsKey, totalKey);
+        if (__DEV__) console.log('[Index] Loading points for keys:', pointsKey, totalKey);
         
         const raw = await AsyncStorage.getItem(pointsKey);
         const totalRaw = await AsyncStorage.getItem(totalKey);
@@ -434,13 +437,13 @@ export default function App() {
           let balance = parsed.balance ?? 0;
           const last = parsed.lastClaimDate ?? '';
           
-          console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance);
+          if (__DEV__) console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance);
           
           if (last !== today) {
             // Nouveau jour : créditer les points quotidiens
             const oldBalance = balance;
             balance = Math.min(maxCapFromProfile, balance + dailyPointsFromProfile);
-            console.log('[Index] Nouveau jour ! Crédit de', dailyPointsFromProfile, 'pts. Ancien:', oldBalance, '→ Nouveau:', balance);
+            if (__DEV__) console.log('[Index] Nouveau jour ! Crédit de', dailyPointsFromProfile, 'pts. Ancien:', oldBalance, '→ Nouveau:', balance);
             
             await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance, lastClaimDate: today }));
             
@@ -450,16 +453,16 @@ export default function App() {
             setTotalPointsEarned(newTotal);
             await AsyncStorage.setItem(totalKey, JSON.stringify(newTotal));
           } else {
-            console.log('[Index] Points déjà crédités aujourd\'hui. Balance actuelle:', balance);
+            if (__DEV__) console.log('[Index] Points déjà crédités aujourd\'hui. Balance actuelle:', balance);
             // Le recalcul se fera dans un useEffect séparé après le chargement des entrées
           }
           setPoints(balance);
           setLastClaimDate(today);
         } else {
           // Premier jour : donner les points quotidiens au lieu de INITIAL_POINTS
-          console.log('[Index] No points found, initializing for user:', currentUserId);
+          if (__DEV__) console.log('[Index] No points found, initializing for user:', currentUserId);
           const initBalance = Math.min(maxCapFromProfile, dailyPointsFromProfile);
-          console.log('[Index] Initialisation avec', initBalance, 'pts (budget quotidien:', dailyPointsFromProfile, ', cap:', maxCapFromProfile, ')');
+          if (__DEV__) console.log('[Index] Initialisation avec', initBalance, 'pts (budget quotidien:', dailyPointsFromProfile, ', cap:', maxCapFromProfile, ')');
           
           await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: initBalance, lastClaimDate: today }));
           setPoints(initBalance);
@@ -479,7 +482,7 @@ export default function App() {
   // Recalculer les points après chargement des entrées (pour corriger les incohérences)
   useEffect(() => {
     const recalculatePointsFromEntries = async () => {
-      console.log('[Recalc] Déclenchement recalcul - Conditions:', { 
+      if (__DEV__) console.log('[Recalc] Déclenchement recalcul - Conditions:', { 
         userProfile: !!userProfile, 
         currentUserId, 
         isReady, 
@@ -487,7 +490,7 @@ export default function App() {
       });
       
       if (!userProfile || !currentUserId || currentUserId === 'guest' || !isReady) {
-        console.log('[Recalc] Conditions non remplies, skip');
+        if (__DEV__) console.log('[Recalc] Conditions non remplies, skip');
         return;
       }
 
@@ -502,7 +505,7 @@ export default function App() {
         const pointsKey = getPointsKey();
         const pointsRaw = await AsyncStorage.getItem(pointsKey);
         if (!pointsRaw) {
-          console.log('[Recalc] Pas de points trouvés');
+          if (__DEV__) console.log('[Recalc] Pas de points trouvés');
           return;
         }
         
@@ -512,7 +515,7 @@ export default function App() {
 
         // Ne recalculer que si c'est aujourd'hui
         if (lastClaimDate !== today) {
-          console.log('[Recalc] Pas aujourd\'hui, skip. lastClaimDate:', lastClaimDate, 'today:', today);
+          if (__DEV__) console.log('[Recalc] Pas aujourd\'hui, skip. lastClaimDate:', lastClaimDate, 'today:', today);
           return;
         }
 
@@ -524,17 +527,19 @@ export default function App() {
         const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
         let totalSpentToday = 0;
 
-        console.log('[Recalc] Recalcul des points - Total entrées:', entries.length, 'Entrées d\'aujourd\'hui:', todayEntries.length);
-        console.log('[Recalc] Date aujourd\'hui:', today);
-        console.log('[Recalc] Dates des entrées:', entries.map(e => ({ 
-          label: e.label, 
-          createdAt: e.createdAt,
-          normalizedDate: normalizeDate(e.createdAt),
-          isToday: normalizeDate(e.createdAt) === today
-        })));
+        if (__DEV__) {
+          console.log('[Recalc] Recalcul des points - Total entrées:', entries.length, 'Entrées d\'aujourd\'hui:', todayEntries.length);
+          console.log('[Recalc] Date aujourd\'hui:', today);
+          console.log('[Recalc] Dates des entrées:', entries.map(e => ({ 
+            label: e.label, 
+            createdAt: e.createdAt,
+            normalizedDate: normalizeDate(e.createdAt),
+            isToday: normalizeDate(e.createdAt) === today
+          })));
+        }
         
         if (todayEntries.length === 0) {
-          console.log('[Recalc] Aucune entrée d\'aujourd\'hui, pas de recalcul nécessaire');
+          if (__DEV__) console.log('[Recalc] Aucune entrée d\'aujourd\'hui, pas de recalcul nécessaire');
           return;
         }
 
@@ -543,13 +548,13 @@ export default function App() {
             const entryCost = entry.items.reduce((sum, itemRef) => {
               const fi = allFoods.find(f => f.id === itemRef.foodId);
               if (!fi) {
-                console.log('[Recalc] Aliment non trouvé:', itemRef.foodId);
+                if (__DEV__) console.log('[Recalc] Aliment non trouvé:', itemRef.foodId);
                 return sum;
               }
               const multiplier = itemRef.multiplier || 1.0;
               const baseCost = computeFoodPoints(fi);
               const cost = Math.round(baseCost * Math.sqrt(multiplier));
-              console.log(`[Recalc] ${entry.label || 'Entrée'} - ${fi.name}: ${cost} pts`);
+              if (__DEV__) console.log(`[Recalc] ${entry.label || 'Entrée'} - ${fi.name}: ${cost} pts`);
               return sum + cost;
             }, 0);
             totalSpentToday += entryCost;
@@ -559,37 +564,41 @@ export default function App() {
         // Calculer le solde attendu : points du jour - dépenses
         const expectedBalance = Math.max(0, dailyPointsFromProfile - totalSpentToday);
 
-        console.log('[Recalc] Recalcul des points:', {
-          dailyPoints: dailyPointsFromProfile,
-          totalSpent: totalSpentToday,
-          expectedBalance,
-          currentBalance,
-        });
-
-        // Si le solde attendu est différent du solde actuel, corriger
-        if (expectedBalance !== currentBalance) {
-          console.log('[Recalc] ✅ Correction automatique des points:', {
+        if (__DEV__) {
+          console.log('[Recalc] Recalcul des points:', {
             dailyPoints: dailyPointsFromProfile,
             totalSpent: totalSpentToday,
             expectedBalance,
             currentBalance,
           });
+        }
+
+        // Si le solde attendu est différent du solde actuel, corriger
+        if (expectedBalance !== currentBalance) {
+          if (__DEV__) {
+            console.log('[Recalc] ✅ Correction automatique des points:', {
+              dailyPoints: dailyPointsFromProfile,
+              totalSpent: totalSpentToday,
+              expectedBalance,
+              currentBalance,
+            });
+          }
 
           await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: expectedBalance, lastClaimDate: today }));
           setPoints(expectedBalance);
-          console.log('[Recalc] Points mis à jour localement:', expectedBalance);
+          if (__DEV__) console.log('[Recalc] Points mis à jour localement:', expectedBalance);
 
           // Synchroniser vers Firestore pour écraser l'ancienne valeur
           if (currentUserId !== 'guest') {
             const totalPointsKey = getTotalPointsKey();
             const totalRaw = await AsyncStorage.getItem(totalPointsKey);
             const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
-            console.log('[Recalc] Synchronisation vers Firestore...');
+            if (__DEV__) console.log('[Recalc] Synchronisation vers Firestore...');
             await syncPointsToFirestore(currentUserId, expectedBalance, today, totalPointsVal);
-            console.log('[Recalc] Points synchronisés vers Firestore avec succès');
+            if (__DEV__) console.log('[Recalc] Points synchronisés vers Firestore avec succès');
           }
 
-          console.log('[Recalc] ✅ Solde corrigé automatiquement:', expectedBalance, 'pts');
+          if (__DEV__) console.log('[Recalc] ✅ Solde corrigé automatiquement:', expectedBalance, 'pts');
         }
       } catch (error) {
         console.error('[Recalc] Erreur recalcul points:', error);
@@ -715,7 +724,7 @@ export default function App() {
       }
       try {
         const key = getEntriesKey();
-        console.log('[Index] Saving entries to key:', key, 'count:', entries.length);
+        if (__DEV__) console.log('[Index] Saving entries to key:', key, 'count:', entries.length);
         await AsyncStorage.setItem(key, JSON.stringify(entries));
         
         // Sync vers Firestore en arrière-plan
