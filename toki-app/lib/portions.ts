@@ -1,5 +1,7 @@
 // Portion sizes with visual references for easy estimation
 
+import type { FoodItem } from './food-db';
+
 export type PortionSize = 'small' | 'medium' | 'large' | 'custom';
 
 export type PortionReference = {
@@ -74,4 +76,45 @@ export function getDefaultPortion(tags: string[]): PortionReference {
  */
 export function formatPortionLabel(portion: PortionReference): string {
   return `${portion.label} · ${portion.grams}g · ${portion.visualRef}`;
+}
+
+/**
+ * Déterminer l'unité appropriée (g ou ml) pour un aliment
+ * Retourne 'ml' pour les liquides, 'g' pour les solides
+ */
+export function getUnitForFood(item: FoodItem): 'g' | 'ml' {
+  const lowerName = item.name.toLowerCase();
+  
+  // Vérifier les tags
+  if (item.tags.includes('alcool')) {
+    return 'ml';
+  }
+  
+  // Vérifier les mots-clés dans le nom
+  const liquidKeywords = ['boisson', 'soda', 'bière', 'jus', 'eau', 'cocktail', 'shake', 'lait', 'liqueur', 'vin', 'champagne'];
+  if (liquidKeywords.some(keyword => lowerName.includes(keyword))) {
+    return 'ml';
+  }
+  
+  // Par défaut, utiliser grammes
+  return 'g';
+}
+
+/**
+ * Créer une portion personnalisée avec quantité en grammes ou millilitres
+ */
+export function createCustomPortion(
+  grams: number,
+  mediumPortion: PortionReference,
+  unit: 'g' | 'ml'
+): PortionReference {
+  const multiplier = grams / mediumPortion.grams;
+  
+  return {
+    size: 'custom',
+    label: 'Personnalisée',
+    grams: grams,
+    visualRef: `${grams}${unit}`,
+    multiplier: multiplier,
+  };
 }

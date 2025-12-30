@@ -178,13 +178,6 @@ export default function TabTwoScreen() {
             fullWidth
           />
 
-          <Button
-            label="🍽️ Demander un aliment"
-            variant="secondary"
-            size="medium"
-            onPress={() => router.push('/food-request')}
-            fullWidth
-          />
 
           <Button
             label="📋 Voir les demandes (Admin)"

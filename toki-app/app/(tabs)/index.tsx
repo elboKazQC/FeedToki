@@ -41,7 +41,7 @@ import { getSmartRecommendations, getSmartRecommendationsByTaste, getHungerAnaly
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
-import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference, PortionSize } from '../../lib/portions';
+import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference, PortionSize, getUnitForFood, createCustomPortion } from '../../lib/portions';
 import { DragonSprite } from '../../components/dragon-sprite';
 import { DragonDisplay } from '../../components/dragon-display';
 import { getLevelUpMessage } from '../../lib/dragon-levels';
@@ -1011,6 +1011,97 @@ export default function App() {
     }
   };
 
+  // Helper pour calculer le coût en points d'une entrée
+  const calculateEntryCost = async (entry: MealEntry): Promise<number> => {
+    if (!entry.items || entry.items.length === 0) return 0;
+    
+    const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+    const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+    
+    return entry.items.reduce((sum, itemRef) => {
+      const fi = allFoods.find(f => f.id === itemRef.foodId);
+      if (!fi) return sum;
+      const multiplier = itemRef.multiplier || 1.0;
+      const baseCost = computeFoodPoints(fi);
+      const cost = Math.round(baseCost * Math.sqrt(multiplier));
+      return sum + cost;
+    }, 0);
+  };
+
+  const handleUpdateEntry = async (entryId: string, updatedEntry: MealEntry) => {
+    try {
+      // Trouver l'ancienne entrée
+      const oldEntry = entries.find(e => e.id === entryId);
+      if (!oldEntry) {
+        console.error('[Update] Entrée non trouvée:', entryId);
+        return;
+      }
+
+      // Calculer l'ancien coût
+      const oldCost = await calculateEntryCost(oldEntry);
+      
+      // Re-classer le repas avec les items mis à jour
+      const classification = classifyMealByItems(updatedEntry.items || []);
+      const finalEntry: MealEntry = {
+        ...updatedEntry,
+        id: entryId,
+        category: classification.category,
+        score: classification.score,
+        createdAt: oldEntry.createdAt, // Garder la date originale
+      };
+      
+      // Calculer le nouveau coût
+      const newCost = await calculateEntryCost(finalEntry);
+      
+      // Mettre à jour l'entrée dans le state
+      const updatedEntries = entries.map(e => e.id === entryId ? finalEntry : e);
+      setEntries(updatedEntries);
+      
+      // Sauvegarder dans AsyncStorage
+      const entriesKey = getEntriesKey();
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(updatedEntries));
+      
+      // Ajuster les points (différence entre ancien et nouveau coût)
+      const pointsDifference = newCost - oldCost;
+      if (pointsDifference !== 0) {
+        const pointsKey = getPointsKey();
+        const pointsRaw = await AsyncStorage.getItem(pointsKey);
+        const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+        const newBalance = Math.max(0, pointsData.balance - pointsDifference);
+        
+        await AsyncStorage.setItem(pointsKey, JSON.stringify({
+          ...pointsData,
+          balance: newBalance,
+        }));
+        
+        setPoints(newBalance);
+        
+        // Synchroniser les points avec Firestore
+        if (currentUserId !== 'guest') {
+          await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
+        }
+        
+        console.log(`[Update] Points ajustés: ${pointsDifference > 0 ? '-' : '+'}${Math.abs(pointsDifference)} pts (ancien: ${oldCost}, nouveau: ${newCost}, nouveau solde: ${newBalance})`);
+      }
+      
+      // Synchroniser avec Firestore
+      if (currentUserId !== 'guest') {
+        await syncMealEntryToFirestore(currentUserId, finalEntry);
+      }
+      
+      await userLogger.info(
+        currentUserId,
+        `Entrée mise à jour: ${finalEntry.label}`,
+        'update-entry',
+        { entryId: finalEntry.id, oldCost, newCost, category: finalEntry.category }
+      );
+    } catch (error) {
+      await logError(currentUserId, error, 'update-entry', { entryId, updatedEntry });
+      console.error('[Update] Erreur lors de la mise à jour d\'entrée:', error);
+      Alert.alert('Erreur', 'Impossible de mettre à jour l\'entrée. Réessayez plus tard.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       {screen === 'home' && (
@@ -1018,6 +1109,7 @@ export default function App() {
           entries={entries}
           onPressAdd={() => setScreen('add')}
           onDeleteEntry={handleDeleteEntry}
+          onUpdateEntry={handleUpdateEntry}
           stats={stats}
           dragonState={dragonState}
           streak={streak}
@@ -1114,6 +1206,7 @@ function HomeScreen({
   entries,
   onPressAdd,
   onDeleteEntry,
+  onUpdateEntry,
   stats,
   dragonState,
   streak,
@@ -1133,6 +1226,7 @@ function HomeScreen({
   entries: MealEntry[];
   onPressAdd: () => void;
   onDeleteEntry: (entryId: string) => void | Promise<void>;
+  onUpdateEntry: (entryId: string, updatedEntry: MealEntry) => Promise<void>;
   stats: StatsUI;
   dragonState: DragonStatus;
   streak: ReturnType<typeof computeStreak>;
@@ -1149,6 +1243,27 @@ function HomeScreen({
   customFoods: typeof FOOD_DB;
   dayCaloriesMap: Record<string, number>;
 }) {
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<{ entryId: string; itemIndex: number; itemRef: FoodItemRef; foodItem: FoodItem } | null>(null);
+
+  // Fusionner FOOD_DB avec les aliments personnalisés
+  const allFoods = useMemo(() => {
+    return mergeFoodsWithCustom(FOOD_DB, customFoods);
+  }, [customFoods]);
+
+  // Helper pour calculer le coût en points d'une entrée (pour l'affichage)
+  const calculateEntryCostDisplay = (entry: MealEntry): number => {
+    if (!entry.items || entry.items.length === 0) return 0;
+    
+    return entry.items.reduce((sum, itemRef) => {
+      const fi = allFoods.find(f => f.id === itemRef.foodId);
+      if (!fi) return sum;
+      const multiplier = itemRef.multiplier || 1.0;
+      const baseCost = computeFoodPoints(fi);
+      const cost = Math.round(baseCost * Math.sqrt(multiplier));
+      return sum + cost;
+    }, 0);
+  };
   // Calculer le coût en points d'une entrée
   const calculateEntryCost = (entry: MealEntry): number => {
     if (!entry.items || entry.items.length === 0) return 0;
@@ -1731,7 +1846,7 @@ function HomeScreen({
             })()}
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => {
-              const entryCost = calculateEntryCost(item);
+              const entryCost = calculateEntryCostDisplay(item);
               const entryDate = normalizeDate(item.createdAt);
               const today = getTodayLocal();
               const todayDate = new Date();
@@ -1741,6 +1856,7 @@ function HomeScreen({
               
               const isToday = entryDate === today;
               const isYesterday = entryDate === yesterday;
+              const isExpanded = expandedEntryId === item.id;
               
               // Calculer les totaux nutritionnels pour cette entrée
               const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
@@ -1817,8 +1933,57 @@ function HomeScreen({
                       -{entryCost} pts
                     </Text>
                   )}
+                  
+                  {/* Items détaillés (si expanded et aujourd'hui) */}
+                  {isToday && isExpanded && item.items && item.items.length > 0 && (
+                    <View style={styles.historyItemsDetail}>
+                      {item.items.map((itemRef, itemIdx) => {
+                        const fi = allFoods.find(f => f.id === itemRef.foodId);
+                        if (!fi) return null;
+                        const multiplier = itemRef.multiplier || 1.0;
+                        const itemCalories = Math.round((fi.calories_kcal || 0) * multiplier);
+                        const itemProtein = Math.round((fi.protein_g || 0) * multiplier);
+                        const unit = getUnitForFood(fi);
+                        const quantityDisplay = itemRef.quantityHint || 
+                          (itemRef.portionGrams ? `${itemRef.portionGrams}${unit}` : '1 portion');
+                        
+                        return (
+                          <View key={`${itemRef.foodId}-${itemIdx}`} style={styles.historyItemDetailRow}>
+                            <View style={styles.historyItemDetailInfo}>
+                              <Text style={styles.historyItemDetailName}>{fi.name}</Text>
+                              <Text style={styles.historyItemDetailQuantity}>{quantityDisplay}</Text>
+                              <Text style={styles.historyItemDetailNutrition}>
+                                🔥 {itemCalories} cal · 💪 {itemProtein}g prot
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.historyItemEditButton}
+                              onPress={() => {
+                                setEditingItem({
+                                  entryId: item.id,
+                                  itemIndex: itemIdx,
+                                  itemRef: itemRef,
+                                  foodItem: fi,
+                                });
+                              }}
+                            >
+                              <Text style={styles.historyItemEditText}>✏️</Text>
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
                 </View>
                 <View style={styles.historyItemActions}>
+                  {isToday && item.items && item.items.length > 0 && (
+                    <TouchableOpacity
+                      style={styles.historyExpandButton}
+                      onPress={() => setExpandedEntryId(isExpanded ? null : item.id)}
+                    >
+                      <Text style={styles.historyExpandText}>{isExpanded ? '▼' : '▶'}</Text>
+                    </TouchableOpacity>
+                  )}
                   {!isToday && item.items && item.items.length > 0 && (
                     <TouchableOpacity
                       style={styles.historyReuseButton}
@@ -1862,6 +2027,33 @@ function HomeScreen({
             }}
           />
         )}
+
+      {/* Modal d'édition d'item */}
+      {editingItem && (() => {
+        const entry = entries.find(e => e.id === editingItem.entryId);
+        if (!entry) return null;
+        
+        return <EditItemModal
+          editingItem={editingItem}
+          entry={entry}
+          onUpdate={(updatedItems) => {
+            const updatedEntry: MealEntry = {
+              ...entry,
+              items: updatedItems,
+            };
+            onUpdateEntry(editingItem.entryId, updatedEntry);
+            setEditingItem(null);
+          }}
+          onCancel={() => setEditingItem(null)}
+          allFoods={allFoods}
+          getUnitForFood={getUnitForFood}
+          createCustomPortion={createCustomPortion}
+          getDefaultPortion={getDefaultPortion}
+          getPortionsForItem={getPortionsForItem}
+          formatPortionLabel={formatPortionLabel}
+          computeFoodPoints={computeFoodPoints}
+        />;
+      })()}
       </View>
     </ScrollView>
   );
@@ -1898,6 +2090,7 @@ function AddEntryScreen({
   const [items, setItems] = useState<FoodItemRef[]>([]);
   const [quickFilter, setQuickFilter] = useState<CategoryFilter>('all');
   const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null); // Item ID pour modal portion
+  const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; onConfirm: (grams: number) => void } | null>(null);
 
   // Fusionner FOOD_DB avec les aliments personnalisés (doit être défini avant tout usage)
   const allFoods = useMemo(() => {
@@ -1932,17 +2125,23 @@ function AddEntryScreen({
   }, 0);
 
   const toggleItem = (foodId: string) => {
-    setItems((prev) => {
-      const exists = prev.some((i) => i.foodId === foodId);
-      if (exists) return prev.filter((i) => i.foodId !== foodId);
-      
-      // Ouvrir le sélecteur de portion au lieu d'ajouter directement
-      const fi = allFoods.find((f) => f.id === foodId);
-      if (!fi) return prev;
-      
-      setSelectedItemForPortion(foodId);
-      return prev; // Ne pas ajouter tout de suite
-    });
+    console.log('[AddEntry] toggleItem appelé avec foodId:', foodId);
+    const fi = allFoods.find((f) => f.id === foodId);
+    if (!fi) {
+      console.error('[AddEntry] Aliment non trouvé:', foodId);
+      return;
+    }
+    
+    const exists = items.some((i) => i.foodId === foodId);
+    if (exists) {
+      console.log('[AddEntry] Aliment déjà sélectionné, suppression');
+      setItems((prev) => prev.filter((i) => i.foodId !== foodId));
+      return;
+    }
+    
+    // Ouvrir le sélecteur de portion au lieu d'ajouter directement
+    console.log('[AddEntry] Ouverture du modal de portion pour:', fi.name);
+    setSelectedItemForPortion(foodId);
   };
   
   const addItemWithPortion = (foodId: string, portion: PortionReference) => {
@@ -1954,6 +2153,12 @@ function AddEntryScreen({
     
     if (pendingCost + cost > points) return; // Pas assez de points
     
+    // Formater quantityHint différemment pour les portions custom
+    const unit = getUnitForFood(fi);
+    const quantityHint = portion.size === 'custom' 
+      ? `${portion.grams}${unit}`
+      : `${portion.grams}g (${portion.visualRef})`;
+    
     setItems((prev) => [
       ...prev,
       {
@@ -1961,10 +2166,19 @@ function AddEntryScreen({
         portionSize: portion.size,
         portionGrams: portion.grams,
         multiplier: portion.multiplier,
-        quantityHint: `${portion.grams}g (${portion.visualRef})`,
+        quantityHint: quantityHint,
       },
     ]);
     setSelectedItemForPortion(null);
+  };
+
+  const addItemWithCustomPortion = (foodId: string, grams: number, unit: 'g' | 'ml') => {
+    const fi = allFoods.find((f) => f.id === foodId);
+    if (!fi) return;
+    
+    const mediumPortion = getDefaultPortion(fi.tags);
+    const customPortion = createCustomPortion(grams, mediumPortion, unit);
+    addItemWithPortion(foodId, customPortion);
   };
 
   // Auto-ajouter l'item pré-sélectionné depuis les recommandations
@@ -2017,6 +2231,26 @@ function AddEntryScreen({
     return matchesCategory && matchesSearch;
   });
 
+  // Filtrer les aliments individuels pour la liste
+  const filteredFoods = useMemo(() => {
+    const filtered = allFoods.filter((food) => {
+      // Filtrer par recherche
+      const matchesSearch = !searchLower || food.name.toLowerCase().includes(searchLower);
+      if (!matchesSearch) return false;
+      
+      // Filtrer par catégorie basée sur baseScore
+      if (quickFilter === 'all') return true;
+      const score = food.baseScore ?? 50;
+      let category: 'sain' | 'ok' | 'cheat' = 'sain';
+      if (score < 40) category = 'cheat';
+      else if (score < 70) category = 'ok';
+      
+      return category === quickFilter;
+    });
+    console.log('[AddEntry] Aliments filtrés:', filtered.length, 'sur', allFoods.length, 'recherche:', searchLower, 'filtre:', quickFilter);
+    return filtered;
+  }, [allFoods, searchLower, quickFilter]);
+
   const handleSave = async () => {
     // Toujours exiger des items - le label est généré automatiquement
     if (items.length === 0) {
@@ -2037,33 +2271,83 @@ function AddEntryScreen({
     onSave({ label: finalLabel, category: classification.category, score: classification.score, items });
   };
 
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+
   return (
     <ScrollView style={styles.inner} contentContainerStyle={styles.innerContent}>
       <Text style={styles.logo}>Partager avec Toki</Text>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Rechercher un aliment..."
-        placeholderTextColor="#6b7280"
-        value={label}
-        onChangeText={setLabel}
-      />
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Rechercher un aliment..."
+          placeholderTextColor="#6b7280"
+          value={label}
+          onChangeText={(text) => {
+            setLabel(text);
+            setShowAutocomplete(text.length > 0);
+          }}
+          onFocus={() => {
+            if (label.length > 0) {
+              setShowAutocomplete(true);
+            }
+          }}
+          onBlur={() => {
+            // Délai pour permettre le clic sur un item avant de fermer
+            setTimeout(() => setShowAutocomplete(false), 200);
+          }}
+        />
+      </View>
+      
+      {/* Liste autocomplete directement sous le champ de recherche */}
+      {showAutocomplete && searchLower.length > 0 && filteredFoods.length > 0 && (
+        <View style={styles.autocompleteList}>
+          <Text style={styles.autocompleteListTitle}>
+            🍽️ Suggestions ({filteredFoods.length})
+          </Text>
+          {filteredFoods.slice(0, 10).map((food) => {
+            const baseCost = computeFoodPoints(food);
+            const mediumPortion = getDefaultPortion(food.tags);
+            const estimatedCost = Math.round(baseCost * Math.sqrt(mediumPortion.multiplier));
+            const canAfford = pendingCost + estimatedCost <= points;
+            
+            return (
+              <TouchableOpacity
+                key={food.id}
+                style={[
+                  styles.autocompleteItem,
+                  !canAfford && styles.autocompleteItemDisabled,
+                ]}
+                onPress={() => {
+                  if (!canAfford) return;
+                  setShowAutocomplete(false);
+                  setLabel(''); // Vider le champ après sélection
+                  toggleItem(food.id);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.autocompleteItemContent}>
+                  <Text style={[styles.autocompleteItemName, !canAfford && styles.autocompleteItemNameDisabled]}>
+                    {food.name}
+                  </Text>
+                  <Text style={styles.autocompleteItemInfo}>
+                    {food.calories_kcal || 0} cal · {food.protein_g || 0}g prot · ~{estimatedCost} pts
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
-
-      {/* Options: Log avec IA et Demande d'aliment */}
+      {/* Options: Log avec IA */}
       <View style={styles.requestBox}>
+        <Text style={styles.requestText}>Tu ne trouves pas l&apos;aliment?</Text>
         <TouchableOpacity
-          style={[styles.requestLinkBtn, { backgroundColor: '#8b5cf6', marginBottom: 8 }]}
+          style={[styles.requestLinkBtn, { backgroundColor: '#8b5cf6', marginTop: 8 }]}
           onPress={() => router.push({ pathname: '/ai-logger', params: { initialText: label } })}
         >
           <Text style={[styles.requestLink, { color: '#fff', fontWeight: '600' }]}>🧠 Log avec IA</Text>
-        </TouchableOpacity>
-        <Text style={styles.requestText}>Tu ne trouves pas l&apos;aliment?</Text>
-        <TouchableOpacity
-          style={styles.requestLinkBtn}
-          onPress={() => router.push({ pathname: '/food-request', params: { q: label || '' } })}
-        >
-          <Text style={styles.requestLink}>Demander un ajout</Text>
         </TouchableOpacity>
       </View>
 
@@ -2178,6 +2462,7 @@ function AddEntryScreen({
         }))}
       </View>
 
+
       <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.cancelBtn} onPress={onCancel}>
           <Text style={styles.cancelText}>Annuler</Text>
@@ -2189,47 +2474,473 @@ function AddEntryScreen({
       </View>
       
       {/* Modal de sélection de portion */}
-      {selectedItemForPortion && (
+      {selectedItemForPortion && (() => {
+        const selectedFood = allFoods.find(f => f.id === selectedItemForPortion);
+        console.log('[AddEntry] Affichage modal pour:', selectedItemForPortion, selectedFood?.name);
+        if (!selectedFood) {
+          console.error('[AddEntry] Aliment non trouvé pour modal:', selectedItemForPortion);
+          return null;
+        }
+        return (
+          <Modal
+            visible={true}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              console.log('[AddEntry] Fermeture modal');
+              setSelectedItemForPortion(null);
+            }}
+          >
+            <View style={styles.portionModal}>
+              <View style={styles.portionModalContent}>
+                <Text style={styles.portionModalTitle}>
+                  Choisis la portion
+                </Text>
+                <Text style={styles.portionModalSubtitle}>
+                  {selectedFood.name}
+                </Text>
+              
+              {getPortionsForItem(selectedFood.tags || []).map((portion) => (
+                <TouchableOpacity
+                  key={portion.size}
+                  style={styles.portionOption}
+                  onPress={() => {
+                    console.log('[AddEntry] Sélection portion:', portion.size);
+                    addItemWithPortion(selectedItemForPortion, portion);
+                  }}
+                >
+                  <Text style={styles.portionOptionLabel}>
+                    {formatPortionLabel(portion)}
+                  </Text>
+                  <Text style={styles.portionOptionCost}>
+                    {Math.round(
+                      computeFoodPoints(selectedFood) * Math.sqrt(portion.multiplier)
+                    )} pts
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              
+              {/* Bouton quantité personnalisée */}
+              {(() => {
+                const unit = getUnitForFood(selectedFood);
+                return (
+                  <TouchableOpacity
+                    style={styles.portionOption}
+                    onPress={() => {
+                      setSelectedItemForPortion(null);
+                      setShowCustomPortionModal({
+                        foodId: selectedItemForPortion,
+                        unit: unit,
+                        onConfirm: (grams: number) => {
+                          addItemWithCustomPortion(selectedItemForPortion, grams, unit);
+                          setShowCustomPortionModal(null);
+                        },
+                      });
+                    }}
+                  >
+                    <Text style={styles.portionOptionLabel}>
+                      📝 Quantité personnalisée
+                    </Text>
+                    <Text style={styles.portionOptionCost}>
+                      {unit === 'ml' ? 'ml' : 'g'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
+              
+              <TouchableOpacity
+                style={styles.portionModalCancel}
+                onPress={() => {
+                  console.log('[AddEntry] Annulation modal');
+                  setSelectedItemForPortion(null);
+                }}
+              >
+                <Text style={styles.portionModalCancelText}>Annuler</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+        );
+      })()}
+
+      {/* Modal quantité personnalisée */}
+      {showCustomPortionModal && (() => {
+        const foodItem = allFoods.find(f => f.id === showCustomPortionModal.foodId);
+        if (!foodItem) return null;
+        
+        return <CustomPortionModal
+          foodItem={foodItem}
+          unit={showCustomPortionModal.unit}
+          initialGrams={showCustomPortionModal.initialGrams}
+          onConfirm={showCustomPortionModal.onConfirm}
+          onCancel={() => setShowCustomPortionModal(null)}
+          allFoods={allFoods}
+        />;
+      })()}
+    </ScrollView>
+  );
+}
+
+// ---- Modal quantité personnalisée (réutilisable) ----
+function CustomPortionModal({
+  foodItem,
+  unit,
+  initialGrams,
+  onConfirm,
+  onCancel,
+  allFoods,
+}: {
+  foodItem: FoodItem;
+  unit: 'g' | 'ml';
+  initialGrams?: number;
+  onConfirm: (grams: number) => void;
+  onCancel: () => void;
+  allFoods: FoodItem[];
+}) {
+  const [quantity, setQuantity] = useState<string>(initialGrams?.toString() || '');
+  const mediumPortion = getDefaultPortion(foodItem.tags);
+  
+  // Calculer les valeurs nutritionnelles et points pour la quantité saisie
+  const quantityNum = parseFloat(quantity) || 0;
+  const multiplier = quantityNum > 0 ? quantityNum / mediumPortion.grams : 1;
+  const baseCost = computeFoodPoints(foodItem);
+  const cost = Math.round(baseCost * Math.sqrt(multiplier));
+  
+  const calories = Math.round((foodItem.calories_kcal || 0) * multiplier);
+  const protein = Math.round((foodItem.protein_g || 0) * multiplier);
+  const carbs = Math.round((foodItem.carbs_g || 0) * multiplier);
+  const fat = Math.round((foodItem.fat_g || 0) * multiplier);
+
+  const handleConfirm = () => {
+    const qty = parseFloat(quantity);
+    if (isNaN(qty) || qty <= 0) {
+      Alert.alert('Erreur', 'Veuillez entrer une quantité valide supérieure à 0.');
+      return;
+    }
+    onConfirm(qty);
+  };
+
+  return (
+    <Modal
+      visible={true}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+    >
+      <View style={styles.portionModal}>
+        <View style={styles.portionModalContent}>
+          <Text style={styles.portionModalTitle}>
+            Quantité personnalisée
+          </Text>
+          <Text style={styles.portionModalSubtitle}>
+            {foodItem.name} ({unit})
+          </Text>
+          
+          <TextInput
+            style={styles.customPortionInput}
+            placeholder={`Quantité en ${unit}`}
+            placeholderTextColor="#6b7280"
+            value={quantity}
+            onChangeText={setQuantity}
+            keyboardType="numeric"
+            autoFocus
+          />
+          
+          {quantityNum > 0 && (
+            <View style={styles.customPortionPreview}>
+              <Text style={styles.customPortionPreviewTitle}>Aperçu:</Text>
+              <Text style={styles.customPortionPreviewText}>
+                🔥 {calories} cal · 💪 {protein}g prot · 🍞 {carbs}g gluc · 🧈 {fat}g lipides
+              </Text>
+              <Text style={styles.customPortionPreviewCost}>
+                Coût: {cost} pts
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.customPortionActions}>
+            <TouchableOpacity
+              style={styles.portionModalCancel}
+              onPress={onCancel}
+            >
+              <Text style={styles.portionModalCancelText}>Annuler</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.customPortionConfirm}
+              onPress={handleConfirm}
+              disabled={quantityNum <= 0}
+            >
+              <Text style={[styles.customPortionConfirmText, quantityNum <= 0 && styles.customPortionConfirmTextDisabled]}>
+                Confirmer
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ---- Modal d'édition d'item ----
+function EditItemModal({
+  editingItem,
+  entry,
+  onUpdate,
+  onCancel,
+  allFoods,
+  getUnitForFood,
+  createCustomPortion,
+  getDefaultPortion,
+  getPortionsForItem,
+  formatPortionLabel,
+  computeFoodPoints,
+}: {
+  editingItem: { entryId: string; itemIndex: number; itemRef: FoodItemRef; foodItem: FoodItem };
+  entry: MealEntry;
+  onUpdate: (updatedItems: FoodItemRef[]) => void;
+  onCancel: () => void;
+  allFoods: FoodItem[];
+  getUnitForFood: (item: FoodItem) => 'g' | 'ml';
+  createCustomPortion: (grams: number, mediumPortion: PortionReference, unit: 'g' | 'ml') => PortionReference;
+  getDefaultPortion: (tags: string[]) => PortionReference;
+  getPortionsForItem: (tags: string[]) => PortionReference[];
+  formatPortionLabel: (portion: PortionReference) => string;
+  computeFoodPoints: (fi: FoodItem) => number;
+}) {
+  const [editMode, setEditMode] = useState<'quantity' | 'replace' | 'delete' | null>(null);
+  const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ initialGrams?: number; onConfirm: (grams: number) => void } | null>(null);
+  const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null);
+
+  const handleUpdateQuantity = (portion: PortionReference) => {
+    const unit = getUnitForFood(editingItem.foodItem);
+    const quantityHint = portion.size === 'custom' 
+      ? `${portion.grams}${unit}`
+      : `${portion.grams}g (${portion.visualRef})`;
+    
+    const updatedItems = [...(entry.items || [])];
+    updatedItems[editingItem.itemIndex] = {
+      ...editingItem.itemRef,
+      portionSize: portion.size,
+      portionGrams: portion.grams,
+      multiplier: portion.multiplier,
+      quantityHint: quantityHint,
+    };
+    onUpdate(updatedItems);
+  };
+
+  const handleReplaceFood = (newFoodId: string, portion: PortionReference) => {
+    const newFood = allFoods.find(f => f.id === newFoodId);
+    if (!newFood) return;
+    
+    const unit = getUnitForFood(newFood);
+    const quantityHint = portion.size === 'custom' 
+      ? `${portion.grams}${unit}`
+      : `${portion.grams}g (${portion.visualRef})`;
+    
+    const updatedItems = [...(entry.items || [])];
+    updatedItems[editingItem.itemIndex] = {
+      foodId: newFoodId,
+      portionSize: portion.size,
+      portionGrams: portion.grams,
+      multiplier: portion.multiplier,
+      quantityHint: quantityHint,
+    };
+    onUpdate(updatedItems);
+  };
+
+  const handleDeleteItem = () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert(
+        'Supprimer',
+        'Supprimer cet aliment du repas ?',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          { text: 'Supprimer', style: 'destructive', onPress: () => {
+            const updatedItems = (entry.items || []).filter((_, idx) => idx !== editingItem.itemIndex);
+            onUpdate(updatedItems);
+          }},
+        ]
+      );
+      return;
+    }
+    
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm('Supprimer cet aliment du repas ?');
+      if (confirmed) {
+        const updatedItems = (entry.items || []).filter((_, idx) => idx !== editingItem.itemIndex);
+        onUpdate(updatedItems);
+      }
+    }
+  };
+
+  if (editMode === 'quantity') {
+    const mediumPortion = getDefaultPortion(editingItem.foodItem.tags);
+    const unit = getUnitForFood(editingItem.foodItem);
+    const currentGrams = editingItem.itemRef.portionGrams || mediumPortion.grams;
+
+    return (
+      <Modal visible={true} transparent animationType="fade" onRequestClose={onCancel}>
         <View style={styles.portionModal}>
           <View style={styles.portionModalContent}>
-            <Text style={styles.portionModalTitle}>
-              Choisis la portion
-            </Text>
-            <Text style={styles.portionModalSubtitle}>
-              {allFoods.find(f => f.id === selectedItemForPortion)?.name}
-            </Text>
+            <Text style={styles.portionModalTitle}>Modifier la quantité</Text>
+            <Text style={styles.portionModalSubtitle}>{editingItem.foodItem.name}</Text>
             
-            {getPortionsForItem(
-              allFoods.find(f => f.id === selectedItemForPortion)?.tags || []
-            ).map((portion) => (
+            {getPortionsForItem(editingItem.foodItem.tags).map((portion) => (
               <TouchableOpacity
                 key={portion.size}
                 style={styles.portionOption}
-                onPress={() => addItemWithPortion(selectedItemForPortion, portion)}
+                onPress={() => {
+                  handleUpdateQuantity(portion);
+                  setEditMode(null);
+                }}
               >
-                <Text style={styles.portionOptionLabel}>
-                  {formatPortionLabel(portion)}
-                </Text>
+                <Text style={styles.portionOptionLabel}>{formatPortionLabel(portion)}</Text>
                 <Text style={styles.portionOptionCost}>
-                  {Math.round(
-                    computeFoodPoints(
-                      allFoods.find(f => f.id === selectedItemForPortion)!
-                    ) * Math.sqrt(portion.multiplier)
-                  )} pts
+                  {Math.round(computeFoodPoints(editingItem.foodItem) * Math.sqrt(portion.multiplier))} pts
                 </Text>
               </TouchableOpacity>
             ))}
             
             <TouchableOpacity
-              style={styles.portionModalCancel}
-              onPress={() => setSelectedItemForPortion(null)}
+              style={styles.portionOption}
+              onPress={() => {
+                setShowCustomPortionModal({
+                  initialGrams: currentGrams,
+                  onConfirm: (grams: number) => {
+                    const customPortion = createCustomPortion(grams, mediumPortion, unit);
+                    handleUpdateQuantity(customPortion);
+                    setShowCustomPortionModal(null);
+                    setEditMode(null);
+                  },
+                });
+              }}
             >
-              <Text style={styles.portionModalCancelText}>Annuler</Text>
+              <Text style={styles.portionOptionLabel}>📝 Quantité personnalisée</Text>
+              <Text style={styles.portionOptionCost}>{unit}</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.portionModalCancel} onPress={() => setEditMode(null)}>
+              <Text style={styles.portionModalCancelText}>Retour</Text>
             </TouchableOpacity>
           </View>
         </View>
-      )}
-    </ScrollView>
+        
+        {showCustomPortionModal && (
+          <CustomPortionModal
+            foodItem={editingItem.foodItem}
+            unit={unit}
+            initialGrams={showCustomPortionModal.initialGrams}
+            onConfirm={showCustomPortionModal.onConfirm}
+            onCancel={() => setShowCustomPortionModal(null)}
+            allFoods={allFoods}
+          />
+        )}
+      </Modal>
+    );
+  }
+
+  if (editMode === 'replace') {
+    return (
+      <Modal visible={true} transparent animationType="fade" onRequestClose={onCancel}>
+        <View style={styles.portionModal}>
+          <View style={[styles.portionModalContent, { maxHeight: '80%' }]}>
+            <Text style={styles.portionModalTitle}>Remplacer l'aliment</Text>
+            <Text style={styles.portionModalSubtitle}>Sélectionne un nouvel aliment</Text>
+            
+            <ScrollView style={{ maxHeight: 400 }}>
+              {allFoods.slice(0, 50).map((food) => (
+                <TouchableOpacity
+                  key={food.id}
+                  style={styles.portionOption}
+                  onPress={() => {
+                    setSelectedItemForPortion(food.id);
+                  }}
+                >
+                  <Text style={styles.portionOptionLabel}>{food.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            <TouchableOpacity style={styles.portionModalCancel} onPress={() => setEditMode(null)}>
+              <Text style={styles.portionModalCancelText}>Retour</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {selectedItemForPortion && (
+          <View style={styles.portionModal}>
+            <View style={styles.portionModalContent}>
+              <Text style={styles.portionModalTitle}>Choisis la portion</Text>
+              <Text style={styles.portionModalSubtitle}>
+                {allFoods.find(f => f.id === selectedItemForPortion)?.name}
+              </Text>
+              
+              {getPortionsForItem(
+                allFoods.find(f => f.id === selectedItemForPortion)?.tags || []
+              ).map((portion) => (
+                <TouchableOpacity
+                  key={portion.size}
+                  style={styles.portionOption}
+                  onPress={() => {
+                    handleReplaceFood(selectedItemForPortion, portion);
+                    setSelectedItemForPortion(null);
+                    setEditMode(null);
+                  }}
+                >
+                  <Text style={styles.portionOptionLabel}>{formatPortionLabel(portion)}</Text>
+                  <Text style={styles.portionOptionCost}>
+                    {Math.round(computeFoodPoints(allFoods.find(f => f.id === selectedItemForPortion)!) * Math.sqrt(portion.multiplier))} pts
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              
+              <TouchableOpacity
+                style={styles.portionModalCancel}
+                onPress={() => setSelectedItemForPortion(null)}
+              >
+                <Text style={styles.portionModalCancelText}>Retour</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal visible={true} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.portionModal}>
+        <View style={styles.portionModalContent}>
+          <Text style={styles.portionModalTitle}>Modifier l'aliment</Text>
+          <Text style={styles.portionModalSubtitle}>{editingItem.foodItem.name}</Text>
+          
+          <TouchableOpacity
+            style={styles.portionOption}
+            onPress={() => setEditMode('quantity')}
+          >
+            <Text style={styles.portionOptionLabel}>📏 Modifier la quantité</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={styles.portionOption}
+            onPress={() => setEditMode('replace')}
+          >
+            <Text style={styles.portionOptionLabel}>🔄 Remplacer l'aliment</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.portionOption, { backgroundColor: '#dc2626', borderColor: '#991b1b' }]}
+            onPress={handleDeleteItem}
+          >
+            <Text style={[styles.portionOptionLabel, { color: '#fff' }]}>🗑️ Supprimer</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.portionModalCancel} onPress={onCancel}>
+            <Text style={styles.portionModalCancelText}>Annuler</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -2322,10 +3033,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  requestText: {
-    color: '#9ca3af',
-    fontSize: 14,
-  },
   requestLinkBtn: {
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -2335,6 +3042,10 @@ const styles = StyleSheet.create({
   requestLink: {
     color: '#60a5fa',
     fontWeight: '600',
+    fontSize: 14,
+  },
+  requestText: {
+    color: '#9ca3af',
     fontSize: 14,
   },
   settingsOverlay: {
@@ -2622,6 +3333,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
+  historyExpandButton: {
+    padding: 4,
+  },
+  historyExpandText: {
+    color: '#60a5fa',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   historyReuseButton: {
     padding: 4,
   },
@@ -2685,6 +3404,10 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     marginTop: 8,
   },
+  searchContainer: {
+    width: '100%',
+    marginBottom: 8,
+  },
   input: {
     width: '100%',
     backgroundColor: '#020617',
@@ -2694,7 +3417,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: '#f9fafb',
+  },
+  autocompleteList: {
+    width: '100%',
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4b5563',
     marginBottom: 16,
+    padding: 8,
+    maxHeight: 400,
+  },
+  autocompleteListTitle: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  autocompleteItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f2937',
+  },
+  autocompleteItemDisabled: {
+    opacity: 0.5,
+  },
+  autocompleteItemContent: {
+    flexDirection: 'column',
+  },
+  autocompleteItemName: {
+    color: '#e5e7eb',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  autocompleteItemNameDisabled: {
+    color: '#9ca3af',
+  },
+  autocompleteItemInfo: {
+    color: '#9ca3af',
+    fontSize: 12,
   },
   suggestionsBox: {
     width: '100%',
@@ -3423,6 +4187,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  customPortionInput: {
+    width: '100%',
+    backgroundColor: '#020617',
+    borderColor: '#4b5563',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#f9fafb',
+    fontSize: 16,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  customPortionPreview: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  customPortionPreviewTitle: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  customPortionPreviewText: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  customPortionPreviewCost: {
+    color: '#fbbf24',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customPortionActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 8,
+  },
+  customPortionConfirm: {
+    flex: 1,
+    backgroundColor: '#22c55e',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  customPortionConfirmText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customPortionConfirmTextDisabled: {
+    color: '#6b7280',
+  },
   selectedItemsBox: {
     width: '100%',
     backgroundColor: '#0f172a',
@@ -3472,6 +4292,58 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  historyItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
+  historyItemsDetail: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  historyItemDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  historyItemDetailInfo: {
+    flex: 1,
+  },
+  historyItemDetailName: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  historyItemDetailQuantity: {
+    color: '#10b981',
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  historyItemDetailNutrition: {
+    color: '#9ca3af',
+    fontSize: 11,
+  },
+  historyItemEditButton: {
+    backgroundColor: '#3b82f6',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  historyItemEditText: {
+    color: '#fff',
+    fontSize: 14,
   },
   // Dragon Dead Modal Styles
   dragonDeadModal: {
@@ -3537,6 +4409,65 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6b7280',
     textAlign: 'center',
+  },
+  foodListContainer: {
+    width: '100%',
+    marginBottom: 16,
+    gap: 8,
+  },
+  foodItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  foodItemBtnSelected: {
+    backgroundColor: '#1e3a8a',
+    borderColor: '#3b82f6',
+    borderWidth: 2,
+  },
+  foodItemBtnDisabled: {
+    opacity: 0.5,
+  },
+  foodItemContent: {
+    flex: 1,
+  },
+  foodItemName: {
+    color: '#e5e7eb',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  foodItemNameSelected: {
+    color: '#93c5fd',
+  },
+  foodItemInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  foodItemNutrition: {
+    color: '#9ca3af',
+    fontSize: 12,
+  },
+  foodItemCost: {
+    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  foodItemCostDisabled: {
+    color: '#6b7280',
+  },
+  foodItemSelectedIcon: {
+    color: '#22c55e',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
 
