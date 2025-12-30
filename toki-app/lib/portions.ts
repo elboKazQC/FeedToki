@@ -118,3 +118,31 @@ export function createCustomPortion(
     multiplier: multiplier,
   };
 }
+
+/**
+ * Créer une portion personnalisée basée sur un nombre de portions
+ * Ex: 0.5 portion, 2 portions, etc.
+ */
+export function createPortionCustomPortion(
+  nbPortions: number,
+  mediumPortion: PortionReference,
+  unit: 'g' | 'ml'
+): PortionReference {
+  const grams = nbPortions * mediumPortion.grams;
+  
+  return {
+    size: 'custom',
+    label: 'Personnalisée',
+    grams: grams,
+    visualRef: formatPortionHint(nbPortions),
+    multiplier: nbPortions,
+  };
+}
+
+/**
+ * Formater le hint pour affichage d'une quantité en portions
+ */
+export function formatPortionHint(nbPortions: number): string {
+  const formatted = nbPortions % 1 === 0 ? nbPortions.toString() : nbPortions.toFixed(1);
+  return nbPortions === 1 ? '1 portion' : `${formatted} portions`;
+}

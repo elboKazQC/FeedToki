@@ -99,6 +99,23 @@ function extractQuantity(text: string, foodName: string): { quantity?: string; q
 }
 
 /**
+ * Normaliser un nom d'aliment pour le dédoublonnage
+ * Enlève accents, pluriels simples, et trim
+ */
+function normalizeForDeduplication(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[àáâãäå]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ç]/g, 'c')
+    .replace(/s$/, ''); // Pluriel simple
+}
+
+/**
  * Parser une description de repas avec IA améliorée
  * Utilise OpenAI si disponible, sinon utilise des règles améliorées pour détecter aliments, quantités et plats composés
  */
@@ -139,7 +156,7 @@ export async function parseMealDescription(
     const foodKeywords = [
       // Protéines
       { keywords: ['poulet', 'chicken'], name: 'Poulet' },
-      { keywords: ['boeuf', 'beef', 'bœuf'], name: 'Poulet' }, // Fallback, devrait être "Boeuf" si ajouté à DB
+      { keywords: ['boeuf', 'beef', 'bœuf'], name: 'Boeuf' }, // Corrigé: Boeuf (sera estimé si pas en DB)
       { keywords: ['dinde', 'turkey'], name: 'Dinde' },
       { keywords: ['poisson', 'fish'], name: 'Poisson' },
       { keywords: ['saumon', 'salmon'], name: 'Poisson' },
@@ -315,73 +332,64 @@ export async function parseMealDescription(
       },
     ];
 
-    // Détecter les plats composés d'abord (priorité)
-    let foundComposedDish = false;
-    for (const dish of composedDishes) {
-      if (dish.pattern.test(originalDesc)) {
-        const qty = dish.extractQuantity ? dish.extractQuantity(originalDesc) : {};
-        items.push({
-          name: dish.name,
-          quantity: qty.quantity,
-          quantityNumber: qty.quantityNumber,
-          confidence: 0.9,
-        });
-        foundComposedDish = true;
-        // Ne pas chercher d'autres aliments si on a trouvé un plat composé unique
-        // Sauf si la description contient "et" ou "," (plusieurs plats)
-        if (!originalDesc.match(/\s+et\s+|\s*,\s*/i)) {
-          return { items };
-        }
-      }
-    }
-
-    // Si pas de plat composé unique, chercher plusieurs aliments
-    if (!foundComposedDish || originalDesc.match(/\s+et\s+|\s*,\s*/i)) {
-      // Diviser la description par "et" ou ","
-      const parts = originalDesc.split(/\s+et\s+|\s*,\s*/i).map(p => p.trim()).filter(p => p.length > 0);
-      
-      for (const part of parts.length > 1 ? parts : [originalDesc]) {
-        // Chercher plats composés dans cette partie
-        let partHasComposedDish = false;
-        for (const dish of composedDishes) {
-          if (dish.pattern.test(part)) {
-            const qty = dish.extractQuantity ? dish.extractQuantity(part) : {};
-            items.push({
+    // Diviser la description par connecteurs FR/EN (haute recall)
+    // Connecteurs: et, and, puis, then, after, avec, with, virgule, point-virgule, saut de ligne
+    const segmentPattern = /\s+(?:et|and|puis|then|after|avec|with|ensuite)\s+|\s*[,;]\s*|\n+/gi;
+    const parts = originalDesc.split(segmentPattern).map(p => p.trim()).filter(p => p.length > 0);
+    
+    // Map pour dédoublonnage (clé normalisée -> item)
+    const itemsMap = new Map<string, ParsedFoodItem>();
+    
+    for (const part of parts.length > 1 ? parts : [originalDesc]) {
+      // 1. Chercher plats composés dans cette partie (priorité)
+      let foundComposedDishInPart = false;
+      for (const dish of composedDishes) {
+        if (dish.pattern.test(part)) {
+          const qty = dish.extractQuantity ? dish.extractQuantity(part) : {};
+          const normalizedKey = normalizeForDeduplication(dish.name);
+          
+          // Ajouter si pas déjà présent
+          if (!itemsMap.has(normalizedKey)) {
+            itemsMap.set(normalizedKey, {
               name: dish.name,
               quantity: qty.quantity,
               quantityNumber: qty.quantityNumber,
               confidence: 0.9,
+              isComposite: true,
             });
-            partHasComposedDish = true;
-            break;
           }
+          foundComposedDishInPart = true;
+          // Ne pas break ici: continuer à chercher d'autres plats composés dans le même segment
         }
+      }
+      
+      // 2. Chercher aliments simples dans cette partie (extraire TOUS, pas juste 1)
+      // Si un plat composé a été trouvé, on cherche quand même d'autres aliments (ex: "pizza et salade")
+      for (const foodGroup of foodKeywords) {
+        const hasKeyword = foodGroup.keywords.some(kw => 
+          part.toLowerCase().includes(kw.toLowerCase())
+        );
         
-        if (!partHasComposedDish) {
-          // Chercher aliments simples dans cette partie
-          for (const foodGroup of foodKeywords) {
-            const hasKeyword = foodGroup.keywords.some(kw => 
-              part.toLowerCase().includes(kw.toLowerCase())
-            );
-            
-            if (hasKeyword) {
-              // Vérifier qu'on ne l'a pas déjà ajouté
-              const alreadyAdded = items.some(item => item.name === foodGroup.name);
-              if (!alreadyAdded) {
-                const qty = extractQuantity(part, foodGroup.name);
-                items.push({
-                  name: foodGroup.name,
-                  quantity: qty.quantity,
-                  quantityNumber: qty.quantityNumber,
-                  confidence: 0.7,
-                });
-                break; // Un aliment par partie
-              }
-            }
+        if (hasKeyword) {
+          const normalizedKey = normalizeForDeduplication(foodGroup.name);
+          
+          // Ajouter si pas déjà présent
+          if (!itemsMap.has(normalizedKey)) {
+            const qty = extractQuantity(part, foodGroup.name);
+            itemsMap.set(normalizedKey, {
+              name: foodGroup.name,
+              quantity: qty.quantity,
+              quantityNumber: qty.quantityNumber,
+              confidence: 0.7,
+              isComposite: false,
+            });
           }
         }
       }
     }
+    
+    // Convertir la map en array
+    items.push(...Array.from(itemsMap.values()));
 
     // Si aucun aliment détecté, retourner le texte complet comme un seul item
     if (items.length === 0) {

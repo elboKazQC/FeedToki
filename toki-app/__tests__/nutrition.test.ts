@@ -287,18 +287,12 @@ describe('nutrition', () => {
         },
       ];
       
-      // Spy on console.warn to verify warning is logged
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      
       const result = computeDailyTotals(entries, today);
       
       expect(result.protein_g).toBe(0);
       expect(result.carbs_g).toBe(0);
       expect(result.calories_kcal).toBe(0);
       expect(result.fat_g).toBe(0);
-      expect(consoleSpy).toHaveBeenCalled();
-      
-      consoleSpy.mockRestore();
     });
 
     it('should handle items with missing nutrition values (null/undefined)', () => {

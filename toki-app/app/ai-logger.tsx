@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
@@ -32,14 +33,21 @@ import { trackAIParserUsed, trackMealLogged } from '../lib/analytics';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { spacing } from '../constants/design-tokens';
+import { BarcodeScanner } from '../components/barcode-scanner';
+import { fetchProductByBarcode, mapOffProductToFoodItem, searchAndMapBestProduct } from '../lib/open-food-facts';
+import { logger } from '../lib/logger';
+
+type ItemSource = 'db' | 'off' | 'estimated';
 
 type DetectedItem = {
   originalName: string;
   matchedItem: FoodItem | null;
   estimatedItem?: FoodItem;
+  offItem?: FoodItem;
   portion: ReturnType<typeof getDefaultPortion>;
   itemRef: FoodItemRef;
   pointsCost: number;
+  source: ItemSource;
 };
 
 export default function AILoggerScreen() {
@@ -48,6 +56,7 @@ export default function AILoggerScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [error, setError] = useState<string>('');
+  const [showScanner, setShowScanner] = useState(false);
 
   const handleParse = async () => {
     // Validation de la description
@@ -102,42 +111,56 @@ export default function AILoggerScreen() {
         console.warn('Erreur tracking:', trackError);
       }
 
-      // 2. Pour chaque item détecté, essayer de matcher avec la DB
+      // 2. Pour chaque item détecté, essayer de résoudre via OFF, DB, ou estimation
       const items: DetectedItem[] = [];
 
       for (const parsedItem of parseResult.items) {
         try {
-          // Matching intelligent : si isComposite = false, être très strict pour éviter les faux positifs
-          // (ex: "beurre de peanut" ne doit PAS matcher avec "toast au beurre de peanut")
-          let match: FoodItem | null = null;
-          
-          if (parsedItem.isComposite === false) {
-            // Pour un ingrédient simple, être très strict (threshold élevé)
-            // et vérifier que le match n'est pas un plat composé
-            const strictMatch = findBestMatch(parsedItem.name, 0.85);
-            if (strictMatch) {
-              // Vérifier que le nom du match n'est pas beaucoup plus long (signe d'un plat composé)
-              const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
-              const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
-              // Si le match a 2+ mots de plus, c'est probablement un plat composé, ne pas matcher
-              if (matchWords <= searchWords + 1) {
-                match = strictMatch;
-              }
-            }
-          } else {
-            // Pour un plat composé, utiliser le threshold normal
-            match = findBestMatch(parsedItem.name, 0.7);
-          }
-
           let foodItem: FoodItem;
           let portion = getDefaultPortion([]);
+          let source: ItemSource = 'estimated';
+          let match: FoodItem | null = null;
+          let offItem: FoodItem | null = null;
 
-          if (match) {
-            // Item trouvé dans la DB
-            foodItem = match;
-            portion = getDefaultPortion(match.tags);
-          } else {
-            // Item non trouvé, créer une estimation en utilisant la catégorie et valeurs nutritionnelles OpenAI si disponibles
+          // Étape 1: Essayer Open Food Facts pour les produits de marque
+          try {
+            logger.info('[AI Logger] Recherche OFF pour:', parsedItem.name);
+            offItem = await searchAndMapBestProduct(parsedItem.name);
+            if (offItem) {
+              logger.info('[AI Logger] Produit OFF trouvé:', offItem.name);
+              foodItem = offItem;
+              portion = getDefaultPortion(offItem.tags);
+              source = 'off';
+            }
+          } catch (offError) {
+            logger.warn('[AI Logger] Erreur recherche OFF:', offError);
+          }
+
+          // Étape 2: Si pas trouvé dans OFF, essayer la DB locale
+          if (!offItem) {
+            // Matching intelligent : si isComposite = false, être très strict pour éviter les faux positifs
+            if (parsedItem.isComposite === false) {
+              const strictMatch = findBestMatch(parsedItem.name, 0.85);
+              if (strictMatch) {
+                const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
+                const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
+                if (matchWords <= searchWords + 1) {
+                  match = strictMatch;
+                }
+              }
+            } else {
+              match = findBestMatch(parsedItem.name, 0.7);
+            }
+
+            if (match) {
+              foodItem = match;
+              portion = getDefaultPortion(match.tags);
+              source = 'db';
+            }
+          }
+
+          // Étape 3: Si toujours pas trouvé, créer une estimation
+          if (!offItem && !match) {
             foodItem = createEstimatedFoodItem(
               parsedItem.name,
               description,
@@ -152,21 +175,24 @@ export default function AILoggerScreen() {
                 : undefined
             );
             portion = getDefaultPortion(foodItem.tags);
+            source = 'estimated';
           }
 
           // Créer le FoodItemRef
-          const itemRef = createFoodItemRef(foodItem, portion);
+          const itemRef = createFoodItemRef(foodItem!, portion);
 
           // Calculer le coût en points
-          const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
+          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(portion.multiplier);
 
           items.push({
             originalName: parsedItem.name || 'Aliment inconnu',
             matchedItem: match || null,
-            estimatedItem: match ? undefined : foodItem,
+            estimatedItem: (!offItem && !match) ? foodItem : undefined,
+            offItem: offItem || undefined,
             portion,
             itemRef,
             pointsCost: Math.round(pointsCost),
+            source,
           });
         } catch (itemError: any) {
           console.error('Erreur traitement item:', itemError);
@@ -191,6 +217,50 @@ export default function AILoggerScreen() {
   const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
   const isEmailVerified = user?.emailVerified ?? false;
   const canUseAI = !currentUserId || currentUserId === 'guest' || isEmailVerified;
+
+  const handleBarcodeScanned = async (barcode: string) => {
+    setShowScanner(false);
+    setIsProcessing(true);
+    setError('');
+
+    try {
+      logger.info('[AI Logger] Code-barres scanné:', barcode);
+      
+      // Fetch produit depuis Open Food Facts
+      const offProduct = await fetchProductByBarcode(barcode);
+      
+      if (!offProduct) {
+        setError(`Produit non trouvé pour le code-barres: ${barcode}`);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Mapper vers FoodItem
+      const foodItem = mapOffProductToFoodItem(offProduct);
+      const portion = getDefaultPortion(foodItem.tags);
+      const itemRef = createFoodItemRef(foodItem, portion);
+      const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
+
+      // Ajouter à la liste des items détectés
+      const newItem: DetectedItem = {
+        originalName: foodItem.name,
+        matchedItem: null,
+        estimatedItem: undefined,
+        offItem: foodItem,
+        portion,
+        itemRef,
+        pointsCost: Math.round(pointsCost),
+        source: 'off',
+      };
+
+      setDetectedItems(prev => [...prev, newItem]);
+    } catch (error: any) {
+      logger.error('[AI Logger] Erreur scan code-barres:', error);
+      setError(`Erreur lors du scan: ${error.message || 'Erreur inconnue'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const handleConfirm = async () => {
     if (detectedItems.length === 0) {
@@ -532,19 +602,31 @@ export default function AILoggerScreen() {
         </View>
       )}
       
-      <TouchableOpacity
-        style={[styles.parseButton, (isProcessing || !canUseAI) && styles.parseButtonDisabled]}
-        onPress={handleParse}
-        disabled={isProcessing || !canUseAI}
-      >
-        {isProcessing ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.parseButtonText}>
-            {canUseAI ? 'Analyser 🚀' : 'Vérification email requise'}
-          </Text>
+      <View style={styles.actionButtons}>
+        <TouchableOpacity
+          style={[styles.parseButton, (isProcessing || !canUseAI) && styles.parseButtonDisabled]}
+          onPress={handleParse}
+          disabled={isProcessing || !canUseAI}
+        >
+          {isProcessing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.parseButtonText}>
+              {canUseAI ? 'Analyser 🚀' : 'Vérification email requise'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={[styles.scanButton, isProcessing && styles.scanButtonDisabled]}
+            onPress={() => setShowScanner(true)}
+            disabled={isProcessing}
+          >
+            <Text style={styles.scanButtonText}>📷 Scanner code-barres</Text>
+          </TouchableOpacity>
         )}
-      </TouchableOpacity>
+      </View>
 
       {detectedItems.length > 0 && (
         <View style={styles.resultsContainer}>
@@ -566,19 +648,28 @@ export default function AILoggerScreen() {
                     <Text style={styles.itemPoints}>{item.pointsCost} pts</Text>
                   </View>
 
-                  {item.matchedItem ? (
+                  {item.source === 'off' && item.offItem ? (
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemOff}>
+                        ✓ Produit OFF: {item.offItem.name}
+                      </Text>
+                      <Text style={styles.itemDetails}>
+                        🔥 {item.offItem.calories_kcal || 0} cal · 💪 {item.offItem.protein_g || 0}g prot · 🍞 {item.offItem.carbs_g || 0}g gluc · 🧈 {item.offItem.fat_g || 0}g lipides
+                      </Text>
+                    </View>
+                  ) : item.source === 'db' && item.matchedItem ? (
                     <View style={styles.itemInfo}>
                       <Text style={styles.itemMatch}>
-                        ✓ Match: {item.matchedItem.name}
+                        ✓ Match DB: {item.matchedItem.name}
                       </Text>
                       <Text style={styles.itemDetails}>
                         🔥 {item.matchedItem.calories_kcal || 0} cal · 💪 {item.matchedItem.protein_g || 0}g prot · 🍞 {item.matchedItem.carbs_g || 0}g gluc · 🧈 {item.matchedItem.fat_g || 0}g lipides
                       </Text>
                     </View>
-                  ) : item.estimatedItem ? (
+                  ) : item.source === 'estimated' && item.estimatedItem ? (
                     <View style={styles.itemInfo}>
                       <Text style={styles.itemEstimate}>
-                        ⚠ Estimé (non trouvé dans la DB)
+                        ⚠ Estimé (non trouvé)
                       </Text>
                       <Text style={styles.itemDetails}>
                         🔥 {item.estimatedItem.calories_kcal || 0} cal · 💪 {item.estimatedItem.protein_g || 0}g prot · 🍞 {item.estimatedItem.carbs_g || 0}g gluc · 🧈 {item.estimatedItem.fat_g || 0}g lipides
@@ -625,8 +716,23 @@ export default function AILoggerScreen() {
         <Text style={styles.hintTitle}>💡 Astuce</Text>
         <Text style={styles.hintText}>
           Sois aussi précis que possible. Mentionne les quantités si tu les connais (ex: &quot;200g de poulet&quot;).
+          {Platform.OS !== 'web' && ' Tu peux aussi scanner le code-barres d\'un produit pour avoir ses nutriments exacts.'}
         </Text>
       </View>
+
+      {/* Modal de scan de code-barres */}
+      {Platform.OS !== 'web' && (
+        <Modal
+          visible={showScanner}
+          animationType="slide"
+          onRequestClose={() => setShowScanner(false)}
+        >
+          <BarcodeScanner
+            onBarcodeScanned={handleBarcodeScanned}
+            onClose={() => setShowScanner(false)}
+          />
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -699,12 +805,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  actionButtons: {
+    gap: 12,
+    marginBottom: 24,
+  },
   parseButton: {
     backgroundColor: '#22c55e',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    marginBottom: 24,
   },
   parseButtonDisabled: {
     opacity: 0.6,
@@ -712,6 +821,22 @@ const styles = StyleSheet.create({
   parseButtonText: {
     color: '#022c22',
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  scanButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#60a5fa',
+  },
+  scanButtonDisabled: {
+    opacity: 0.6,
+  },
+  scanButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: 'bold',
   },
   resultsContainer: {
@@ -775,6 +900,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#22c55e',
     marginBottom: 4,
+  },
+  itemOff: {
+    fontSize: 14,
+    color: '#3b82f6',
+    marginBottom: 4,
+    fontWeight: '600',
   },
   itemEstimate: {
     fontSize: 14,

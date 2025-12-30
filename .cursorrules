@@ -1,0 +1,218 @@
+# FeedToki - Règles de Développement Cursor
+
+## 📋 Vue d'ensemble
+Application React Native (Expo SDK 54) de suivi nutritionnel gamifié avec système de points, Firebase, et IA (OpenAI).
+
+## 🎯 Principes Généraux
+
+### Langue
+- **UI/UX**: Toujours en français (messages utilisateur, labels, alertes)
+- **Code**: Commentaires en français
+- **Variables/Fonctions**: camelCase en anglais (convention React Native)
+
+### Architecture
+- **Frontend**: React Native avec Expo Router (file-based routing)
+- **State**: React hooks (useState, useEffect, useMemo, useCallback) + AsyncStorage + Firestore
+- **Auth**: Firebase Authentication (email/password)
+- **Database**: Firestore (avec synchronisation bidirectionnelle AsyncStorage ↔ Firestore)
+- **AI**: OpenAI GPT-4o-mini pour parsing de repas
+
+## 🔧 Conventions de Code
+
+### Naming
+- **Variables/Fonctions**: `camelCase` (ex: `handleDeleteEntry`, `currentUserId`)
+- **Composants**: `PascalCase` (ex: `HomeScreen`, `DragonDisplay`)
+- **Fichiers**: `kebab-case.tsx` ou `camelCase.tsx` (ex: `best-days.tsx`, `data-sync.ts`)
+- **Types/Interfaces**: `PascalCase` (ex: `MealEntry`, `UserProfile`)
+- **Constantes**: `UPPER_SNAKE_CASE` (ex: `MAX_POINTS`, `DAILY_POINTS`)
+
+### React Hooks - RÈGLE CRITIQUE
+⚠️ **TOUJOURS déclarer TOUS les hooks AVANT tout `return` conditionnel**
+```typescript
+// ✅ CORRECT
+export default function Component() {
+  const [state, setState] = useState(false);
+  const memoized = useMemo(() => ..., []);
+  useEffect(() => {}, []);
+  
+  if (!isClient) return <Loading />; // Après tous les hooks
+  
+  return <MainContent />;
+}
+
+// ❌ INCORRECT - Erreur React #418/#310
+export default function Component() {
+  if (!isClient) return <Loading />; // AVANT les hooks !
+  const [state, setState] = useState(false);
+  return <MainContent />;
+}
+```
+
+### Gestion d'État
+- **Local state**: `useState` pour données temporaires/composant
+- **AsyncStorage**: Pour données persistantes locales (backup/cache)
+- **Firestore**: Source de vérité pour données cloud (multi-appareils)
+- **Synchronisation**: Toujours via `lib/data-sync.ts` (fusion intelligente)
+
+### Logging
+- Utiliser `lib/logger.ts` pour logs structurés
+- En production: `logger.debug()` et `logger.info()` sont mutés
+- Toujours utiliser `logger.warn()` et `logger.error()` pour problèmes importants
+- Pour logs temporaires: `console.log` avec `if (__DEV__)`
+
+## 🔐 Sécurité & Firebase
+
+### Authentification
+- Vérification email requise pour utilisation IA (sauf admins)
+- Admins: Liste centralisée dans `lib/admin-utils.ts`
+- Guest mode: Permis mais fonctionnalités limitées
+
+### Firestore Security Rules
+- Toujours vérifier `request.auth.uid` pour isolation des données
+- Users peuvent lire/écrire uniquement leurs propres données
+- Admins: Accès spécial via `isAdmin()` helper
+
+### Rate Limiting
+- OpenAI API: 50 appels/jour par utilisateur (Firestore-based)
+- Client-side: 10 req/min avec délai minimum 2s entre appels
+
+## 📊 Synchronisation de Données
+
+### Principe de Fusion
+- **Points**: Prendre la valeur la plus HAUTE (pour préserver remboursements/corrections)
+- **Meals**: Fusion par ID (Firestore prioritaire si conflit)
+- **Targets/Weights**: Firestore prioritaire si local vide
+
+### Fonctions de Sync
+- `syncFromFirestore()`: Charger depuis Firestore et fusionner avec local
+- `syncToFirestore()`: Envoyer vers Firestore
+- Toujours appeler après modifications critiques (ajout/suppression repas, points)
+
+### Points - Règles Spéciales
+- **Remboursement**: Lors de suppression d'entrée, restaurer points ET synchroniser Firestore
+- **Fusion**: `Math.max(local, firestore)` pour éviter perte de remboursements
+- **Écriture**: Ne jamais écraser une valeur Firestore plus haute
+
+## 🎨 UI/UX
+
+### Thème
+- Support dark/light mode via `lib/theme-context.tsx`
+- Utiliser `useTheme()` hook pour accéder aux couleurs
+- Tokens de design dans `constants/design-tokens.ts`
+
+### Composants
+- Utiliser composants UI réutilisables: `Button`, `Card`, `ProgressBar`, `Badge`
+- Modals: Utiliser React Native `Modal` (pas de View absolute) pour centrage correct
+
+### Messages Utilisateur
+- Toujours en français
+- Messages d'erreur clairs et actionnables
+- Pour emails Firebase (spam): Mentionner explicitement dossier SPAM/COURRIER INDÉSIRABLE
+
+## 🐛 Patterns de Debugging
+
+### Erreurs Hydratation React (#418/#310)
+- Cause: Rendu conditionnel avant hooks OU mismatch SSR/client
+- Solution: État `isClient` avec `useState(false)` + `useEffect(() => setIsClient(true), [])`
+- Retourner "Chargement..." si `!isClient`, après TOUS les hooks
+
+### Data Isolation
+- Toujours utiliser `currentUserId` correctement:
+  ```typescript
+  const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
+  ```
+- Reset state local lors changement d'utilisateur (useEffect avec dépendance `currentUserId`)
+
+### Console Logs
+- En production: Utiliser `logger.debug()` / `logger.info()` (mutés)
+- Logs critiques: Toujours `logger.warn()` / `logger.error()`
+- Logs temporaires: `if (__DEV__) console.log(...)`
+
+## 📁 Structure de Fichiers
+
+```
+toki-app/
+├── app/                    # Expo Router pages
+│   ├── (tabs)/            # Pages principales (navigation tabs)
+│   ├── auth.tsx           # Login/signup
+│   └── stats.tsx          # Statistiques
+├── lib/                   # Logique métier
+│   ├── auth-context.tsx   # Context d'authentification
+│   ├── data-sync.ts       # Sync AsyncStorage ↔ Firestore
+│   ├── firebase-*.ts      # Configuration Firebase
+│   ├── stats.ts           # Calculs de streaks/scores
+│   ├── points-*.ts        # Système de points
+│   └── logger.ts          # Logging centralisé
+├── components/            # Composants réutilisables
+│   ├── ui/               # Composants UI de base
+│   └── *.tsx             # Composants spécifiques
+├── constants/            # Constantes et configuration
+└── scripts/              # Scripts utilitaires
+```
+
+## 🚀 Déploiement
+
+### Build Production Web
+```bash
+cd toki-app
+npx expo export --platform web
+cp -r dist/* web-build/
+firebase deploy --only hosting
+```
+
+### Variables d'Environnement
+- `.env.production`: Clés API (NE JAMAIS commiter)
+- Variables Expo: Préfixe `EXPO_PUBLIC_` pour exposition client
+
+## ✅ Checklist Avant Commit
+
+- [ ] Tous les hooks déclarés avant `return` conditionnel
+- [ ] `currentUserId` utilisé correctement pour isolation
+- [ ] Sync Firestore appelée après modifications critiques
+- [ ] Messages utilisateur en français
+- [ ] Logs de prod via `logger` (pas `console.log` direct)
+- [ ] Pas de clés API/secrètes dans le code
+- [ ] Types TypeScript corrects (pas de `any` sauf Firebase user)
+- [ ] Gestion d'erreurs avec try/catch pour opérations async
+
+## 🎓 Bonnes Pratiques
+
+### Performance
+- Utiliser `useMemo` pour calculs coûteux (streaks, stats)
+- Utiliser `useCallback` pour callbacks passés en props (éviter re-renders)
+- Limiter re-renders: State local minimal, props stables
+
+### Maintenabilité
+- Commenter le "pourquoi", pas le "quoi" (code auto-documenté)
+- Exporter types depuis `lib/types.ts` (pas inline)
+- Fonctions pures quand possible (facilitent tests)
+- Helpers réutilisables dans `lib/`
+
+### Tests
+- Tests unitaires pour logique métier (`lib/stats.ts`, `lib/points-*.ts`)
+- Tests d'intégration pour flows critiques (login, sync)
+- Mocker Firebase/AsyncStorage dans tests
+
+## 🔄 Migration & Backward Compatibility
+
+### Versioning
+- AsyncStorage keys: Inclure version (ex: `feedtoki_entries_${userId}_v1`)
+- Changements breaking: Nouvelle version de key + migration script
+- Firestore: Structure documentée, migrations via scripts
+
+### Error Handling
+- Opérations async: Toujours try/catch
+- Sync Firestore: Ne pas bloquer UI si échec (logger warning, continuer local)
+- Messages d'erreur: Actionnables pour utilisateur (pas de stack traces)
+
+## 📝 Documentation
+
+- README.md: Vue d'ensemble, setup, scripts
+- GUIDE_DEPLOIEMENT.md: Instructions déploiement
+- CHANGELOG.md: Historique des changements
+- POINTS_SYSTEM_EXPLANATION.md: Explication système de points
+
+---
+
+**Dernière mise à jour**: Janvier 2025
+**Version app**: 1.0.0

@@ -122,10 +122,11 @@ describe('ai-meal-parser', () => {
     it('should handle English food names', async () => {
       const result = await parseMealDescription('chicken and rice');
       expect(result.error).toBeUndefined();
-      expect(result.items.length).toBeGreaterThanOrEqual(1);
-      // Should map chicken to poulet
+      expect(result.items.length).toBeGreaterThanOrEqual(2);
+      // Should detect both chicken and rice
       const names = result.items.map(item => item.name.toLowerCase());
       expect(names.some(name => name.includes('poulet') || name.includes('chicken'))).toBe(true);
+      expect(names.some(name => name.includes('riz') || name.includes('rice'))).toBe(true);
     });
 
     it('should handle vegetables', async () => {
@@ -255,6 +256,45 @@ describe('ai-meal-parser', () => {
       // Both should parse successfully
       expect(singular.error).toBeUndefined();
       expect(plural.error).toBeUndefined();
+    });
+
+    it('should detect multiple foods with "and" connector', async () => {
+      const result = await parseMealDescription('two toasts and two eggs');
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThanOrEqual(2);
+      const names = result.items.map(item => item.name.toLowerCase());
+      expect(names.some(name => name.includes('toast'))).toBe(true);
+      expect(names.some(name => name.includes('oeuf') || name.includes('egg'))).toBe(true);
+    });
+
+    it('should detect multiple foods with "then" connector', async () => {
+      const result = await parseMealDescription('I ate chicken then rice');
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThanOrEqual(2);
+      const names = result.items.map(item => item.name.toLowerCase());
+      expect(names.some(name => name.includes('poulet') || name.includes('chicken'))).toBe(true);
+      expect(names.some(name => name.includes('riz') || name.includes('rice'))).toBe(true);
+    });
+
+    it('should detect multiple foods in complex description', async () => {
+      const result = await parseMealDescription(
+        '2 petits pains avec du pâté, puis 2 bières, 3 fromages, des boulettes avec de la purée et des légumes'
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThanOrEqual(3);
+      const names = result.items.map(item => item.name.toLowerCase());
+      // Au minimum: pain/toast, fromage, légumes (3 items détectés)
+      expect(names.some(name => name.includes('toast') || name.includes('pain'))).toBe(true);
+      expect(names.some(name => name.includes('fromage'))).toBe(true);
+      expect(names.some(name => name.includes('légume'))).toBe(true);
+    });
+
+    it('should not duplicate items', async () => {
+      const result = await parseMealDescription('poulet et poulet et poulet');
+      expect(result.error).toBeUndefined();
+      // Should deduplicate and return only 1 item
+      expect(result.items.length).toBe(1);
+      expect(result.items[0].name.toLowerCase()).toContain('poulet');
     });
   });
 });

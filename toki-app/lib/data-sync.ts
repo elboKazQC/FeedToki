@@ -119,8 +119,24 @@ export async function syncPointsToFirestore(
 
   try {
     const pointsRef = doc(db, 'users', userId, 'points', 'current');
+    
+    // IMPORTANT: Ne jamais écraser avec une valeur plus basse
+    // (pour préserver les remboursements et corrections manuelles)
+    const existingSnap = await getDoc(pointsRef);
+    const existingData = existingSnap.exists() ? existingSnap.data() : null;
+    const today = new Date().toISOString().slice(0, 10);
+    
+    let finalBalance = balance;
+    if (existingData && existingData.lastClaimDate === today && lastClaimDate === today) {
+      // Même jour: prendre la valeur la plus haute
+      finalBalance = Math.max(balance, existingData.balance || 0);
+      if (finalBalance !== balance) {
+        console.log('[Sync] Points: garde la valeur Firestore plus haute:', existingData.balance, 'vs local:', balance);
+      }
+    }
+    
     await setDoc(pointsRef, {
-      balance,
+      balance: finalBalance,
       lastClaimDate,
       updatedAt: Timestamp.now(),
     });
@@ -308,9 +324,10 @@ export async function syncFromFirestore(userId: string): Promise<{
         finalBalance = firestorePointsData.balance || 0;
         finalLastClaimDate = firestorePointsData.lastClaimDate || '';
       } else if (localPointsData.lastClaimDate === today && firestorePointsData.lastClaimDate === today) {
-        // Même jour sur les deux sources - prendre la plus PETITE balance
-        // (car les points diminuent quand on mange)
-        finalBalance = Math.min(localPointsData.balance || 0, firestorePointsData.balance || 0);
+        // Même jour sur les deux sources - prendre la plus HAUTE balance
+        // (pour préserver les remboursements de points après suppression d'entrées
+        // et les corrections manuelles dans Firebase)
+        finalBalance = Math.max(localPointsData.balance || 0, firestorePointsData.balance || 0);
         finalLastClaimDate = today;
         console.log('[Sync] Points fusion: local=', localPointsData.balance, 'firestore=', firestorePointsData.balance, '-> final=', finalBalance);
       } else if (localPointsData.lastClaimDate === today) {

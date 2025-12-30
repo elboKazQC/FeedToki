@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
@@ -10,12 +10,14 @@ import { StreakCalendar } from '../components/streak-calendar';
 import { 
   MealEntry, 
   computeStreak, 
+  computeStreakWithCalories,
   computeDragonState, 
-  computeScore7Jours,
+  computeDragonStateWithCalories,
   normalizeDate,
   StreakStats,
   DragonStatus,
   DAYS_CRITICAL,
+  MIN_CALORIES_FOR_COMPLETE_DAY,
 } from '../lib/stats';
 import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dragon-levels';
 import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry, loadBaseline, getWeeklyAverageSeries } from '../lib/weight';
@@ -24,12 +26,19 @@ import { validateWeight } from '../lib/validation';
 import { BestDays } from '../components/best-days';
 import { loadCustomFoods } from '../lib/custom-foods';
 import { FOOD_DB } from '../lib/food-db';
+import { computeDailyTotals } from '../lib/nutrition';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
   const { activeTheme } = useTheme();
   const colors = Colors[activeTheme];
   
+  // État pour rendu côté client uniquement (évite erreurs d'hydratation #418/#310 sur web)
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   const [entries, setEntries] = useState<MealEntry[]>([]);
   const [streak, setStreak] = useState<StreakStats>({
     currentStreakDays: 0,
@@ -41,19 +50,50 @@ export default function StatsScreen() {
     isStreakBonusDay: false,
   });
   const [dragonState, setDragonState] = useState<DragonStatus>({ mood: 'normal', daysSinceLastMeal: 0 });
-  const [score7j, setScore7j] = useState<{ score: number; zone: 'vert' | 'jaune' | 'rouge'; mealsCount: number }>({ score: 0, zone: 'rouge', mealsCount: 0 });
   const [weights, setWeights] = useState<WeightEntry[]>([]);
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('lbs');
   const [weightInput, setWeightInput] = useState('');
   const [baseline, setBaseline] = useState<WeightEntry | null>(null);
   const [customFoods, setCustomFoods] = useState<typeof FOOD_DB>([]);
+  const [excludedBestDays, setExcludedBestDays] = useState<string[]>([]); // Jours exclus du classement (pas supprimés)
 
   const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
 
-  // Charger les entrées
+  // Calcul des calories par jour (pour aligner la logique streak avec la Home)
+  // IMPORTANT: ce useMemo doit être AVANT tout return conditionnel (règle des hooks React)
+  const dayCaloriesMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (!entries || entries.length === 0) return map;
+    const uniqueDays = Array.from(new Set(entries.map((e) => normalizeDate(e.createdAt))));
+    for (const day of uniqueDays) {
+      try {
+        const totals = computeDailyTotals(entries, day, customFoods);
+        map[day] = totals.calories_kcal || 0;
+      } catch {
+        map[day] = 0;
+      }
+    }
+    return map;
+  }, [entries, customFoods]);
+
+  // Charger les entrées (avec synchronisation Firestore comme sur la page principale)
   useEffect(() => {
     const loadEntries = async () => {
+      if (!currentUserId || currentUserId === 'guest') {
+        setEntries([]);
+        return;
+      }
+      
       try {
+        // IMPORTANT: Synchroniser d'abord depuis Firestore (fusion) pour avoir les données les plus récentes
+        try {
+          const { syncFromFirestore } = await import('../lib/data-sync');
+          await syncFromFirestore(currentUserId);
+        } catch (syncError) {
+          console.warn('[Stats] Erreur sync Firestore, utilisation locale:', syncError);
+        }
+        
+        // Après synchronisation, charger depuis AsyncStorage (qui contient maintenant les données fusionnées)
         const key = `feedtoki_entries_${currentUserId}_v1`;
         const json = await AsyncStorage.getItem(key);
         if (json) {
@@ -97,6 +137,25 @@ export default function StatsScreen() {
     load();
   }, [currentUserId]);
 
+  // Charger les jours exclus des "meilleurs jours"
+  useEffect(() => {
+    const loadExcludedDays = async () => {
+      try {
+        const key = `feedtoki_excluded_best_days_${currentUserId}`;
+        const json = await AsyncStorage.getItem(key);
+        if (json) {
+          const parsed = JSON.parse(json);
+          if (Array.isArray(parsed)) {
+            setExcludedBestDays(parsed);
+          }
+        }
+      } catch (error) {
+        console.error('[Stats] Erreur chargement jours exclus:', error);
+      }
+    };
+    loadExcludedDays();
+  }, [currentUserId]);
+
   // Calculer les stats
   useEffect(() => {
     const dayFeeds = entries.reduce((acc, entry) => {
@@ -106,10 +165,10 @@ export default function StatsScreen() {
       return acc;
     }, {} as Record<string, { date: string; mealIds: string[] }>);
 
-    setStreak(computeStreak(dayFeeds));
-    setDragonState(computeDragonState(dayFeeds));
-    setScore7j(computeScore7Jours(entries));
-  }, [entries]);
+    // IMPORTANT: même logique que la Home (streak validé par calories minimum)
+    setStreak(computeStreakWithCalories(dayFeeds, dayCaloriesMap, MIN_CALORIES_FOR_COMPLETE_DAY));
+    setDragonState(computeDragonStateWithCalories(dayFeeds, dayCaloriesMap, MIN_CALORIES_FOR_COMPLETE_DAY));
+  }, [entries, dayCaloriesMap]);
 
   const dragonLevel = getDragonLevel(streak.currentStreakDays);
   const dragonProgress = getDragonProgress(streak.currentStreakDays);
@@ -123,8 +182,41 @@ export default function StatsScreen() {
     setWeightInput(String(toDisplay(weightKg, weightUnit)));
   };
 
+  // Fonction pour exclure un jour du classement des "meilleurs jours"
+  // Les données ne sont PAS supprimées, juste masquées du top
+  const handleExcludeDay = useCallback(async (date: string) => {
+    try {
+      // Ajouter le jour à la liste d'exclusion (sans supprimer les données)
+      setExcludedBestDays(current => {
+        if (current.includes(date)) return current; // Déjà exclu
+        const updated = [...current, date];
+        
+        // Sauvegarder dans AsyncStorage
+        const key = `feedtoki_excluded_best_days_${currentUserId}`;
+        AsyncStorage.setItem(key, JSON.stringify(updated)).catch(error => {
+          console.error('[Stats] Erreur sauvegarde jours exclus:', error);
+        });
+        
+        return updated;
+      });
+    } catch (error) {
+      console.error('[Stats] Erreur exclusion jour:', error);
+      Alert.alert('Erreur', 'Impossible d\'exclure ce jour. Réessayez plus tard.');
+    }
+  }, [currentUserId]);
+
   // Vérifier si le dragon est mort (5 jours sans nourrir)
   const isDragonDead = dragonState.daysSinceLastMeal >= DAYS_CRITICAL;
+
+  // IMPORTANT (Web export): éviter les erreurs d'hydratation React (#418/#310)
+  // Ce return conditionnel doit être APRÈS tous les hooks (règle des hooks React)
+  if (!isClient) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>Chargement…</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -162,6 +254,9 @@ export default function StatsScreen() {
             <Text style={[styles.levelText, { color: colors.text }]}>
               {dragonLevel.emoji} Niveau {dragonLevel.level} - {dragonLevel.name}
             </Text>
+            <Text style={[styles.evolutionsText, { color: colors.icon }]}>
+              Niveaux débloqués: {streak.evolutionsUnlocked} / 12
+            </Text>
             {dragonLevel.level < 12 && (
               <>
                 <View style={styles.progressContainer}>
@@ -171,6 +266,9 @@ export default function StatsScreen() {
                 </View>
                 <Text style={[styles.progressText, { color: colors.icon }]}>
                   {daysToNext} jour{daysToNext > 1 ? 's' : ''} pour le niveau suivant
+                </Text>
+                <Text style={[styles.progressText, { color: colors.icon, marginTop: 4 }]}>
+                  Progression: {Math.round(streak.progressToNextEvolution * 100)}% vers niveau {dragonLevel.level + 1}
                 </Text>
               </>
             )}
@@ -205,29 +303,6 @@ export default function StatsScreen() {
               <Text style={styles.statEmoji}>🎖️</Text>
               <Text style={[styles.statValue, { color: colors.text }]}>{streak.streakBonusEarned}</Text>
               <Text style={[styles.statLabel, { color: colors.icon }]}>Mois complétés</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Score 7 jours */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>📊 Score 7 jours</Text>
-          <View style={[styles.scoreCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
-            <View style={styles.scoreCircle}>
-              <Text style={[
-                styles.scoreValue,
-                { color: score7j.zone === 'vert' ? '#10b981' : score7j.zone === 'jaune' ? '#f59e0b' : '#ef4444' }
-              ]}>
-                {score7j.score}%
-              </Text>
-            </View>
-            <View style={styles.scoreInfo}>
-              <Text style={[styles.scoreLabel, { color: colors.text }]}>
-                {score7j.zone === 'vert' ? '🟢 Excellent!' : score7j.zone === 'jaune' ? '🟡 En progrès' : '🔴 À améliorer'}
-              </Text>
-              <Text style={[styles.scoreDesc, { color: colors.icon }]}>
-                Basé sur {score7j.mealsCount} repas cette semaine
-              </Text>
             </View>
           </View>
         </View>
@@ -389,7 +464,13 @@ export default function StatsScreen() {
         {entries.length > 0 && (
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>🏆 Meilleurs jours</Text>
-            <BestDays entries={entries} customFoods={customFoods} daysToShow={3} />
+            <BestDays 
+              entries={entries} 
+              customFoods={customFoods} 
+              daysToShow={3}
+              excludedDays={excludedBestDays}
+              onExcludeDay={handleExcludeDay}
+            />
           </View>
         )}
 
@@ -483,6 +564,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 12,
+  },
+  evolutionsText: {
+    fontSize: 14,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   progressContainer: {
     width: '100%',

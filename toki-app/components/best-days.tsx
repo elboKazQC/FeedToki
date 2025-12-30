@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { MealEntry, normalizeDate } from '../lib/stats';
 import { computeDailyTotals } from '../lib/nutrition';
 import { FoodItem } from '../lib/food-db';
@@ -8,6 +8,8 @@ type BestDaysProps = {
   entries: MealEntry[];
   customFoods?: FoodItem[];
   daysToShow?: number;
+  excludedDays?: string[]; // Jours exclus du classement (mais données conservées)
+  onExcludeDay?: (date: string) => void; // Callback pour exclure un jour du classement
 };
 
 type DaySummary = {
@@ -17,7 +19,7 @@ type DaySummary = {
   totals: ReturnType<typeof computeDailyTotals>;
 };
 
-export function BestDays({ entries, customFoods = [], daysToShow = 3 }: BestDaysProps) {
+export function BestDays({ entries, customFoods = [], daysToShow = 3, excludedDays = [], onExcludeDay }: BestDaysProps) {
   // Calculer les dates de référence une seule fois (évite l'erreur d'hydratation)
   const dateRefs = useMemo(() => {
     const now = new Date();
@@ -45,6 +47,11 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3 }: BestDays
     const summaries: DaySummary[] = [];
     
     dayMap.forEach((dayEntries, date) => {
+      // Ignorer les jours exclus du classement
+      if (excludedDays.includes(date)) {
+        return;
+      }
+      
       // Calculer le score moyen des repas de ce jour
       const scores = dayEntries.map(e => e.score);
       const avgScore = scores.length > 0 
@@ -65,7 +72,7 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3 }: BestDays
     return summaries
       .sort((a, b) => b.score - a.score)
       .slice(0, daysToShow);
-  }, [entries, customFoods, daysToShow]);
+  }, [entries, customFoods, daysToShow, excludedDays]);
   
   // Fonctions helper utilisant les références de date stables
   const formatDate = (dateStr: string) => {
@@ -113,6 +120,33 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3 }: BestDays
                   <Text style={styles.scoreText}>{day.score}%</Text>
                 </View>
               </View>
+              {onExcludeDay && (
+                <TouchableOpacity
+                  style={styles.excludeButton}
+                  onPress={() => {
+                    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.confirm) {
+                      const confirmed = window.confirm(`Exclure le ${formatDate(day.date)} du classement ?\n\n(Les données ne seront pas supprimées, juste masquées du top)`);
+                      if (confirmed) {
+                        onExcludeDay(day.date);
+                      }
+                    } else {
+                      Alert.alert(
+                        'Exclure ce jour du classement',
+                        `Exclure le ${formatDate(day.date)} du top des meilleurs jours ?\n\nLes données ne seront pas supprimées, juste masquées.`,
+                        [
+                          { text: 'Annuler', style: 'cancel' },
+                          {
+                            text: 'Exclure',
+                            onPress: () => onExcludeDay(day.date),
+                          },
+                        ]
+                      );
+                    }
+                  }}
+                >
+                  <Text style={styles.excludeButtonText}>✕</Text>
+                </TouchableOpacity>
+              )}
             </View>
             
             <Text style={styles.scoreLabel}>{getScoreLabel(day.score)}</Text>
@@ -258,6 +292,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#e5e7eb',
     flex: 1,
+  },
+  excludeButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#6b7280', // Gris au lieu de rouge (moins alarmant car pas de suppression)
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    zIndex: 10,
+  },
+  excludeButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 
