@@ -61,6 +61,8 @@ import { Badge } from '../../components/ui/Badge';
 import { spacing, typography, borderRadius, darkTheme, lightTheme } from '../../constants/design-tokens';
 import { useTheme as useAppTheme } from '../../lib/theme-context';
 import { getFormattedAppVersion } from '../../lib/app-version';
+import { BarcodeScanner } from '../../components/barcode-scanner';
+import { fetchProductByBarcode, mapOffProductToFoodItem } from '../../lib/open-food-facts';
 
 type StatsUI = {
   scorePct: number;
@@ -2178,11 +2180,20 @@ function AddEntryScreen({
   const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null); // Item ID pour modal portion
   const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => void } | null>(null);
   const [portionCount, setPortionCount] = useState<number>(1); // Nombre de portions (toujours visible)
+  
+  // States pour scan code-barres
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [scannedProduct, setScannedProduct] = useState<FoodItem | null>(null);
+  const [showProductConfirmation, setShowProductConfirmation] = useState(false);
+  const [scannedProductQuantity, setScannedProductQuantity] = useState<number>(1);
+  const [scannedFoods, setScannedFoods] = useState<FoodItem[]>([]); // Produits scannés temporaires
 
-  // Fusionner FOOD_DB avec les aliments personnalisés (doit être défini avant tout usage)
+  // Fusionner FOOD_DB avec les aliments personnalisés ET les produits scannés
   const allFoods = useMemo(() => {
-    return mergeFoodsWithCustom(FOOD_DB, customFoods);
-  }, [customFoods]);
+    const merged = mergeFoodsWithCustom(FOOD_DB, customFoods);
+    // Ajouter les produits scannés
+    return [...merged, ...scannedFoods];
+  }, [customFoods, scannedFoods]);
 
   const selectionNutrition = useMemo(() => {
     return items.reduce(
@@ -2353,6 +2364,82 @@ function AddEntryScreen({
     return filtered;
   }, [allFoods, searchLower, quickFilter]);
 
+  // Gérer le scan de code-barres
+  const handleBarcodeScan = async (barcode: string) => {
+    setShowBarcodeScanner(false);
+    
+    try {
+      console.log('[AddEntry] Scan code-barres:', barcode);
+      const product = await fetchProductByBarcode(barcode);
+      
+      if (!product) {
+        // Produit non trouvé -> proposer IA Photo
+        Alert.alert(
+          'Produit introuvable',
+          'Ce produit n\'est pas dans la base Open Food Facts. Voulez-vous prendre une photo pour l\'analyser avec l\'IA ?',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            {
+              text: 'Analyser par photo',
+              onPress: () => {
+                onCancel(); // Fermer le modal actuel
+                router.push('/ai-logger?mode=photo&reason=barcode_not_found');
+              },
+            },
+          ]
+        );
+        return;
+      }
+      
+      // Mapper le produit OFF vers FoodItem
+      const foodItem = mapOffProductToFoodItem(product);
+      setScannedProduct(foodItem);
+      setScannedProductQuantity(1);
+      setShowProductConfirmation(true);
+    } catch (error) {
+      console.error('[AddEntry] Erreur scan:', error);
+      Alert.alert(
+        'Erreur',
+        'Impossible de récupérer les informations du produit. Vérifiez votre connexion internet.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+  
+  const handleAddScannedProduct = () => {
+    if (!scannedProduct) return;
+    
+    // Ajouter le produit aux scannedFoods s'il n'est pas déjà présent
+    const existingFood = allFoods.find(f => f.id === scannedProduct.id);
+    if (!existingFood) {
+      setScannedFoods((prev) => {
+        // Vérifier qu'il n'est pas déjà dans scannedFoods
+        if (prev.some(f => f.id === scannedProduct.id)) {
+          return prev;
+        }
+        return [...prev, scannedProduct];
+      });
+    }
+    
+    // Ajouter le produit scanné aux items
+    const mediumPortion = getDefaultPortion(scannedProduct.tags || []);
+    const portion = createPortionCustomPortion(scannedProductQuantity, mediumPortion, 'g');
+    
+    setItems((prev) => [
+      ...prev,
+      {
+        foodId: scannedProduct.id,
+        portionSize: portion.size,
+        portionGrams: portion.grams,
+        multiplier: portion.multiplier,
+        quantityHint: portion.visualRef,
+      },
+    ]);
+    
+    setShowProductConfirmation(false);
+    setScannedProduct(null);
+  };
+
   const handleSave = async () => {
     // Toujours exiger des items - le label est généré automatiquement
     if (items.length === 0) {
@@ -2400,6 +2487,14 @@ function AddEntryScreen({
           }}
         />
       </View>
+      
+      {/* Bouton scan code-barres */}
+      <TouchableOpacity
+        style={styles.scanButton}
+        onPress={() => setShowBarcodeScanner(true)}
+      >
+        <Text style={styles.scanButtonText}>📷 Scanner un code-barres</Text>
+      </TouchableOpacity>
       
       {/* Liste autocomplete directement sous le champ de recherche */}
       {showAutocomplete && searchLower.length > 0 && filteredFoods.length > 0 && (
@@ -2721,6 +2816,101 @@ function AddEntryScreen({
           allFoods={allFoods}
         />;
       })()}
+      
+      {/* Modal scan code-barres */}
+      <Modal
+        visible={showBarcodeScanner}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setShowBarcodeScanner(false)}
+      >
+        <BarcodeScanner
+          onBarcodeScanned={handleBarcodeScan}
+          onClose={() => setShowBarcodeScanner(false)}
+        />
+      </Modal>
+      
+      {/* Modal confirmation produit scanné */}
+      {showProductConfirmation && scannedProduct && (
+        <Modal
+          visible={true}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowProductConfirmation(false)}
+        >
+          <View style={styles.portionModal}>
+            <View style={styles.portionModalContent}>
+              <Text style={styles.portionModalTitle}>
+                Ajouter ce produit ?
+              </Text>
+              <Text style={styles.portionModalSubtitle}>
+                {scannedProduct.name}
+              </Text>
+              
+              <View style={styles.portionCountControl}>
+                <Text style={styles.portionCountLabel}>Quantité:</Text>
+                <View style={styles.portionCountButtons}>
+                  <TouchableOpacity
+                    style={styles.portionCountButton}
+                    onPress={() => setScannedProductQuantity(Math.max(0.5, scannedProductQuantity - 0.5))}
+                  >
+                    <Text style={styles.portionCountButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.portionCountInput}
+                    value={scannedProductQuantity.toString()}
+                    onChangeText={(text) => {
+                      const val = parseFloat(text);
+                      if (!isNaN(val) && val > 0) {
+                        setScannedProductQuantity(val);
+                      }
+                    }}
+                    keyboardType="decimal-pad"
+                  />
+                  <TouchableOpacity
+                    style={styles.portionCountButton}
+                    onPress={() => setScannedProductQuantity(scannedProductQuantity + 0.5)}
+                  >
+                    <Text style={styles.portionCountButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.customPortionPreview}>
+                <Text style={styles.customPortionPreviewTitle}>Infos nutritionnelles:</Text>
+                <Text style={styles.customPortionPreviewText}>
+                  🔥 {Math.round((scannedProduct.calories_kcal || 0) * scannedProductQuantity)} cal · 
+                  💪 {Math.round((scannedProduct.protein_g || 0) * scannedProductQuantity)}g prot · 
+                  🍞 {Math.round((scannedProduct.carbs_g || 0) * scannedProductQuantity)}g gluc
+                </Text>
+                <Text style={styles.customPortionPreviewCost}>
+                  Coût: {Math.round(computeFoodPoints(scannedProduct) * Math.sqrt(scannedProductQuantity))} pts
+                </Text>
+              </View>
+              
+              <View style={styles.customPortionActions}>
+                <TouchableOpacity
+                  style={styles.portionModalCancel}
+                  onPress={() => {
+                    setShowProductConfirmation(false);
+                    setScannedProduct(null);
+                  }}
+                >
+                  <Text style={styles.portionModalCancelText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.customPortionConfirm}
+                  onPress={handleAddScannedProduct}
+                >
+                  <Text style={styles.customPortionConfirmText}>
+                    Ajouter
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -3760,6 +3950,19 @@ const styles = StyleSheet.create({
   searchContainer: {
     width: '100%',
     marginBottom: 8,
+  },
+  scanButton: {
+    width: '100%',
+    backgroundColor: '#8b5cf6',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  scanButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   input: {
     width: '100%',

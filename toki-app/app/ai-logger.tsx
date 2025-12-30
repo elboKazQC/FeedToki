@@ -1,7 +1,7 @@
 // Écran de logging alimentaire via IA
 // Permet de décrire un repas en texte ou voix, et l'IA extrait les aliments
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,9 @@ import {
   Alert,
   Platform,
   Modal,
+  Image,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
 import { findBestMatch, createFoodItemRef, findMultipleMatches } from '../lib/food-matcher';
@@ -33,9 +35,9 @@ import { trackAIParserUsed, trackMealLogged } from '../lib/analytics';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { spacing } from '../constants/design-tokens';
-import { BarcodeScanner } from '../components/barcode-scanner';
-import { fetchProductByBarcode, mapOffProductToFoodItem, searchAndMapBestProduct } from '../lib/open-food-facts';
+import { searchAndMapBestProduct } from '../lib/open-food-facts';
 import { logger } from '../lib/logger';
+import { parseMealPhotoWithOpenAI } from '../lib/openai-parser';
 
 type ItemSource = 'db' | 'off' | 'estimated';
 
@@ -51,12 +53,18 @@ type DetectedItem = {
 };
 
 export default function AILoggerScreen() {
-  const params = useLocalSearchParams<{ initialText?: string }>();
+  const params = useLocalSearchParams<{ initialText?: string; mode?: string; reason?: string }>();
+  const [inputMode, setInputMode] = useState<'text' | 'photo'>(params.mode === 'photo' ? 'photo' : 'text');
   const [description, setDescription] = useState(params.initialText || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [error, setError] = useState<string>('');
-  const [showScanner, setShowScanner] = useState(false);
+  
+  // États pour le mode Photo
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [showCamera, setShowCamera] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState<{ uri: string; base64: string } | null>(null);
+  const cameraRef = useRef<any>(null);
 
   const handleParse = async () => {
     // Validation de la description
@@ -218,47 +226,165 @@ export default function AILoggerScreen() {
   const isEmailVerified = user?.emailVerified ?? false;
   const canUseAI = !currentUserId || currentUserId === 'guest' || isEmailVerified;
 
-  const handleBarcodeScanned = async (barcode: string) => {
-    setShowScanner(false);
-    setIsProcessing(true);
-    setError('');
+  const handleOpenCamera = async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert(
+          'Accès caméra requis',
+          'Pour analyser une photo, FeedToki a besoin d\'accéder à ta caméra. Autorise la permission dans ton navigateur/app.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
 
+    setCapturedPhoto(null);
+    setShowCamera(true);
+    setInputMode('photo');
+  };
+
+  const handleTakePhoto = async () => {
     try {
-      logger.info('[AI Logger] Code-barres scanné:', barcode);
-      
-      // Fetch produit depuis Open Food Facts
-      const offProduct = await fetchProductByBarcode(barcode);
-      
-      if (!offProduct) {
-        setError(`Produit non trouvé pour le code-barres: ${barcode}`);
-        setIsProcessing(false);
+      if (!cameraRef.current?.takePictureAsync) {
+        Alert.alert('Erreur', 'Caméra non prête. Réessaie dans un instant.');
         return;
       }
 
-      // Mapper vers FoodItem
-      const foodItem = mapOffProductToFoodItem(offProduct);
-      const portion = getDefaultPortion(foodItem.tags);
-      const itemRef = createFoodItemRef(foodItem, portion);
-      const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
+      const photo = await cameraRef.current.takePictureAsync({
+        base64: true,
+        quality: 0.7,
+      });
 
-      // Ajouter à la liste des items détectés
-      const newItem: DetectedItem = {
-        originalName: foodItem.name,
-        matchedItem: null,
-        estimatedItem: undefined,
-        offItem: foodItem,
-        portion,
-        itemRef,
-        pointsCost: Math.round(pointsCost),
-        source: 'off',
-      };
+      if (!photo?.base64 || !photo?.uri) {
+        Alert.alert('Erreur', 'Impossible de récupérer la photo. Réessaie.');
+        return;
+      }
 
-      setDetectedItems(prev => [...prev, newItem]);
-    } catch (error: any) {
-      logger.error('[AI Logger] Erreur scan code-barres:', error);
-      setError(`Erreur lors du scan: ${error.message || 'Erreur inconnue'}`);
+      setCapturedPhoto({ uri: photo.uri, base64: photo.base64 });
+    } catch (e: any) {
+      console.error('[AI Logger] Erreur capture photo:', e);
+      Alert.alert('Erreur', e?.message || 'Impossible de prendre la photo.');
+    }
+  };
+
+  const handleAnalyzePhoto = async () => {
+    if (!capturedPhoto?.base64) {
+      Alert.alert('Erreur', 'Aucune photo à analyser.');
+      return;
+    }
+
+    // Vérifier email si nécessaire
+    if (currentUserId && currentUserId !== 'guest' && !isEmailVerified) {
+      setError('Veuillez vérifier votre adresse email avant d\'utiliser l\'analyse IA. Consultez vos emails pour le lien de vérification.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError('');
+    setDetectedItems([]);
+
+    try {
+      const parseResult = await parseMealPhotoWithOpenAI(capturedPhoto.base64, currentUserId, isEmailVerified);
+
+      if (!parseResult || parseResult.error || parseResult.items.length === 0) {
+        setError(parseResult?.error || 'Aucun aliment détecté sur la photo. Essaie une photo plus claire.');
+        return;
+      }
+
+      // Réutiliser exactement le même pipeline de résolution (OFF -> DB -> estimé)
+      const items: DetectedItem[] = [];
+      for (const parsedItem of parseResult.items) {
+        try {
+          let foodItem: FoodItem;
+          let portion = getDefaultPortion([]);
+          let source: ItemSource = 'estimated';
+          let match: FoodItem | null = null;
+          let offItem: FoodItem | null = null;
+
+          // Étape 1: Open Food Facts
+          try {
+            logger.info('[AI Logger] (Photo) Recherche OFF pour:', parsedItem.name);
+            offItem = await searchAndMapBestProduct(parsedItem.name);
+            if (offItem) {
+              foodItem = offItem;
+              portion = getDefaultPortion(offItem.tags);
+              source = 'off';
+            }
+          } catch (offError) {
+            logger.warn('[AI Logger] (Photo) Erreur recherche OFF:', offError);
+          }
+
+          // Étape 2: DB locale
+          if (!offItem) {
+            if (parsedItem.isComposite === false) {
+              const strictMatch = findBestMatch(parsedItem.name, 0.85);
+              if (strictMatch) {
+                const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
+                const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
+                if (matchWords <= searchWords + 1) {
+                  match = strictMatch;
+                }
+              }
+            } else {
+              match = findBestMatch(parsedItem.name, 0.7);
+            }
+
+            if (match) {
+              foodItem = match;
+              portion = getDefaultPortion(match.tags);
+              source = 'db';
+            }
+          }
+
+          // Étape 3: estimation
+          if (!offItem && !match) {
+            foodItem = createEstimatedFoodItem(
+              parsedItem.name,
+              'photo',
+              parsedItem.category,
+              parsedItem.calories_kcal !== undefined || parsedItem.protein_g !== undefined
+                ? {
+                    calories_kcal: parsedItem.calories_kcal,
+                    protein_g: parsedItem.protein_g,
+                    carbs_g: parsedItem.carbs_g,
+                    fat_g: parsedItem.fat_g,
+                  }
+                : undefined
+            );
+            portion = getDefaultPortion(foodItem.tags);
+            source = 'estimated';
+          }
+
+          const itemRef = createFoodItemRef(foodItem!, portion);
+          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(portion.multiplier);
+
+          items.push({
+            originalName: parsedItem.name || 'Aliment inconnu',
+            matchedItem: match || null,
+            estimatedItem: (!offItem && !match) ? foodItem : undefined,
+            offItem: offItem || undefined,
+            portion,
+            itemRef,
+            pointsCost: Math.round(pointsCost),
+            source,
+          });
+        } catch (itemError: any) {
+          console.error('Erreur traitement item photo:', itemError);
+        }
+      }
+
+      if (items.length === 0) {
+        setError('Impossible d\'analyser les aliments. Essaie une autre photo.');
+      } else {
+        setDetectedItems(items);
+      }
+    } catch (e: any) {
+      console.error('[AI Logger] Erreur analyse photo:', e);
+      setError(e?.message || 'Erreur lors de l\'analyse photo. Réessaie.');
     } finally {
       setIsProcessing(false);
+      setShowCamera(false);
     }
   };
 
@@ -618,11 +744,11 @@ export default function AILoggerScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.scanButton, isProcessing && styles.scanButtonDisabled]}
-          onPress={() => setShowScanner(true)}
-          disabled={isProcessing}
+          style={[styles.scanButton, (isProcessing || !canUseAI) && styles.scanButtonDisabled]}
+          onPress={handleOpenCamera}
+          disabled={isProcessing || !canUseAI}
         >
-          <Text style={styles.scanButtonText}>📷 Scanner code-barres</Text>
+          <Text style={styles.scanButtonText}>📷 Log avec une photo</Text>
         </TouchableOpacity>
       </View>
 
@@ -714,21 +840,68 @@ export default function AILoggerScreen() {
         <Text style={styles.hintTitle}>💡 Astuce</Text>
         <Text style={styles.hintText}>
           Sois aussi précis que possible. Mentionne les quantités si tu les connais (ex: &quot;200g de poulet&quot;).
-          Tu peux aussi scanner le code-barres d'un produit pour avoir ses nutriments exacts.
+          Tu peux aussi prendre une photo de ton repas pour aider l'IA à détecter les aliments.
           {Platform.OS === 'web' && ' (Sur web: autorise l\'accès caméra dans ton navigateur)'}
         </Text>
       </View>
 
-      {/* Modal de scan de code-barres */}
+      {/* Modal caméra (photo) */}
       <Modal
-        visible={showScanner}
+        visible={showCamera}
         animationType="slide"
-        onRequestClose={() => setShowScanner(false)}
+        onRequestClose={() => setShowCamera(false)}
       >
-        <BarcodeScanner
-          onBarcodeScanned={handleBarcodeScanned}
-          onClose={() => setShowScanner(false)}
-        />
+        <View style={styles.cameraContainer}>
+          {!cameraPermission?.granted ? (
+            <View style={styles.cameraPermissionBox}>
+              <Text style={styles.cameraPermissionText}>
+                Autorise l'accès caméra pour prendre une photo.
+              </Text>
+              <TouchableOpacity style={styles.cameraPermissionButton} onPress={requestCameraPermission}>
+                <Text style={styles.cameraPermissionButtonText}>Autoriser la caméra</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cameraCloseButton} onPress={() => setShowCamera(false)}>
+                <Text style={styles.cameraCloseText}>Fermer</Text>
+              </TouchableOpacity>
+            </View>
+          ) : capturedPhoto ? (
+            <View style={styles.cameraPreviewBox}>
+              <Image source={{ uri: capturedPhoto.uri }} style={styles.cameraPreviewImage} />
+              <View style={styles.cameraActionsRow}>
+                <TouchableOpacity
+                  style={styles.cameraSecondaryButton}
+                  onPress={() => setCapturedPhoto(null)}
+                  disabled={isProcessing}
+                >
+                  <Text style={styles.cameraSecondaryButtonText}>Reprendre</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cameraPrimaryButton}
+                  onPress={handleAnalyzePhoto}
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.cameraPrimaryButtonText}>Analyser la photo</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.cameraBox}>
+              <CameraView ref={cameraRef} style={styles.cameraView} facing="back" />
+              <View style={styles.cameraActionsRow}>
+                <TouchableOpacity style={styles.cameraSecondaryButton} onPress={() => setShowCamera(false)}>
+                  <Text style={styles.cameraSecondaryButtonText}>Fermer</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cameraPrimaryButton} onPress={handleTakePhoto}>
+                  <Text style={styles.cameraPrimaryButtonText}>Prendre la photo</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
       </Modal>
     </ScrollView>
   );
@@ -835,6 +1008,95 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cameraContainer: {
+    flex: 1,
+    backgroundColor: '#020617',
+    padding: 16,
+    justifyContent: 'center',
+  },
+  cameraPermissionBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  cameraPermissionText: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  cameraPermissionButton: {
+    backgroundColor: '#8b5cf6',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  cameraPermissionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cameraCloseButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cameraCloseText: {
+    color: '#93c5fd',
+    fontSize: 16,
+  },
+  cameraBox: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  cameraView: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  cameraPreviewBox: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  cameraPreviewImage: {
+    width: '100%',
+    height: 420,
+    borderRadius: 16,
+    marginBottom: 16,
+    backgroundColor: '#111827',
+  },
+  cameraActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cameraPrimaryButton: {
+    flex: 1,
+    backgroundColor: '#22c55e',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraPrimaryButtonText: {
+    color: '#0b1220',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cameraSecondaryButton: {
+    flex: 1,
+    backgroundColor: '#1f2937',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  cameraSecondaryButtonText: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
   },
   resultsContainer: {
     marginTop: 8,

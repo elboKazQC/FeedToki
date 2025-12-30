@@ -108,7 +108,7 @@ export async function parseMealWithOpenAI(
   }
 
   try {
-    logger.log('[OpenAI] Envoi de la requête pour:', description.substring(0, 50) + '...');
+    logger.info('[OpenAI] Envoi de la requête pour:', description.substring(0, 50) + '...');
     
     const response = await fetch(OPENAI_API_URL, {
       method: 'POST',
@@ -373,7 +373,7 @@ Règles importantes:
     }
 
     if (__DEV__) {
-      logger.log('[OpenAI] Réponse reçue, longueur:', content.length, 'caractères');
+      logger.debug('[OpenAI] Réponse reçue, longueur:', content.length, 'caractères');
     }
 
     // Extraire le JSON de la réponse (au cas où il y aurait du texte autour)
@@ -409,7 +409,7 @@ Règles importantes:
     }
 
     if (__DEV__) {
-      logger.log('[OpenAI] ✅ Parsing réussi:', parsed.items.length, 'aliment(s) détecté(s)');
+      logger.debug('[OpenAI] ✅ Parsing réussi:', parsed.items.length, 'aliment(s) détecté(s)');
     }
 
     // Convertir les items en format ParsedFoodItem
@@ -444,6 +444,187 @@ Règles importantes:
     return {
       items: [],
       error: `Erreur lors de l'appel OpenAI: ${error.message || 'Erreur inconnue'}`,
+    };
+  }
+}
+
+/**
+ * Parser une photo de repas avec OpenAI (vision)
+ * - photoBase64: base64 JPEG/PNG sans préfixe
+ */
+export async function parseMealPhotoWithOpenAI(
+  photoBase64: string,
+  userId?: string,
+  userEmailVerified?: boolean
+): Promise<ParsedMealResult> {
+  if (!OPENAI_API_KEY) {
+    logger.warn('[OpenAI] Appel photo bloqué: clé API non configurée');
+    return {
+      items: [],
+      error: 'Clé API OpenAI non configurée. Utilisation du parser texte uniquement.',
+    };
+  }
+
+  if (!photoBase64 || photoBase64.trim().length === 0) {
+    return {
+      items: [],
+      error: 'Photo vide',
+    };
+  }
+
+  // Vérifier que l'email est vérifié (si userId fourni)
+  if (userId && userId !== 'guest' && userEmailVerified === false) {
+    return {
+      items: [],
+      error: 'Veuillez vérifier votre adresse email avant d\'utiliser l\'analyse IA. Consultez vos emails pour le lien de vérification.',
+    };
+  }
+
+  // Rate limiting côté client
+  await waitForClientRateLimit();
+
+  // Rate limiting Firestore par utilisateur
+  if (userId && userId !== 'guest') {
+    const limitCheck = await checkUserAPILimit(userId);
+    if (!limitCheck.allowed) {
+      return {
+        items: [],
+        error: limitCheck.reason || 'Limite d\'appels API atteinte. Réessayez plus tard.',
+      };
+    }
+  }
+
+  try {
+    logger.info('[OpenAI] Envoi requête photo (vision)');
+
+    const response = await fetch(OPENAI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `Tu es un expert en nutrition. Analyse une PHOTO de repas et extrais tous les aliments visibles/identifiables avec leurs quantités estimées.\n\nRetourne UNIQUEMENT un JSON valide avec cette structure:\n{\n  \"items\": [\n    {\n      \"name\": \"nom de l'aliment en français\",\n      \"quantity\": \"quantité avec unité (ex: '200g', '1 portion', '2 oeufs')\",\n      \"quantityNumber\": nombre,\n      \"category\": \"PROTEINE_MAIGRE | LEGUME | FECULENT_SIMPLE | ULTRA_TRANSFORME | GRAS_FRIT | SUCRE\",\n      \"calories_kcal\": nombre,\n      \"protein_g\": nombre,\n      \"carbs_g\": nombre,\n      \"fat_g\": nombre,\n      \"isComposite\": boolean\n    }\n  ]\n}\n\nRÈGLES:\n- JSON seulement (pas de texte, pas de markdown)\n- Sois conservateur si l'image est floue: préfère moins d'items plutôt que d'inventer\n- Si la quantité est inconnue: utilise \"1 portion\" et quantityNumber=1\n- Toujours fournir calories/protéines/glucides/lipides (estimations réalistes)\n`,
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Analyse cette photo de repas et retourne le JSON demandé.',
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${photoBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+        temperature: 0.2,
+      }),
+    });
+
+    // Incrémenter compteur Firestore si userId
+    if (userId && userId !== 'guest') {
+      try {
+        await incrementAPICall(userId);
+      } catch (e) {
+        logger.warn('[OpenAI] Impossible d\'incrémenter le compteur API:', e);
+      }
+    }
+
+    if (!response.ok) {
+      let errorData: any = null;
+      try {
+        errorData = await response.json();
+      } catch {}
+
+      let errorMessage = `Erreur OpenAI (photo): ${response.status}`;
+      if (response.status === 401) {
+        errorMessage = 'Erreur d\'authentification: Clé API OpenAI invalide ou expirée.';
+      } else if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        if (retryAfter) {
+          const delay = parseInt(retryAfter) * 1000;
+          errorMessage = `Limite de taux dépassée. Réessayez dans ${Math.ceil(delay / 1000)} seconde(s).`;
+        } else {
+          errorMessage = 'Limite de taux dépassée: Trop de requêtes à l\'API OpenAI. Réessayez dans quelques instants.';
+        }
+      } else if (response.status >= 500) {
+        errorMessage = 'Erreur serveur OpenAI: Le service est temporairement indisponible.';
+      } else if (errorData?.error?.message) {
+        errorMessage = `Erreur OpenAI: ${errorData.error.message}`;
+      }
+
+      return {
+        items: [],
+        error: errorMessage,
+      };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      logger.error('[OpenAI] Réponse invalide (photo): pas de contenu');
+      return { items: [], error: 'Réponse OpenAI invalide: aucun contenu retourné' };
+    }
+
+    if (__DEV__) {
+      logger.debug('[OpenAI] Réponse photo reçue, longueur:', content.length, 'caractères');
+    }
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      logger.error('[OpenAI] Format invalide (photo): aucun JSON trouvé');
+      return { items: [], error: 'Format de réponse OpenAI invalide: aucun JSON détecté' };
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (parseError: any) {
+      logger.error('[OpenAI] Erreur parsing JSON (photo):', parseError);
+      return { items: [], error: `Erreur parsing JSON OpenAI: ${parseError.message}` };
+    }
+
+    if (!parsed.items || !Array.isArray(parsed.items)) {
+      logger.error('[OpenAI] Format JSON invalide (photo): items manquant');
+      return { items: [], error: 'Format JSON OpenAI invalide: items manquant ou invalide' };
+    }
+
+    const items: ParsedFoodItem[] = parsed.items.map((item: any) => ({
+      name: item.name || '',
+      quantity: item.quantity || '1 portion',
+      quantityNumber: item.quantityNumber || 1,
+      confidence: 0.9,
+      category: item.category || undefined,
+      calories_kcal: typeof item.calories_kcal === 'number' ? item.calories_kcal : undefined,
+      protein_g: typeof item.protein_g === 'number' ? item.protein_g : undefined,
+      carbs_g: typeof item.carbs_g === 'number' ? item.carbs_g : undefined,
+      fat_g: typeof item.fat_g === 'number' ? item.fat_g : undefined,
+      isComposite: typeof item.isComposite === 'boolean' ? item.isComposite : undefined,
+    }));
+
+    return { items, rawResponse: content };
+  } catch (error: any) {
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      logger.error('[OpenAI] Erreur réseau (photo):', error);
+      return {
+        items: [],
+        error: 'Erreur réseau: Impossible de contacter l\'API OpenAI. Vérifiez votre connexion internet.',
+      };
+    }
+
+    logger.error('[OpenAI] Erreur inattendue (photo):', error);
+    return {
+      items: [],
+      error: `Erreur lors de l'appel OpenAI (photo): ${error.message || 'Erreur inconnue'}`,
     };
   }
 }
