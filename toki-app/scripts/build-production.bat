@@ -23,7 +23,7 @@ if not exist ".env.production" (
     exit /b 1
 )
 
-echo [1/4] Vérification des dépendances...
+echo [1/5] Vérification des dépendances...
 call npm install
 if errorlevel 1 (
     echo Erreur lors de l'installation des dépendances
@@ -31,13 +31,25 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/4] Nettoyage du répertoire web-build...
+echo [2/5] Génération du fichier de version...
+for /f "delims=" %%i in ('node -e "console.log(require('./package.json').version)"') do set VERSION=%%i
+for /f "delims=" %%i in ('powershell -Command "Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.000Z' -AsUTC"') do set BUILD_DATE=%%i
+(
+echo // Ce fichier est généré automatiquement par scripts/build-production.bat
+echo // NE PAS MODIFIER MANUELLEMENT
+echo export const BUILD_VERSION = '%VERSION%';
+echo export const BUILD_DATE = '%BUILD_DATE%';
+) > lib\build-version.ts
+echo Version injectée: %VERSION% (build: %BUILD_DATE%)
+
+echo.
+echo [3/5] Nettoyage du répertoire web-build...
 if exist "web-build" (
     rmdir /s /q web-build
 )
 
 echo.
-echo [3/4] Build de l'application pour web...
+echo [4/5] Build de l'application pour web...
 call npx expo export --platform web --output-dir web-build
 if errorlevel 1 (
     echo Erreur lors du build
@@ -45,7 +57,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/4] Déploiement sur Firebase Hosting...
+echo [5/5] Déploiement sur Firebase Hosting...
 call firebase deploy --only hosting
 if errorlevel 1 (
     echo Erreur lors du déploiement

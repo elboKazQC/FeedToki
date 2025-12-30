@@ -24,19 +24,31 @@ if [ ! -f ".env.production" ]; then
     read -p "Appuyez sur Entrée pour continuer quand même, ou Ctrl+C pour annuler..."
 fi
 
-echo "[1/4] Vérification des dépendances..."
+echo "[1/5] Vérification des dépendances..."
 npm install
 
 echo ""
-echo "[2/4] Nettoyage du répertoire web-build..."
+echo "[2/5] Génération du fichier de version..."
+VERSION=$(node -e "console.log(require('./package.json').version)")
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+cat > lib/build-version.ts << EOF
+// Ce fichier est généré automatiquement par scripts/build-production.sh
+// NE PAS MODIFIER MANUELLEMENT
+export const BUILD_VERSION = '$VERSION';
+export const BUILD_DATE = '$BUILD_DATE';
+EOF
+echo "Version injectée: $VERSION (build: $BUILD_DATE)"
+
+echo ""
+echo "[3/5] Nettoyage du répertoire web-build..."
 rm -rf web-build
 
 echo ""
-echo "[3/4] Build de l'application pour web..."
+echo "[4/5] Build de l'application pour web..."
 npx expo export --platform web --output-dir web-build
 
 echo ""
-echo "[4/4] Déploiement sur Firebase Hosting..."
+echo "[5/5] Déploiement sur Firebase Hosting..."
 firebase deploy --only hosting
 
 echo ""
