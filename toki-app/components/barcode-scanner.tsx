@@ -23,6 +23,7 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   const [isDecoding, setIsDecoding] = useState(false);
   const [decodingError, setDecodingError] = useState<string | null>(null);
   const [usePhotoMode, setUsePhotoMode] = useState(false);
+  const [decodingStatus, setDecodingStatus] = useState<string>(''); // Status: 'cloud', 'local', ''
   const cameraRef = useRef<CameraView>(null);
 
   useEffect(() => {
@@ -72,15 +73,22 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
         throw new Error('Photo non capturée ou base64 manquant');
       }
       
-      logger.info('[BarcodeScanner] Photo capturée, décodage en cours (max 10s)...');
+      logger.info('[BarcodeScanner] Photo capturée, décodage en cours (Cloud API → QuaggaJS → ZXing)...');
       
-      // Construire la data URL pour ZXing
+      // Construire la data URL
       const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
       
-      // Décoder avec ZXing avec timeout (max 10 secondes)
-      const decodePromise = decodeBarcodeFromDataUrl(dataUrl);
+      // Décoder avec timeout (max 15 secondes pour inclure Cloud API)
+      setDecodingStatus('cloud');
+      const decodePromise = decodeBarcodeFromDataUrl(dataUrl).then((barcode) => {
+        setDecodingStatus('');
+        return barcode;
+      });
       const timeoutPromise = new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), 10000);
+        setTimeout(() => {
+          setDecodingStatus('');
+          resolve(null);
+        }, 15000);
       });
       
       const barcode = await Promise.race([decodePromise, timeoutPromise]);
@@ -90,7 +98,7 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
         setScanned(true);
         onBarcodeScanned(barcode);
       } else {
-        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives (QuaggaJS + ZXing)');
+        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives (Cloud API + QuaggaJS + ZXing)');
         setDecodingError('Aucun code-barres détecté. Conseils:\n• Centrez bien le code sur la ligne verte\n• Approchez-vous (10-15 cm)\n• Améliorez l\'éclairage et évitez les reflets\n• Ou entrez le code manuellement ci-dessous');
       }
     } catch (error: any) {
@@ -210,13 +218,24 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
                   </View>
                 )}
                 
+                {isDecoding && decodingStatus === 'cloud' && (
+                  <View style={styles.statusContainer}>
+                    <Text style={styles.statusText}>☁️ Analyse cloud en cours...</Text>
+                  </View>
+                )}
+                
                 <TouchableOpacity 
                   style={[styles.captureButton, isDecoding && styles.captureButtonDisabled]} 
                   onPress={handleTakePhoto}
                   disabled={isDecoding}
                 >
                   {isDecoding ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={styles.captureButtonText}>
+                        {decodingStatus === 'cloud' ? 'Analyse...' : 'Décodage...'}
+                      </Text>
+                    </View>
                   ) : (
                     <Text style={styles.captureButtonText}>📸 Prendre la photo du code-barres</Text>
                   )}
@@ -457,5 +476,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     textAlign: 'center',
+  },
+  statusContainer: {
+    backgroundColor: 'rgba(59, 130, 246, 0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    maxWidth: '90%',
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '600',
   },
 });

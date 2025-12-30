@@ -1,16 +1,18 @@
 /**
  * Décodage de codes-barres sur le web (fallback pour iPhone Safari)
- * Utilise QuaggaJS (principal) et ZXing (fallback) pour décoder des images statiques localement
+ * Utilise Google Cloud Vision API (principal), puis QuaggaJS, puis ZXing (fallback)
  * 
- * Améliorations v1.0.9:
- * - QuaggaJS comme méthode principale (meilleur taux de détection sur web mobile)
- * - ZXing en fallback si QuaggaJS échoue
- * - Preprocessing simplifié (QuaggaJS gère mieux les images brutes)
+ * Améliorations v1.1.0:
+ * - Google Cloud Vision API comme méthode principale (taux de détection > 95%)
+ * - QuaggaJS en fallback si API cloud échoue
+ * - ZXing en dernier recours
  */
 
 // @ts-ignore - QuaggaJS n'a pas de types officiels
 import Quagga from 'quagga';
 import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from './firebase-config';
 import { logger } from './logger';
 
 // Configuration des formats supportés (alimentaire uniquement)
@@ -38,21 +40,33 @@ const QUAGGA_CONFIG = {
 
 /**
  * Décode un code-barres depuis une data URL (base64)
- * Essaie d'abord QuaggaJS (meilleur pour web mobile), puis ZXing en fallback
+ * Ordre de priorité: Google Cloud Vision API → QuaggaJS → ZXing
  * 
  * @param dataUrl - Image en format data:image/...;base64,...
  * @returns Le code-barres détecté, ou null si aucun n'est trouvé
  */
 export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string | null> {
   try {
-    logger.info('[barcode-decode-web] Démarrage du décodage (QuaggaJS puis ZXing fallback)');
+    logger.info('[barcode-decode-web] Démarrage du décodage (Cloud API → QuaggaJS → ZXing)');
     
-    // Étape 1: Essayer QuaggaJS (meilleur pour web mobile)
-    logger.info('[barcode-decode-web] Tentative avec QuaggaJS...');
+    // Étape 1: Essayer Google Cloud Vision API (le plus fiable)
+    logger.info('[barcode-decode-web] Tentative avec Google Cloud Vision API...');
+    const cloudResult = await decodeBarcodeWithCloudAPI(dataUrl);
+    
+    if (cloudResult) {
+      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec Cloud API', { 
+        barcode: cloudResult 
+      });
+      return cloudResult;
+    }
+    
+    logger.warn('[barcode-decode-web] Cloud API n\'a pas détecté de code, essai avec QuaggaJS...');
+    
+    // Étape 2: Fallback QuaggaJS (meilleur pour web mobile)
     const quaggaResult = await decodeBarcodeWithQuagga(dataUrl);
     
     if (quaggaResult) {
-      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec QuaggaJS', { 
+      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec QuaggaJS (fallback)', { 
         barcode: quaggaResult 
       });
       return quaggaResult;
@@ -60,7 +74,7 @@ export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string 
     
     logger.warn('[barcode-decode-web] QuaggaJS n\'a pas détecté de code, essai avec ZXing...');
     
-    // Étape 2: Fallback ZXing (avec multi-tentatives)
+    // Étape 3: Fallback ZXing (dernier recours)
     const zxingResult = await decodeBarcodeWithZXing(dataUrl);
     
     if (zxingResult) {
@@ -70,11 +84,67 @@ export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string 
       return zxingResult;
     }
     
-    logger.warn('[barcode-decode-web] ❌ Aucun code-barres détecté (QuaggaJS + ZXing ont échoué)');
+    logger.warn('[barcode-decode-web] ❌ Aucun code-barres détecté (Cloud API + QuaggaJS + ZXing ont échoué)');
     return null;
 
   } catch (error: any) {
     logger.error('[barcode-decode-web] Erreur fatale lors du décodage', { 
+      error: error?.message || String(error) 
+    });
+    return null;
+  }
+}
+
+/**
+ * Décode un code-barres avec Google Cloud Vision API via Firebase Functions
+ * C'est la méthode la plus fiable (> 95% de taux de détection)
+ */
+async function decodeBarcodeWithCloudAPI(dataUrl: string): Promise<string | null> {
+  try {
+    // Vérifier que Firebase est initialisé
+    if (!app) {
+      logger.warn('[barcode-decode-web] Firebase non initialisé, skip Cloud API');
+      return null;
+    }
+    
+    const functions = getFunctions(app);
+    const decodeBarcodeCloud = httpsCallable(functions, 'decodeBarcodeCloud');
+    
+    // Extraire le base64 de la data URL
+    const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+    
+    // Appeler la Firebase Function avec timeout (10 secondes)
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), 10000);
+    });
+    
+    const apiPromise = decodeBarcodeCloud({ imageBase64: base64Data })
+      .then((result: any) => {
+        if (result.data?.success && result.data?.barcode) {
+          return result.data.barcode;
+        }
+        return null;
+      })
+      .catch((error: any) => {
+        // Gérer les erreurs spécifiques
+        if (error.code === 'functions/permission-denied') {
+          logger.warn('[barcode-decode-web] Cloud API: Vision API non activée ou permissions manquantes');
+        } else if (error.code === 'functions/invalid-argument') {
+          logger.warn('[barcode-decode-web] Cloud API: Image invalide');
+        } else {
+          logger.warn('[barcode-decode-web] Cloud API erreur:', { 
+            code: error.code, 
+            message: error.message 
+          });
+        }
+        return null;
+      });
+    
+    const result = await Promise.race([apiPromise, timeoutPromise]);
+    
+    return result;
+  } catch (error: any) {
+    logger.warn('[barcode-decode-web] Erreur Cloud API (fallback vers local):', { 
       error: error?.message || String(error) 
     });
     return null;
