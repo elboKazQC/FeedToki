@@ -135,10 +135,50 @@ export default function AILoggerScreen() {
             logger.info('[AI Logger] Recherche OFF pour:', parsedItem.name);
             offItem = await searchAndMapBestProduct(parsedItem.name);
             if (offItem) {
-              logger.info('[AI Logger] Produit OFF trouvé:', offItem.name);
-              foodItem = offItem;
+              logger.info('[AI Logger] Produit OFF trouvé:', offItem.name, {
+                calories: offItem.calories_kcal,
+                protein: offItem.protein_g,
+                carbs: offItem.carbs_g,
+                fat: offItem.fat_g,
+              });
+              
+              // Vérifier si le produit OFF a des valeurs nutritionnelles valides
+              const hasValidNutrition = 
+                (offItem.calories_kcal && offItem.calories_kcal > 0) ||
+                ((offItem.protein_g || 0) + (offItem.carbs_g || 0) + (offItem.fat_g || 0) > 0);
+              
+              // Si le produit OFF a des valeurs à 0 ou manquantes, fusionner avec les valeurs de l'IA
+              if (!hasValidNutrition && (
+                parsedItem.calories_kcal !== undefined ||
+                parsedItem.protein_g !== undefined ||
+                parsedItem.carbs_g !== undefined ||
+                parsedItem.fat_g !== undefined
+              )) {
+                logger.info('[AI Logger] Fusion des valeurs: OFF a des valeurs à 0, utilisation des valeurs IA');
+                // Créer un nouvel item avec les valeurs de l'IA mais garder les autres propriétés OFF (tags, points, etc.)
+                foodItem = {
+                  ...offItem,
+                  calories_kcal: parsedItem.calories_kcal !== undefined 
+                    ? Math.round(parsedItem.calories_kcal) 
+                    : offItem.calories_kcal || 0,
+                  protein_g: parsedItem.protein_g !== undefined 
+                    ? Math.round(parsedItem.protein_g * 10) / 10 
+                    : offItem.protein_g || 0,
+                  carbs_g: parsedItem.carbs_g !== undefined 
+                    ? Math.round(parsedItem.carbs_g * 10) / 10 
+                    : offItem.carbs_g || 0,
+                  fat_g: parsedItem.fat_g !== undefined 
+                    ? Math.round(parsedItem.fat_g * 10) / 10 
+                    : offItem.fat_g || 0,
+                };
+                source = 'off'; // Garder la source OFF car c'est un produit réel
+              } else {
+                // Le produit OFF a des valeurs valides, l'utiliser tel quel
+                foodItem = offItem;
+                source = 'off';
+              }
+              
               portion = getDefaultPortion(offItem.tags);
-              source = 'off';
             }
           } catch (offError) {
             logger.warn('[AI Logger] Erreur recherche OFF:', offError);
@@ -307,9 +347,50 @@ export default function AILoggerScreen() {
             logger.info('[AI Logger] (Photo) Recherche OFF pour:', parsedItem.name);
             offItem = await searchAndMapBestProduct(parsedItem.name);
             if (offItem) {
-              foodItem = offItem;
+              logger.info('[AI Logger] (Photo) Produit OFF trouvé:', offItem.name, {
+                calories: offItem.calories_kcal,
+                protein: offItem.protein_g,
+                carbs: offItem.carbs_g,
+                fat: offItem.fat_g,
+              });
+              
+              // Vérifier si le produit OFF a des valeurs nutritionnelles valides
+              const hasValidNutrition = 
+                (offItem.calories_kcal && offItem.calories_kcal > 0) ||
+                ((offItem.protein_g || 0) + (offItem.carbs_g || 0) + (offItem.fat_g || 0) > 0);
+              
+              // Si le produit OFF a des valeurs à 0 ou manquantes, fusionner avec les valeurs de l'IA
+              if (!hasValidNutrition && (
+                parsedItem.calories_kcal !== undefined ||
+                parsedItem.protein_g !== undefined ||
+                parsedItem.carbs_g !== undefined ||
+                parsedItem.fat_g !== undefined
+              )) {
+                logger.info('[AI Logger] (Photo) Fusion des valeurs: OFF a des valeurs à 0, utilisation des valeurs IA');
+                // Créer un nouvel item avec les valeurs de l'IA mais garder les autres propriétés OFF (tags, points, etc.)
+                foodItem = {
+                  ...offItem,
+                  calories_kcal: parsedItem.calories_kcal !== undefined 
+                    ? Math.round(parsedItem.calories_kcal) 
+                    : offItem.calories_kcal || 0,
+                  protein_g: parsedItem.protein_g !== undefined 
+                    ? Math.round(parsedItem.protein_g * 10) / 10 
+                    : offItem.protein_g || 0,
+                  carbs_g: parsedItem.carbs_g !== undefined 
+                    ? Math.round(parsedItem.carbs_g * 10) / 10 
+                    : offItem.carbs_g || 0,
+                  fat_g: parsedItem.fat_g !== undefined 
+                    ? Math.round(parsedItem.fat_g * 10) / 10 
+                    : offItem.fat_g || 0,
+                };
+                source = 'off'; // Garder la source OFF car c'est un produit réel
+              } else {
+                // Le produit OFF a des valeurs valides, l'utiliser tel quel
+                foodItem = offItem;
+                source = 'off';
+              }
+              
               portion = getDefaultPortion(offItem.tags);
-              source = 'off';
             }
           } catch (offError) {
             logger.warn('[AI Logger] (Photo) Erreur recherche OFF:', offError);

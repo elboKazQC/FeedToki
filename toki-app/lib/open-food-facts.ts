@@ -219,6 +219,101 @@ function detectTagsFromOffProduct(product: OffProduct): FoodTag[] {
 }
 
 /**
+ * Calculer la similarité entre deux chaînes (simple, basée sur les mots communs)
+ */
+function calculateNameSimilarity(query: string, productName: string): number {
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  
+  if (queryWords.length === 0 || productWords.length === 0) {
+    return 0;
+  }
+  
+  // Compter les mots communs
+  const commonWords = queryWords.filter(qw => 
+    productWords.some(pw => pw.includes(qw) || qw.includes(pw))
+  );
+  
+  // Similarité basée sur le ratio de mots communs
+  return commonWords.length / Math.max(queryWords.length, productWords.length);
+}
+
+/**
+ * Valider un produit OFF avant de l'utiliser
+ * @param product Produit à valider
+ * @param query Requête de recherche originale
+ * @returns true si le produit est valide, false sinon
+ */
+function isValidOffProduct(product: OffProduct, query: string): boolean {
+  // 1. Vérifier les valeurs nutritionnelles
+  const nutriments = product.nutriments || {};
+  const calories = nutriments['energy-kcal_100g'] || 0;
+  const protein = nutriments['proteins_100g'] || 0;
+  const carbs = nutriments['carbohydrates_100g'] || 0;
+  const fat = nutriments['fat_100g'] || 0;
+  
+  // Le produit doit avoir au moins des calories > 0 OU (protéines + glucides + lipides) > 0
+  const hasValidNutrition = calories > 0 || (protein + carbs + fat) > 0;
+  
+  if (!hasValidNutrition) {
+    logger.debug('[OFF] Produit rejeté: valeurs nutritionnelles invalides (tout à 0)', {
+      productName: product.product_name_fr || product.product_name,
+      query,
+    });
+    return false;
+  }
+  
+  // 2. Vérifier la pertinence du nom
+  const productName = product.product_name_fr || product.product_name || '';
+  if (!productName) {
+    logger.debug('[OFF] Produit rejeté: nom manquant', { query });
+    return false;
+  }
+  
+  // Calculer la similarité entre la requête et le nom du produit
+  const similarity = calculateNameSimilarity(query, productName);
+  
+  // Seuil de similarité: au moins 30% des mots doivent correspondre
+  // Pour les aliments génériques simples (1-2 mots), être plus strict
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const minSimilarity = queryWords.length <= 2 ? 0.5 : 0.3;
+  
+  if (similarity < minSimilarity) {
+    logger.debug('[OFF] Produit rejeté: nom non pertinent', {
+      query,
+      productName,
+      similarity: similarity.toFixed(2),
+      minSimilarity,
+    });
+    return false;
+  }
+  
+  // 3. Filtrer les produits avec des noms complètement différents
+  // Ex: "sidi Ali" pour "pâte" ne devrait pas passer
+  const productNameLower = productName.toLowerCase();
+  const productWords = productNameLower.split(/\s+/).filter(w => w.length > 2);
+  
+  // Si la requête est très courte (1-2 mots) et le nom du produit est très différent, rejeter
+  if (queryWords.length <= 2) {
+    const hasCommonRoot = queryWords.some(qw => {
+      // Vérifier si au moins un mot de la requête apparaît dans le nom du produit
+      return productNameLower.includes(qw) || 
+             productWords.some(pw => pw.includes(qw) || qw.includes(pw));
+    });
+    
+    if (!hasCommonRoot) {
+      logger.debug('[OFF] Produit rejeté: aucun mot commun avec la requête', {
+        query,
+        productName,
+      });
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
  * Calculer baseScore depuis les tags et nutriscore
  */
 function calculateBaseScore(product: OffProduct, tags: FoodTag[]): number {
@@ -294,18 +389,33 @@ export function mapOffProductToFoodItem(product: OffProduct): FoodItem {
 /**
  * Rechercher et mapper le meilleur produit correspondant
  * @param query Termes de recherche
- * @returns FoodItem du produit le plus pertinent, ou null
+ * @returns FoodItem du produit le plus pertinent et valide, ou null
  */
 export async function searchAndMapBestProduct(query: string): Promise<FoodItem | null> {
-  const searchResult = await searchProducts(query, { page_size: 5 });
+  const searchResult = await searchProducts(query, { page_size: 10 });
   
   if (!searchResult || searchResult.products.length === 0) {
+    logger.debug('[OFF] Aucun résultat de recherche pour:', query);
     return null;
   }
 
-  // Prendre le premier résultat (le plus pertinent selon OFF)
-  const bestProduct = searchResult.products[0];
-  return mapOffProductToFoodItem(bestProduct);
+  // Parcourir les résultats et trouver le premier produit valide
+  for (const product of searchResult.products) {
+    if (isValidOffProduct(product, query)) {
+      logger.info('[OFF] Produit valide trouvé:', {
+        query,
+        productName: product.product_name_fr || product.product_name,
+        calories: product.nutriments?.['energy-kcal_100g'] || 0,
+      });
+      return mapOffProductToFoodItem(product);
+    }
+  }
+
+  // Aucun produit valide trouvé
+  logger.warn('[OFF] Aucun produit valide trouvé pour:', query, {
+    totalResults: searchResult.products.length,
+  });
+  return null;
 }
 
 /**
