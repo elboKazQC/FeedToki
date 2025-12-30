@@ -61,31 +61,37 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
       
       logger.info('[BarcodeScanner] Capture de la photo...');
       
+      // Amélioration qualité: quality 0.9 et skipProcessing false pour meilleure détection
       const photo = await cameraRef.current.takePictureAsync({
         base64: true,
-        quality: 0.7,
-        skipProcessing: true,
+        quality: 0.9, // Augmenté de 0.7 à 0.9 pour meilleure qualité
+        skipProcessing: false, // Laisser le traitement natif (améliore la netteté)
       });
       
       if (!photo || !photo.base64) {
         throw new Error('Photo non capturée ou base64 manquant');
       }
       
-      logger.info('[BarcodeScanner] Photo capturée, décodage en cours...');
+      logger.info('[BarcodeScanner] Photo capturée, décodage en cours (max 10s)...');
       
       // Construire la data URL pour ZXing
       const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
       
-      // Décoder avec ZXing
-      const barcode = await decodeBarcodeFromDataUrl(dataUrl);
+      // Décoder avec ZXing avec timeout (max 10 secondes)
+      const decodePromise = decodeBarcodeFromDataUrl(dataUrl);
+      const timeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 10000);
+      });
+      
+      const barcode = await Promise.race([decodePromise, timeoutPromise]);
       
       if (barcode) {
         logger.info('[BarcodeScanner] Code-barres décodé avec succès', { barcode });
         setScanned(true);
         onBarcodeScanned(barcode);
       } else {
-        logger.warn('[BarcodeScanner] Aucun code-barres détecté dans la photo');
-        setDecodingError('Aucun code-barres détecté. Assurez-vous que le code est bien visible et centré sur la ligne verte.');
+        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives');
+        setDecodingError('Aucun code-barres détecté après plusieurs tentatives. Essayez de mieux centrer le code sur la ligne verte, d\'améliorer l\'éclairage, ou entrez le code manuellement.');
       }
     } catch (error: any) {
       logger.error('[BarcodeScanner] Erreur lors de la capture/décodage', { 
