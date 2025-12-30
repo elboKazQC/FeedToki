@@ -2,7 +2,7 @@
 // Utilise expo-camera pour scanner les codes-barres de produits
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput } from 'react-native';
 import { CameraView, Camera, BarcodeScanningResult } from 'expo-camera';
 
 type BarcodeScannerProps = {
@@ -13,6 +13,8 @@ type BarcodeScannerProps = {
 export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProps) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
+  const [manualBarcode, setManualBarcode] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -28,22 +30,67 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
     onBarcodeScanned(data);
   };
 
+  const handleManualSubmit = () => {
+    if (manualBarcode.trim().length === 0) return;
+    setScanned(true);
+    onBarcodeScanned(manualBarcode.trim());
+  };
+
   if (hasPermission === null) {
     return (
       <View style={styles.container}>
         <Text style={styles.text}>Demande d'accès à la caméra...</Text>
+        <TouchableOpacity 
+          style={styles.manualInputButton} 
+          onPress={() => setShowManualInput(true)}
+        >
+          <Text style={styles.manualInputButtonText}>✏️ Entrer le code manuellement</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <Text style={styles.closeButtonText}>Annuler</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  if (hasPermission === false) {
+  if (hasPermission === false || showManualInput) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>
-          Accès à la caméra refusé. Veuillez autoriser l'accès dans les paramètres.
-        </Text>
+        {hasPermission === false && (
+          <Text style={styles.text}>
+            Accès à la caméra refusé.{'\n'}
+            Vous pouvez entrer le code-barres manuellement.
+          </Text>
+        )}
+        <Text style={styles.manualTitle}>Entrer le code-barres (EAN)</Text>
+        <TextInput
+          style={styles.manualInput}
+          placeholder="Ex: 3017620422003"
+          placeholderTextColor="#6b7280"
+          value={manualBarcode}
+          onChangeText={setManualBarcode}
+          keyboardType="numeric"
+          autoFocus
+          returnKeyType="search"
+          onSubmitEditing={handleManualSubmit}
+        />
+        <TouchableOpacity 
+          style={[styles.submitButton, manualBarcode.trim().length === 0 && styles.submitButtonDisabled]} 
+          onPress={handleManualSubmit}
+          disabled={manualBarcode.trim().length === 0}
+        >
+          <Text style={styles.submitButtonText}>🔍 Rechercher</Text>
+        </TouchableOpacity>
+        {hasPermission !== false && (
+          <TouchableOpacity 
+            style={styles.backToScanButton} 
+            onPress={() => setShowManualInput(false)}
+          >
+            <Text style={styles.backToScanButtonText}>📷 Retour au scan</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-          <Text style={styles.closeButtonText}>Fermer</Text>
+          <Text style={styles.closeButtonText}>Annuler</Text>
         </TouchableOpacity>
       </View>
     );
@@ -83,6 +130,12 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
             <Text style={styles.instructionText}>
               Placez le code-barres dans le cadre
             </Text>
+            <TouchableOpacity 
+              style={styles.manualInputButton} 
+              onPress={() => setShowManualInput(true)}
+            >
+              <Text style={styles.manualInputButtonText}>✏️ Entrer manuellement</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
               <Text style={styles.cancelButtonText}>Annuler</Text>
             </TouchableOpacity>
@@ -190,10 +243,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 12,
+    marginTop: 12,
   },
   cancelButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  manualTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  manualInput: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 18,
+    color: '#fff',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    width: '80%',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  manualInputButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 12,
+    borderWidth: 2,
+    borderColor: '#60a5fa',
+  },
+  manualInputButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  submitButton: {
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  submitButtonDisabled: {
+    opacity: 0.5,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  backToScanButton: {
+    backgroundColor: '#6b7280',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  backToScanButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

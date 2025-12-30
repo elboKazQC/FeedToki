@@ -453,16 +453,22 @@ export default function App() {
           const parsed = JSON.parse(raw);
           let balance = parsed.balance ?? 0;
           const last = parsed.lastClaimDate ?? '';
+          const startOfDayBalance = parsed.startOfDayBalance;
           
-          if (__DEV__) console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance);
+          if (__DEV__) console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance, 'startOfDayBalance:', startOfDayBalance);
           
           if (last !== today) {
-            // Nouveau jour : créditer les points quotidiens
+            // Nouveau jour : créditer les points quotidiens (carryover)
             const oldBalance = balance;
             balance = Math.min(maxCapFromProfile, balance + dailyPointsFromProfile);
             if (__DEV__) console.log('[Index] Nouveau jour ! Crédit de', dailyPointsFromProfile, 'pts. Ancien:', oldBalance, '→ Nouveau:', balance);
             
-            await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance, lastClaimDate: today }));
+            // Stocker aussi startOfDayBalance pour le recalcul
+            await AsyncStorage.setItem(pointsKey, JSON.stringify({ 
+              balance, 
+              lastClaimDate: today,
+              startOfDayBalance: balance 
+            }));
             
             // Incrémenter les points totaux
             const currentTotal = totalRaw ? JSON.parse(totalRaw) : 0;
@@ -481,7 +487,11 @@ export default function App() {
           const initBalance = Math.min(maxCapFromProfile, dailyPointsFromProfile);
           if (__DEV__) console.log('[Index] Initialisation avec', initBalance, 'pts (budget quotidien:', dailyPointsFromProfile, ', cap:', maxCapFromProfile, ')');
           
-          await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: initBalance, lastClaimDate: today }));
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({ 
+            balance: initBalance, 
+            lastClaimDate: today,
+            startOfDayBalance: initBalance 
+          }));
           setPoints(initBalance);
           setLastClaimDate(today);
           
@@ -529,6 +539,7 @@ export default function App() {
         const pointsData = JSON.parse(pointsRaw);
         const currentBalance = pointsData.balance ?? 0;
         const lastClaimDate = pointsData.lastClaimDate ?? '';
+        let startOfDayBalance = pointsData.startOfDayBalance;
 
         // Ne recalculer que si c'est aujourd'hui
         if (lastClaimDate !== today) {
@@ -578,12 +589,19 @@ export default function App() {
           }
         }
 
-        // Calculer le solde attendu : points du jour - dépenses
-        const expectedBalance = Math.max(0, dailyPointsFromProfile - totalSpentToday);
+        // Si startOfDayBalance n'existe pas (ancienne version), l'estimer depuis currentBalance + totalSpentToday
+        if (startOfDayBalance === undefined) {
+          const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
+          startOfDayBalance = Math.min(maxCapFromProfile, currentBalance + totalSpentToday);
+          if (__DEV__) console.log('[Recalc] startOfDayBalance non trouvé, estimation:', startOfDayBalance);
+        }
+
+        // Calculer le solde attendu : solde de début de journée - dépenses (carryover préservé)
+        const expectedBalance = Math.max(0, startOfDayBalance - totalSpentToday);
 
         if (__DEV__) {
           console.log('[Recalc] Recalcul des points:', {
-            dailyPoints: dailyPointsFromProfile,
+            startOfDayBalance,
             totalSpent: totalSpentToday,
             expectedBalance,
             currentBalance,
@@ -594,14 +612,18 @@ export default function App() {
         if (expectedBalance !== currentBalance) {
           if (__DEV__) {
             console.log('[Recalc] ✅ Correction automatique des points:', {
-              dailyPoints: dailyPointsFromProfile,
+              startOfDayBalance,
               totalSpent: totalSpentToday,
               expectedBalance,
               currentBalance,
             });
           }
 
-          await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: expectedBalance, lastClaimDate: today }));
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({ 
+            balance: expectedBalance, 
+            lastClaimDate: today,
+            startOfDayBalance 
+          }));
           setPoints(expectedBalance);
           if (__DEV__) console.log('[Recalc] Points mis à jour localement:', expectedBalance);
 
@@ -700,7 +722,13 @@ export default function App() {
           });
 
           const pointsKey = getPointsKey();
-          await AsyncStorage.setItem(pointsKey, JSON.stringify({ balance: correctBalance, lastClaimDate: today }));
+          const pointsRaw = await AsyncStorage.getItem(pointsKey);
+          const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+          await AsyncStorage.setItem(pointsKey, JSON.stringify({ 
+            ...pointsData,
+            balance: correctBalance, 
+            lastClaimDate: today 
+          }));
           setPoints(correctBalance);
 
           // Synchroniser vers Firestore
@@ -997,13 +1025,24 @@ export default function App() {
         }
       }
       
-      // Calculer le solde correct : points du jour - dépenses
-      const correctBalance = Math.max(0, Math.min(maxCapFromProfile, dailyPointsFromProfile - totalSpent));
-      
+      // Calculer le solde correct : startOfDayBalance - dépenses (pour préserver le carryover)
+      // Si pas de startOfDayBalance, l'estimer (cas de migration)
       const pointsKey = getPointsKey();
+      const pointsRaw = await AsyncStorage.getItem(pointsKey);
+      const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
+      let startOfDayBalance = pointsData.startOfDayBalance;
+      
+      if (startOfDayBalance === undefined) {
+        // Estimer depuis le budget quotidien (cas de migration)
+        startOfDayBalance = dailyPointsFromProfile;
+      }
+      
+      const correctBalance = Math.max(0, Math.min(maxCapFromProfile, startOfDayBalance - totalSpent));
+      
       await AsyncStorage.setItem(pointsKey, JSON.stringify({
         balance: correctBalance,
         lastClaimDate: today,
+        startOfDayBalance,
       }));
       
       setPoints(correctBalance);

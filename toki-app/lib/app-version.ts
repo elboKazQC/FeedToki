@@ -14,7 +14,7 @@ export function getAppVersion(): string {
   }
   
   // Fallback hardcodé (sera mis à jour lors du bump)
-  return '1.0.1';
+  return '1.0.2';
 }
 
 /**
