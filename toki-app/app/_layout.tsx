@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/lib/auth-context';
 import { ThemeProvider as TokiThemeProvider } from '@/lib/theme-context';
+import { autoCleanupWebCache } from '@/lib/web-cache-buster';
 import * as Sentry from '@sentry/react-native';
 
 // Initialiser Sentry (seulement en production ou avec DSN configuré)
@@ -39,6 +40,13 @@ if (SENTRY_DSN) {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  // Auto-cleanup des caches web au démarrage (web uniquement)
+  useEffect(() => {
+    autoCleanupWebCache().catch(err => {
+      console.warn('[RootLayout] Cache cleanup failed:', err);
+    });
+  }, []);
+
   return (
     <TokiThemeProvider>
       <AuthProvider>
@@ -59,6 +67,7 @@ export default function RootLayout() {
             <Stack.Screen name="points-explanation" options={{ headerShown: false }} />
             <Stack.Screen name="privacy-policy" options={{ headerShown: false }} />
             <Stack.Screen name="terms-of-service" options={{ headerShown: false }} />
+            <Stack.Screen name="version" options={{ headerShown: false }} />
           </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>

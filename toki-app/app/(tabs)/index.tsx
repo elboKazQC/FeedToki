@@ -1457,7 +1457,9 @@ function HomeScreen({
       <View style={styles.headerRow}>
         <Text style={styles.logo}>FeedToki 🐉</Text>
         <View style={styles.headerRightSection}>
-          <Text style={styles.headerVersion}>{getFormattedAppVersion()}</Text>
+          <TouchableOpacity onPress={() => router.push('/version')}>
+            <Text style={styles.headerVersion}>{getFormattedAppVersion()}</Text>
+          </TouchableOpacity>
           <TouchableOpacity 
             style={styles.headerSettingsButton}
             onPress={() => setShowSettingsModal(true)}
