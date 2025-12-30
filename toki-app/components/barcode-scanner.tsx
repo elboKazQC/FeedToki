@@ -1,9 +1,12 @@
 // Composant de scan de code-barres
 // Utilise expo-camera pour scanner les codes-barres de produits
+// Fallback photo + ZXing pour iPhone Safari web (scan live non supporté)
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { CameraView, Camera, BarcodeScanningResult } from 'expo-camera';
+import { decodeBarcodeFromDataUrl, isIOSSafari } from '../lib/barcode-decode-web';
+import { logger } from '../lib/logger';
 
 type BarcodeScannerProps = {
   onBarcodeScanned: (barcode: string) => void;
@@ -15,11 +18,23 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   const [scanned, setScanned] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  
+  // États pour le mode photo (fallback iPhone Safari)
+  const [isDecoding, setIsDecoding] = useState(false);
+  const [decodingError, setDecodingError] = useState<string | null>(null);
+  const [usePhotoMode, setUsePhotoMode] = useState(false);
+  const cameraRef = useRef<CameraView>(null);
 
   useEffect(() => {
     (async () => {
       const { status } = await Camera.requestCameraPermissionsAsync();
       setHasPermission(status === 'granted');
+      
+      // Détecter si on doit utiliser le mode photo (iPhone Safari web)
+      if (Platform.OS === 'web' && isIOSSafari()) {
+        logger.info('[BarcodeScanner] iPhone Safari détecté → mode photo activé');
+        setUsePhotoMode(true);
+      }
     })();
   }, []);
 
@@ -34,6 +49,52 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
     if (manualBarcode.trim().length === 0) return;
     setScanned(true);
     onBarcodeScanned(manualBarcode.trim());
+  };
+
+  // Mode photo: capturer une image et la décoder avec ZXing
+  const handleTakePhoto = async () => {
+    if (!cameraRef.current || isDecoding) return;
+    
+    try {
+      setIsDecoding(true);
+      setDecodingError(null);
+      
+      logger.info('[BarcodeScanner] Capture de la photo...');
+      
+      const photo = await cameraRef.current.takePictureAsync({
+        base64: true,
+        quality: 0.7,
+        skipProcessing: true,
+      });
+      
+      if (!photo || !photo.base64) {
+        throw new Error('Photo non capturée ou base64 manquant');
+      }
+      
+      logger.info('[BarcodeScanner] Photo capturée, décodage en cours...');
+      
+      // Construire la data URL pour ZXing
+      const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+      
+      // Décoder avec ZXing
+      const barcode = await decodeBarcodeFromDataUrl(dataUrl);
+      
+      if (barcode) {
+        logger.info('[BarcodeScanner] Code-barres décodé avec succès', { barcode });
+        setScanned(true);
+        onBarcodeScanned(barcode);
+      } else {
+        logger.warn('[BarcodeScanner] Aucun code-barres détecté dans la photo');
+        setDecodingError('Aucun code-barres détecté. Assurez-vous que le code est bien visible et centré sur la ligne verte.');
+      }
+    } catch (error: any) {
+      logger.error('[BarcodeScanner] Erreur lors de la capture/décodage', { 
+        error: error?.message || String(error) 
+      });
+      setDecodingError('Erreur lors de la capture. Réessayez ou entrez le code manuellement.');
+    } finally {
+      setIsDecoding(false);
+    }
   };
 
   if (hasPermission === null) {
@@ -99,9 +160,10 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   return (
     <View style={styles.container}>
       <CameraView
+        ref={cameraRef}
         style={styles.camera}
         facing="back"
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={scanned || usePhotoMode ? undefined : handleBarCodeScanned}
         barcodeScannerSettings={{
           barcodeTypes: [
             'ean13',
@@ -129,15 +191,53 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
             <View style={styles.sideOverlay} />
           </View>
           <View style={styles.bottomOverlay}>
-            <Text style={styles.instructionText}>
-              Placez le code-barres dans la bande. Approchez-vous (10–15 cm) et évitez les reflets.
-            </Text>
-            <TouchableOpacity 
-              style={styles.manualInputButton} 
-              onPress={() => setShowManualInput(true)}
-            >
-              <Text style={styles.manualInputButtonText}>✏️ Entrer manuellement</Text>
-            </TouchableOpacity>
+            {usePhotoMode ? (
+              // Mode photo pour iPhone Safari
+              <>
+                <Text style={styles.instructionText}>
+                  Placez le code-barres dans la bande verte, puis appuyez sur le bouton.
+                </Text>
+                
+                {decodingError && (
+                  <View style={styles.errorContainer}>
+                    <Text style={styles.errorText}>❌ {decodingError}</Text>
+                  </View>
+                )}
+                
+                <TouchableOpacity 
+                  style={[styles.captureButton, isDecoding && styles.captureButtonDisabled]} 
+                  onPress={handleTakePhoto}
+                  disabled={isDecoding}
+                >
+                  {isDecoding ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.captureButtonText}>📸 Prendre la photo du code-barres</Text>
+                  )}
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.manualInputButton} 
+                  onPress={() => setShowManualInput(true)}
+                  disabled={isDecoding}
+                >
+                  <Text style={styles.manualInputButtonText}>✏️ Entrer manuellement</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              // Mode scan live (navigateurs compatibles)
+              <>
+                <Text style={styles.instructionText}>
+                  Placez le code-barres dans la bande. Approchez-vous (10–15 cm) et évitez les reflets.
+                </Text>
+                <TouchableOpacity 
+                  style={styles.manualInputButton} 
+                  onPress={() => setShowManualInput(true)}
+                >
+                  <Text style={styles.manualInputButtonText}>✏️ Entrer manuellement</Text>
+                </TouchableOpacity>
+              </>
+            )}
             <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
               <Text style={styles.cancelButtonText}>Annuler</Text>
             </TouchableOpacity>
@@ -321,5 +421,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  captureButton: {
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    minWidth: 280,
+    alignItems: 'center',
+  },
+  captureButtonDisabled: {
+    opacity: 0.6,
+  },
+  captureButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    maxWidth: '90%',
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
