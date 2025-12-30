@@ -3,7 +3,7 @@
 // Fallback photo + ZXing pour iPhone Safari web (scan live non supporté)
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput, ActivityIndicator, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput, ActivityIndicator, Image, ScrollView, Modal } from 'react-native';
 import { CameraView, Camera, BarcodeScanningResult } from 'expo-camera';
 import { decodeBarcodeFromDataUrl, isIOSSafari } from '../lib/barcode-decode-web';
 import { extractBarcodeWithOpenAI } from '../lib/openai-parser';
@@ -35,6 +35,7 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   const [debugMode, setDebugMode] = useState(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [capturedPhotoData, setCapturedPhotoData] = useState<string | null>(null); // Base64 pour debug
+  const [showDebugModal, setShowDebugModal] = useState(false);
   
   const addDebugLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -86,8 +87,8 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
       
       logger.info('[BarcodeScanner] Démarrage capture avec tentatives multiples...');
       
-      // Essayer jusqu'à 3 fois si échec
-      const maxAttempts = 3;
+      // Essayer 1 seule fois, puis proposer saisie manuelle
+      const maxAttempts = 1;
       let lastError: string | null = null;
       
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -212,12 +213,13 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
         }
       }
       
-      // Toutes les tentatives ont échoué
-      if (debugMode) addDebugLog('❌ Toutes les tentatives ont échoué');
-      logger.warn('[BarcodeScanner] ❌ Toutes les tentatives ont échoué');
+      // Tentative échouée - proposer saisie manuelle
+      if (debugMode) addDebugLog('❌ Détection automatique échouée');
+      logger.warn('[BarcodeScanner] ❌ Détection automatique échouée');
       
-      // Message d'erreur simplifié et scrollable
-      setDecodingError(`Aucun code-barres détecté après ${maxAttempts} tentatives.\n\nVous pouvez entrer le code manuellement ci-dessous.`);
+      // Afficher directement la saisie manuelle
+      setDecodingError(null);
+      setShowManualInput(true);
     } catch (error: any) {
       if (debugMode) addDebugLog(`Erreur fatale: ${error?.message || String(error)}`);
       logger.error('[BarcodeScanner] Erreur fatale lors de la capture/décodage', { 
@@ -388,7 +390,12 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
                 
                 <TouchableOpacity 
                   style={styles.debugButton} 
-                  onPress={() => setDebugMode(!debugMode)}
+                  onPress={() => {
+                    setDebugMode(!debugMode);
+                    if (!debugMode && debugLogs.length > 0) {
+                      setShowDebugModal(true);
+                    }
+                  }}
                   disabled={isDecoding}
                 >
                   <Text style={styles.debugButtonText}>
@@ -397,25 +404,12 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
                 </TouchableOpacity>
                 
                 {debugMode && debugLogs.length > 0 && (
-                  <ScrollView style={styles.debugLogsContainer}>
-                    <Text style={styles.debugLogsTitle}>📋 Logs de Debug:</Text>
-                    {debugLogs.map((log, index) => (
-                      <Text key={index} style={styles.debugLogText}>{log}</Text>
-                    ))}
-                    {capturedPhotoData && (
-                      <View style={styles.debugImageContainer}>
-                        <Text style={styles.debugLogsTitle}>📷 Image capturée:</Text>
-                        <Image 
-                          source={{ uri: capturedPhotoData }} 
-                          style={styles.debugImage}
-                          resizeMode="contain"
-                        />
-                        <Text style={styles.debugImageInfo}>
-                          Taille base64: {capturedPhotoData.length} caractères
-                        </Text>
-                      </View>
-                    )}
-                  </ScrollView>
+                  <TouchableOpacity 
+                    style={styles.viewLogsButton} 
+                    onPress={() => setShowDebugModal(true)}
+                  >
+                    <Text style={styles.viewLogsButtonText}>📋 Voir les logs ({debugLogs.length})</Text>
+                  </TouchableOpacity>
                 )}
               </>
             ) : (
@@ -438,6 +432,46 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
           </View>
         </View>
       </CameraView>
+      
+      {/* Modal plein écran pour les logs de debug */}
+      <Modal
+        visible={showDebugModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowDebugModal(false)}
+      >
+        <View style={styles.debugModalContainer}>
+          <View style={styles.debugModalHeader}>
+            <Text style={styles.debugModalTitle}>📋 Logs de Debug</Text>
+            <TouchableOpacity 
+              style={styles.debugModalCloseButton}
+              onPress={() => setShowDebugModal(false)}
+            >
+              <Text style={styles.debugModalCloseText}>✕ Fermer</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.debugModalContent}>
+            {debugLogs.map((log, index) => (
+              <Text key={index} style={styles.debugModalLogText}>{log}</Text>
+            ))}
+            
+            {capturedPhotoData && (
+              <View style={styles.debugModalImageContainer}>
+                <Text style={styles.debugModalImageTitle}>📷 Image capturée:</Text>
+                <Image 
+                  source={{ uri: capturedPhotoData }} 
+                  style={styles.debugModalImage}
+                  resizeMode="contain"
+                />
+                <Text style={styles.debugModalImageInfo}>
+                  Taille base64: {capturedPhotoData.length} caractères
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -711,6 +745,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  viewLogsButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  viewLogsButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   debugLogsContainer: {
     backgroundColor: 'rgba(17, 24, 39, 0.95)',
     borderRadius: 8,
@@ -747,5 +793,69 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 10,
     textAlign: 'center',
+  },
+  debugModalContainer: {
+    flex: 1,
+    backgroundColor: '#111827',
+  },
+  debugModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  debugModalTitle: {
+    color: '#22c55e',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  debugModalCloseButton: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  debugModalCloseText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  debugModalContent: {
+    flex: 1,
+    padding: 16,
+  },
+  debugModalLogText: {
+    color: '#d1d5db',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  debugModalImageContainer: {
+    marginTop: 24,
+    alignItems: 'center',
+    paddingBottom: 40,
+  },
+  debugModalImageTitle: {
+    color: '#22c55e',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  debugModalImage: {
+    width: '100%',
+    height: 400,
+    borderRadius: 12,
+    marginVertical: 16,
+    backgroundColor: '#1f2937',
+  },
+  debugModalImageInfo: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
   },
 });
