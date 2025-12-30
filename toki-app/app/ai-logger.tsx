@@ -617,15 +617,13 @@ export default function AILoggerScreen() {
           )}
         </TouchableOpacity>
 
-        {Platform.OS !== 'web' && (
-          <TouchableOpacity
-            style={[styles.scanButton, isProcessing && styles.scanButtonDisabled]}
-            onPress={() => setShowScanner(true)}
-            disabled={isProcessing}
-          >
-            <Text style={styles.scanButtonText}>📷 Scanner code-barres</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[styles.scanButton, isProcessing && styles.scanButtonDisabled]}
+          onPress={() => setShowScanner(true)}
+          disabled={isProcessing}
+        >
+          <Text style={styles.scanButtonText}>📷 Scanner code-barres</Text>
+        </TouchableOpacity>
       </View>
 
       {detectedItems.length > 0 && (
@@ -716,23 +714,22 @@ export default function AILoggerScreen() {
         <Text style={styles.hintTitle}>💡 Astuce</Text>
         <Text style={styles.hintText}>
           Sois aussi précis que possible. Mentionne les quantités si tu les connais (ex: &quot;200g de poulet&quot;).
-          {Platform.OS !== 'web' && ' Tu peux aussi scanner le code-barres d\'un produit pour avoir ses nutriments exacts.'}
+          Tu peux aussi scanner le code-barres d'un produit pour avoir ses nutriments exacts.
+          {Platform.OS === 'web' && ' (Sur web: autorise l\'accès caméra dans ton navigateur)'}
         </Text>
       </View>
 
       {/* Modal de scan de code-barres */}
-      {Platform.OS !== 'web' && (
-        <Modal
-          visible={showScanner}
-          animationType="slide"
-          onRequestClose={() => setShowScanner(false)}
-        >
-          <BarcodeScanner
-            onBarcodeScanned={handleBarcodeScanned}
-            onClose={() => setShowScanner(false)}
-          />
-        </Modal>
-      )}
+      <Modal
+        visible={showScanner}
+        animationType="slide"
+        onRequestClose={() => setShowScanner(false)}
+      >
+        <BarcodeScanner
+          onBarcodeScanned={handleBarcodeScanned}
+          onClose={() => setShowScanner(false)}
+        />
+      </Modal>
     </ScrollView>
   );
 }

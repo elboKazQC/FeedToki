@@ -60,6 +60,7 @@ import { ProgressBar } from '../../components/ui/ProgressBar';
 import { Badge } from '../../components/ui/Badge';
 import { spacing, typography, borderRadius, darkTheme, lightTheme } from '../../constants/design-tokens';
 import { useTheme as useAppTheme } from '../../lib/theme-context';
+import { getFormattedAppVersion } from '../../lib/app-version';
 
 type StatsUI = {
   scorePct: number;
@@ -1416,12 +1417,15 @@ function HomeScreen({
       {/* Header avec settings */}
       <View style={styles.headerRow}>
         <Text style={styles.logo}>FeedToki 🐉</Text>
-        <TouchableOpacity 
-          style={styles.headerSettingsButton}
-          onPress={() => setShowSettingsModal(true)}
-        >
-          <Text style={styles.headerSettingsIcon}>⚙️</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRightSection}>
+          <Text style={styles.headerVersion}>{getFormattedAppVersion()}</Text>
+          <TouchableOpacity 
+            style={styles.headerSettingsButton}
+            onPress={() => setShowSettingsModal(true)}
+          >
+            <Text style={styles.headerSettingsIcon}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Modal Settings */}
@@ -1489,7 +1493,7 @@ function HomeScreen({
               <Text style={styles.settingsOptionIcon}>ℹ️</Text>
               <View style={styles.settingsOptionContent}>
                 <Text style={styles.settingsOptionTitle}>À propos</Text>
-                <Text style={styles.settingsOptionDesc}>Version 1.0 - Toki</Text>
+                <Text style={styles.settingsOptionDesc}>Version {getFormattedAppVersion()} - Toki</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -3309,6 +3313,16 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#fbbf24',
+  },
+  headerRightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerVersion: {
+    fontSize: 12,
+    color: '#9ca3af',
+    fontWeight: '600',
   },
   headerSettingsButton: {
     padding: 8,
