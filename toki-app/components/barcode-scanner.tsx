@@ -119,16 +119,18 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
           <View style={styles.middleRow}>
             <View style={styles.sideOverlay} />
             <View style={styles.scanArea}>
-              <View style={styles.corner} style={[styles.corner, styles.topLeft]} />
-              <View style={styles.corner} style={[styles.corner, styles.topRight]} />
-              <View style={styles.corner} style={[styles.corner, styles.bottomLeft]} />
-              <View style={styles.corner} style={[styles.corner, styles.bottomRight]} />
+              {/* Cadre bande horizontale (meilleur pour code-barres) */}
+              <View style={styles.scanGuideLine} />
+              <View style={[styles.corner, styles.topLeft]} />
+              <View style={[styles.corner, styles.topRight]} />
+              <View style={[styles.corner, styles.bottomLeft]} />
+              <View style={[styles.corner, styles.bottomRight]} />
             </View>
             <View style={styles.sideOverlay} />
           </View>
           <View style={styles.bottomOverlay}>
             <Text style={styles.instructionText}>
-              Placez le code-barres dans le cadre
+              Placez le code-barres dans la bande. Approchez-vous (10–15 cm) et évitez les reflets.
             </Text>
             <TouchableOpacity 
               style={styles.manualInputButton} 
@@ -166,21 +168,31 @@ const styles = StyleSheet.create({
   },
   middleRow: {
     flexDirection: 'row',
-    height: 250,
+    height: 170,
   },
   sideOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   scanArea: {
-    width: 300,
-    height: 250,
+    width: 320,
+    height: 110,
     position: 'relative',
+    borderRadius: 12,
+  },
+  scanGuideLine: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: '50%',
+    height: 2,
+    backgroundColor: 'rgba(34, 197, 94, 0.8)',
+    borderRadius: 2,
   },
   corner: {
     position: 'absolute',
-    width: 30,
-    height: 30,
+    width: 22,
+    height: 22,
     borderColor: '#22c55e',
   },
   topLeft: {
