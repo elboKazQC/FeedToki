@@ -216,21 +216,8 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
       if (debugMode) addDebugLog('❌ Toutes les tentatives ont échoué');
       logger.warn('[BarcodeScanner] ❌ Toutes les tentatives ont échoué');
       
-      // Message d'erreur amélioré avec conseils spécifiques
-      const errorDetails = [];
-      errorDetails.push(`❌ Aucun code-barres détecté après ${maxAttempts} tentatives`);
-      errorDetails.push('');
-      errorDetails.push('💡 Conseils pour améliorer la détection:');
-      errorDetails.push('• Centrez bien le code sur la ligne verte');
-      errorDetails.push('• Approchez-vous (10-15 cm du produit)');
-      errorDetails.push('• Assurez-vous d\'avoir un bon éclairage');
-      errorDetails.push('• Évitez les reflets sur l\'emballage');
-      errorDetails.push('• Tenez le téléphone stable pendant la capture');
-      errorDetails.push('• Le code doit être net et bien visible');
-      errorDetails.push('');
-      errorDetails.push('💭 Si le problème persiste, entrez le code manuellement ci-dessous.');
-      
-      setDecodingError(errorDetails.join('\n'));
+      // Message d'erreur simplifié et scrollable
+      setDecodingError(`Aucun code-barres détecté après ${maxAttempts} tentatives.\n\nVous pouvez entrer le code manuellement ci-dessous.`);
     } catch (error: any) {
       if (debugMode) addDebugLog(`Erreur fatale: ${error?.message || String(error)}`);
       logger.error('[BarcodeScanner] Erreur fatale lors de la capture/décodage', { 
@@ -540,9 +527,11 @@ const styles = StyleSheet.create({
   bottomOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    paddingTop: 20,
     paddingBottom: 40,
+    overflow: 'scroll',
   },
   text: {
     color: '#fff',
@@ -727,8 +716,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
-    maxHeight: 200,
+    maxHeight: 300,
     width: '90%',
+    overflow: 'scroll',
   },
   debugLogsTitle: {
     color: '#22c55e',

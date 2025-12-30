@@ -252,6 +252,10 @@ export default function App() {
       try {
         // IMPORTANT: Synchroniser d'abord depuis Firestore (fusion) pour avoir les données les plus récentes
         console.log('[Index] 🔄 Démarrage synchronisation complète depuis Firestore...');
+        console.log('[Index] UserId:', currentUserId);
+        console.log('[Index] Auth user:', authUser);
+        console.log('[Index] Auth profile:', authProfile);
+        
         try {
           const { syncFromFirestore } = await import('../../lib/data-sync');
           const syncResult = await syncFromFirestore(currentUserId);
@@ -261,7 +265,13 @@ export default function App() {
             targetsRestored: syncResult.targetsRestored,
             weightsMerged: syncResult.weightsMerged,
           });
+          
+          // FORCER le rechargement des entrées après la sync
+          if (syncResult.mealsMerged > 0) {
+            console.log('[Index] 🔄 Rechargement forcé des entrées après sync...');
+          }
         } catch (syncError) {
+          console.error('[Index] ❌ Erreur sync Firestore:', syncError);
           console.warn('[Index] ⚠️ Erreur sync Firestore, utilisation locale:', syncError);
         }
         
