@@ -103,13 +103,15 @@ function extractQuantity(text: string, foodName: string): { quantity?: string; q
  * Utilise OpenAI si disponible, sinon utilise des règles améliorées pour détecter aliments, quantités et plats composés
  */
 export async function parseMealDescription(
-  description: string
+  description: string,
+  userId?: string,
+  userEmailVerified?: boolean
 ): Promise<ParsedMealResult> {
   // Essayer d'abord avec OpenAI si disponible
   if (process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
     try {
       const { parseMealWithOpenAI } = await import('./openai-parser');
-      const result = await parseMealWithOpenAI(description);
+      const result = await parseMealWithOpenAI(description, userId, userEmailVerified);
       if (result.items.length > 0 && !result.error) {
         return result; // Utiliser le résultat OpenAI si disponible
       }

@@ -244,3 +244,4 @@ export type TypographySize = keyof typeof typography.fontSize;
 export type ColorPalette = keyof typeof colors;
 export type ThemeMode = 'light' | 'dark';
 
+

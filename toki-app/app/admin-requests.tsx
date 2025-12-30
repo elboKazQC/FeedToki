@@ -10,11 +10,7 @@ import { FoodRequest } from './food-request';
 
 const REQUESTS_KEY = 'feedtoki_food_requests_v1';
 
-// Liste des emails admin (à configurer)
-const ADMIN_EMAILS = [
-  'vcasaubon@noovelia.com',
-  // Ajouter d'autres emails admin ici
-];
+import { checkIsAdmin } from '@/lib/admin-utils';
 
 export default function AdminRequestsScreen() {
   const { profile, user } = useAuth();
@@ -25,7 +21,7 @@ export default function AdminRequestsScreen() {
   const [loading, setLoading] = useState(true);
   
   const userEmail = profile?.email || (user as any)?.email || '';
-  const isAdmin = ADMIN_EMAILS.includes(userEmail);
+  const isAdmin = checkIsAdmin(user, profile);
 
   // Charger les demandes
   useEffect(() => {
@@ -297,6 +293,12 @@ export default function AdminRequestsScreen() {
 }
 
 const styles = StyleSheet.create({
+  loadingText: {
+    fontSize: 16,
+    color: '#e5e7eb',
+    textAlign: 'center',
+    marginTop: 40,
+  },
   container: {
     flex: 1,
   },

@@ -48,7 +48,7 @@ export default function StatsScreen() {
   const [baseline, setBaseline] = useState<WeightEntry | null>(null);
   const [customFoods, setCustomFoods] = useState<typeof FOOD_DB>([]);
 
-  const currentUserId = profile?.userId || (user as any)?.id || 'guest';
+  const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
 
   // Charger les entrées
   useEffect(() => {

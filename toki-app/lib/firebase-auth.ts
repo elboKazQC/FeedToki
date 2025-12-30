@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  sendEmailVerification,
   User,
   updateProfile
 } from 'firebase/auth';
@@ -26,6 +27,27 @@ export async function signUp(email: string, password: string, displayName: strin
     
     // Mettre à jour le nom d'affichage
     await updateProfile(userCredential.user, { displayName });
+    
+    // Envoyer l'email de vérification
+    try {
+      // Attendre un peu pour s'assurer que le profil utilisateur est bien créé dans Firebase
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Option url pour rediriger après vérification (web seulement)
+      const actionCodeSettings = typeof window !== 'undefined' 
+        ? { url: window.location.origin + '/?verified=true' }
+        : undefined;
+      
+      await sendEmailVerification(userCredential.user, actionCodeSettings);
+      console.log('[Firebase Auth] ✅ Email de vérification envoyé à:', email);
+    } catch (verifyError: any) {
+      console.error('[Firebase Auth] ❌ Erreur envoi email de vérification:', verifyError);
+      console.error('[Firebase Auth] Code erreur:', verifyError?.code);
+      console.error('[Firebase Auth] Message erreur:', verifyError?.message);
+      // Ne pas bloquer la création du compte si l'envoi d'email échoue
+      // L'utilisateur pourra demander un renvoi plus tard
+      // Mais on log l'erreur pour débugger
+    }
     
     // Créer le profil par défaut dans Firestore
     // Utiliser le calcul de points au lieu d'une valeur hardcodée
@@ -79,6 +101,7 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
 
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    // Ne pas bloquer la connexion - on laissera l'UI gérer l'affichage
     return userCredential.user;
   } catch (error: any) {
     // Messages d'erreur plus clairs
@@ -167,4 +190,32 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
  */
 export function getCurrentUser(): AuthUser | null {
   return auth.currentUser;
+}
+
+/**
+ * Renvoyer l'email de vérification
+ */
+export async function resendEmailVerification(user: AuthUser): Promise<void> {
+  if (!auth || !user) {
+    throw new Error('Firebase n\'est pas correctement initialisé ou utilisateur non connecté.');
+  }
+
+  try {
+    // Option url pour rediriger après vérification (web seulement)
+    const actionCodeSettings = typeof window !== 'undefined' 
+      ? { url: window.location.origin + '/?verified=true' }
+      : undefined;
+    
+    await sendEmailVerification(user, actionCodeSettings);
+    console.log('[Firebase Auth] ✅ Email de vérification renvoyé à:', user.email);
+  } catch (error: any) {
+    console.error('[Firebase Auth] ❌ Erreur renvoi email de vérification:', error);
+    let errorMessage = error.message || 'Erreur lors de l\'envoi de l\'email de vérification';
+    
+    if (error.code === 'auth/too-many-requests') {
+      errorMessage = 'Trop de demandes. Veuillez attendre quelques minutes avant de réessayer.';
+    }
+    
+    throw new Error(errorMessage);
+  }
 }

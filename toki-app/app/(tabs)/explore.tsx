@@ -171,6 +171,14 @@ export default function TabTwoScreen() {
           />
 
           <Button
+            label="💡 Système de Points"
+            variant="secondary"
+            size="medium"
+            onPress={() => router.push('/points-explanation')}
+            fullWidth
+          />
+
+          <Button
             label="🍽️ Demander un aliment"
             variant="secondary"
             size="medium"

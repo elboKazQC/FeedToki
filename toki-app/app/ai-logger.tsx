@@ -62,8 +62,18 @@ export default function AILoggerScreen() {
     setDetectedItems([]);
 
     try {
-      // 1. Parser la description avec IA
-      const parseResult = await parseMealDescription(description);
+      // 1. Vérifier que l'email est vérifié
+      const currentUserId = user?.uid || undefined;
+      const isEmailVerified = user?.emailVerified ?? false;
+      
+      if (currentUserId && currentUserId !== 'guest' && !isEmailVerified) {
+        setError('Veuillez vérifier votre adresse email avant d\'utiliser l\'analyse IA. Consultez vos emails pour le lien de vérification.');
+        setIsProcessing(false);
+        return;
+      }
+
+      // 2. Parser la description avec IA
+      const parseResult = await parseMealDescription(description, currentUserId, isEmailVerified);
 
       if (!parseResult || parseResult.error || parseResult.items.length === 0) {
         // Tracker échec du parser
@@ -178,7 +188,9 @@ export default function AILoggerScreen() {
   };
 
   const { profile, user } = useAuth();
-  const currentUserId = profile?.userId || (user as any)?.id || (user as any)?.uid || 'guest';
+  const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
+  const isEmailVerified = user?.emailVerified ?? false;
+  const canUseAI = !currentUserId || currentUserId === 'guest' || isEmailVerified;
 
   const handleConfirm = async () => {
     if (detectedItems.length === 0) {
@@ -367,7 +379,9 @@ export default function AILoggerScreen() {
 
     try {
       // Réanalyser seulement cet aliment
-      const parseResult = await parseMealDescription(foodName);
+      const currentUserId = user?.uid || undefined;
+      const isEmailVerified = user?.emailVerified ?? false;
+      const parseResult = await parseMealDescription(foodName, currentUserId, isEmailVerified);
 
       if (!parseResult || parseResult.error || parseResult.items.length === 0) {
         setError(`Impossible de réanalyser "${foodName}"`);
@@ -510,15 +524,25 @@ export default function AILoggerScreen() {
         </View>
       ) : null}
 
+      {!canUseAI && currentUserId && currentUserId !== 'guest' && (
+        <View style={styles.warningBox}>
+          <Text style={styles.warningText}>
+            ⚠️ Vérification email requise. Veuillez vérifier votre adresse email avant d'utiliser l'analyse IA.
+          </Text>
+        </View>
+      )}
+      
       <TouchableOpacity
-        style={[styles.parseButton, isProcessing && styles.parseButtonDisabled]}
+        style={[styles.parseButton, (isProcessing || !canUseAI) && styles.parseButtonDisabled]}
         onPress={handleParse}
-        disabled={isProcessing}
+        disabled={isProcessing || !canUseAI}
       >
         {isProcessing ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.parseButtonText}>Analyser 🚀</Text>
+          <Text style={styles.parseButtonText}>
+            {canUseAI ? 'Analyser 🚀' : 'Vérification email requise'}
+          </Text>
         )}
       </TouchableOpacity>
 
@@ -661,6 +685,19 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#fca5a5',
     fontSize: 14,
+  },
+  warningBox: {
+    backgroundColor: '#78350f',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  warningText: {
+    color: '#fcd34d',
+    fontSize: 14,
+    lineHeight: 20,
   },
   parseButton: {
     backgroundColor: '#22c55e',

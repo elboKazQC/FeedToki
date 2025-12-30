@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +29,8 @@ import {
   MIN_CALORIES_FOR_COMPLETE_DAY,
 } from '../../lib/stats';
 import { classifyMealByItems, FoodItemRef } from '../../lib/classifier';
-import { QUICK_ITEMS, QUICK_MEALS } from '../../lib/presets';
+import { QUICK_MEALS } from '../../lib/presets';
+import { calculateFavoriteMeals } from '../../lib/favorite-meals';
 import { FOOD_DB, type FoodItem } from '../../lib/food-db';
 import {
   initNotificationsIfAllowed,
@@ -126,12 +128,15 @@ export default function App() {
   const [targets, setTargets] = useState(DEFAULT_TARGETS);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [preselectedItem, setPreselectedItem] = useState<{ item: FoodItem; portion: PortionReference } | null>(null);
+  const [preselectedEntryItems, setPreselectedEntryItems] = useState<FoodItemRef[] | null>(null);
+  const [preselectedEntryLabel, setPreselectedEntryLabel] = useState<string | null>(null);
   // TEMPORAIRE: Désactiver le modal dragon pour fixer le bug
   // const [showDragonDeadModal, setShowDragonDeadModal] = useState(false);
   const [isDragonDead, setIsDragonDead] = useState(false);
 
   // IMPORTANT: Déclarer currentUserId AVANT les useEffect qui l'utilisent
-  const currentUserId = (authProfile?.userId || (authUser as any)?.id || 'guest');
+  // Utiliser authUser.uid pour Firebase (pas authUser.id qui n'existe pas)
+  const currentUserId = (authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest');
 
   // Utiliser le profil du contexte Auth
   useEffect(() => {
@@ -178,7 +183,29 @@ export default function App() {
   const getTotalPointsKey = () => `feedtoki_total_points_${currentUserId}_v1`;
   const getTargetsKey = () => `feedtoki_targets_${currentUserId}_v1`;
 
-  // Réinitialiser les données quand on change de compte
+  // Réinitialiser les données quand on change de compte/utilisateur
+  const prevUserIdRef = React.useRef<string | undefined>(undefined);
+  
+  useEffect(() => {
+    // Si l'userId a changé ET que ce n'est pas la première fois (undefined → valeur initiale), réinitialiser
+    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId && currentUserId !== 'guest') {
+      console.log('[Index] ⚠️ Changement de compte détecté:', prevUserIdRef.current, '→', currentUserId);
+      console.log('[Index] Réinitialisation des données locales pour éviter mélange');
+      
+      // Réinitialiser les états pour forcer le rechargement avec les bonnes données
+      setEntries([]);
+      setPoints(0);
+      setTotalPointsEarned(0);
+      setLastClaimDate('');
+      setIsReady(false);
+      
+      // Forcer un nettoyage des données en mémoire
+      // Les données seront rechargées par les useEffect suivants avec le bon userId
+    }
+    
+    // Mettre à jour la référence
+    prevUserIdRef.current = currentUserId;
+  }, [currentUserId]);
   useEffect(() => {
     if (currentUserId && currentUserId !== 'guest') {
       console.log('[Index] User changed, resetting data for:', currentUserId);
@@ -1011,6 +1038,45 @@ export default function App() {
           totalPointsEarned={totalPointsEarned}
           userProfile={userProfile}
           setPreselectedItem={setPreselectedItem}
+          onReuseEntry={(entry) => {
+            // Ajouter directement le repas pour aujourd'hui avec confirmation
+            if (entry.items && entry.items.length > 0) {
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                const confirmed = window.confirm(`Ajouter "${entry.label}" pour aujourd'hui ?`);
+                if (confirmed) {
+                  // Créer une nouvelle entrée avec la date d'aujourd'hui
+                  const newEntry: Omit<MealEntry, 'id' | 'createdAt'> = {
+                    label: entry.label,
+                    category: entry.category,
+                    score: entry.score,
+                    items: entry.items,
+                  };
+                  handleAddEntry(newEntry);
+                }
+              } else {
+                Alert.alert(
+                  'Réutiliser le repas',
+                  `Ajouter "${entry.label}" pour aujourd'hui ?`,
+                  [
+                    { text: 'Annuler', style: 'cancel' },
+                    {
+                      text: 'Ajouter',
+                      onPress: async () => {
+                        // Créer une nouvelle entrée avec la date d'aujourd'hui
+                        const newEntry: Omit<MealEntry, 'id' | 'createdAt'> = {
+                          label: entry.label,
+                          category: entry.category,
+                          score: entry.score,
+                          items: entry.items,
+                        };
+                        await handleAddEntry(newEntry);
+                      },
+                    },
+                  ]
+                );
+              }
+            }
+          }}
           lastClaimDate={lastClaimDate}
           customFoods={customFoods}
           dayCaloriesMap={dayCaloriesMap}
@@ -1022,6 +1088,8 @@ export default function App() {
           onCancel={() => {
             setScreen('home');
             setPreselectedItem(null);
+            setPreselectedEntryItems(null);
+            setPreselectedEntryLabel(null);
           }}
           onSave={handleAddEntry}
           points={points}
@@ -1029,7 +1097,10 @@ export default function App() {
           todayTotals={todayTotals}
           targets={targets}
           preselectedItem={preselectedItem}
+          preselectedEntryItems={preselectedEntryItems}
+          preselectedEntryLabel={preselectedEntryLabel}
           customFoods={customFoods}
+          entries={entries}
         />
       )}
 
@@ -1054,6 +1125,7 @@ function HomeScreen({
   totalPointsEarned,
   userProfile,
   setPreselectedItem,
+  onReuseEntry,
   lastClaimDate,
   customFoods,
   dayCaloriesMap,
@@ -1072,6 +1144,7 @@ function HomeScreen({
   totalPointsEarned: number;
   userProfile: UserProfile | null;
   setPreselectedItem: (item: { item: FoodItem; portion: PortionReference } | null) => void;
+  onReuseEntry: (entry: MealEntry) => void;
   lastClaimDate: string;
   customFoods: typeof FOOD_DB;
   dayCaloriesMap: Record<string, number>;
@@ -1195,7 +1268,12 @@ function HomeScreen({
       </View>
 
       {/* Modal Settings */}
-      {showSettingsModal && (
+      <Modal
+        visible={showSettingsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
         <View style={styles.settingsOverlay}>
           <View style={styles.settingsModal}>
             <View style={styles.settingsHeader}>
@@ -1259,7 +1337,7 @@ function HomeScreen({
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      </Modal>
 
       {/* Modal Dragon Mort - TEMPORAIREMENT DÉSACTIVÉ - TODO: Réimplémenter après fix */}
 
@@ -1740,33 +1818,45 @@ function HomeScreen({
                     </Text>
                   )}
                 </View>
-                <TouchableOpacity
-                  style={styles.historyDeleteButton}
-                  onPress={() => {
-                    // Sur web, utiliser window.confirm, sinon Alert.alert
-                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                      const confirmed = window.confirm(`Supprimer "${item.label}" ?`);
-                      if (confirmed) {
-                        onDeleteEntry(item.id);
+                <View style={styles.historyItemActions}>
+                  {!isToday && item.items && item.items.length > 0 && (
+                    <TouchableOpacity
+                      style={styles.historyReuseButton}
+                      onPress={() => {
+                        onReuseEntry(item);
+                      }}
+                    >
+                      <Text style={styles.historyReuseText}>↻</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={styles.historyDeleteButton}
+                    onPress={() => {
+                      // Sur web, utiliser window.confirm, sinon Alert.alert
+                      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                        const confirmed = window.confirm(`Supprimer "${item.label}" ?`);
+                        if (confirmed) {
+                          onDeleteEntry(item.id);
+                        }
+                      } else {
+                        Alert.alert(
+                          'Supprimer',
+                          `Supprimer "${item.label}" ?`,
+                          [
+                            { text: 'Annuler', style: 'cancel' },
+                            {
+                              text: 'Supprimer',
+                              style: 'destructive',
+                              onPress: () => onDeleteEntry(item.id),
+                            },
+                          ]
+                        );
                       }
-                    } else {
-                      Alert.alert(
-                        'Supprimer',
-                        `Supprimer "${item.label}" ?`,
-                        [
-                          { text: 'Annuler', style: 'cancel' },
-                          {
-                            text: 'Supprimer',
-                            style: 'destructive',
-                            onPress: () => onDeleteEntry(item.id),
-                          },
-                        ]
-                      );
-                    }
-                  }}
-                >
-                  <Text style={styles.historyDeleteText}>✕</Text>
-                </TouchableOpacity>
+                    }}
+                  >
+                    <Text style={styles.historyDeleteText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
               );
             }}
@@ -1786,7 +1876,10 @@ function AddEntryScreen({
   todayTotals,
   targets,
   preselectedItem,
+  preselectedEntryItems,
+  preselectedEntryLabel,
   customFoods = [],
+  entries = [],
 }: {
   onCancel: () => void;
   onSave: (entry: Omit<MealEntry, 'id' | 'createdAt'>) => void;
@@ -1795,7 +1888,10 @@ function AddEntryScreen({
   todayTotals: ReturnType<typeof computeDailyTotals>;
   targets: typeof DEFAULT_TARGETS;
   preselectedItem: { item: FoodItem; portion: PortionReference } | null;
+  preselectedEntryItems: FoodItemRef[] | null;
+  preselectedEntryLabel: string | null;
   customFoods?: typeof FOOD_DB;
+  entries?: MealEntry[];
 }) {
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState<MealEntry['category']>('sain');
@@ -1879,6 +1975,19 @@ function AddEntryScreen({
     }
   }, []); // Exécuter une seule fois au montage
 
+  // Auto-remplir les items d'un repas précédent à réutiliser
+  useEffect(() => {
+    if (preselectedEntryItems && preselectedEntryItems.length > 0) {
+      setItems(preselectedEntryItems);
+      if (preselectedEntryLabel) {
+        setLabel(preselectedEntryLabel);
+      }
+      // Classifier le repas automatiquement
+      const cls = classifyMealByItems(preselectedEntryItems);
+      setCategory(cls.category);
+    }
+  }, []); // Exécuter une seule fois au montage
+
   const applyQuickMeal = (mealId: string) => {
     const preset = QUICK_MEALS.find((m) => m.id === mealId);
     if (preset) {
@@ -1890,15 +1999,18 @@ function AddEntryScreen({
   };
 
 
+  // Calculer les repas favoris basés sur l'usage réel
+  const favoriteMeals = calculateFavoriteMeals(entries, 8);
+  // Combiner les repas favoris calculés avec les repas par défaut (si pas assez de favoris)
+  const allFavoriteMeals = favoriteMeals.length >= 5 
+    ? favoriteMeals 
+    : [...favoriteMeals, ...QUICK_MEALS.slice(0, Math.max(0, 5 - favoriteMeals.length))];
+
   // Filtre basé sur la recherche + la catégorie sélectionnée
   const searchLower = label.toLowerCase().trim();
-  const filteredItems = allFoods.filter((fi) => {
-    const matchesCategory = quickFilter === 'all' || scoreToCategory(fi.baseScore) === quickFilter;
-    const matchesSearch = !searchLower || fi.name.toLowerCase().includes(searchLower);
-    return matchesCategory && matchesSearch;
-  });
-
-  const filteredMeals = QUICK_MEALS.filter((qm) => {
+  
+  // Ne plus afficher les quick items - seulement les repas favoris
+  const filteredMeals = allFavoriteMeals.filter((qm) => {
     const cls = classifyMealByItems(qm.items);
     const matchesCategory = quickFilter === 'all' || cls.category === quickFilter;
     const matchesSearch = !searchLower || qm.name.toLowerCase().includes(searchLower);
@@ -2012,69 +2124,18 @@ function AddEntryScreen({
         </>
       )}
 
-      <Text style={styles.label}>Items rapides</Text>
+      <Text style={styles.label}>⭐ Repas favoris (basés sur ton usage)</Text>
       <View style={styles.quickRow}>
-        {filteredItems.map((fi) => {
-          const cost = computeFoodPoints(fi as any);
-          const selected = items.some((i) => i.foodId === fi.id);
-          const macros = {
-            protein_g: fi.protein_g || 0,
-            carbs_g: fi.carbs_g || 0,
-            calories_kcal: fi.calories_kcal || 0,
-            fat_g: fi.fat_g || 0,
-          };
-          const projected = {
-            protein_g: todayTotals.protein_g + selectionNutrition.protein_g + (selected ? 0 : macros.protein_g),
-            carbs_g: todayTotals.carbs_g + selectionNutrition.carbs_g + (selected ? 0 : macros.carbs_g),
-            calories_kcal: todayTotals.calories_kcal + selectionNutrition.calories_kcal + (selected ? 0 : macros.calories_kcal),
-            fat_g: todayTotals.fat_g + selectionNutrition.fat_g + (selected ? 0 : macros.fat_g),
-          };
-          const overTargets =
-            projected.protein_g > targets.protein_g ||
-            projected.carbs_g > targets.carbs_g ||
-            projected.calories_kcal > targets.calories_kcal ||
-            projected.fat_g > targets.fat_g;
-          const affordable = pendingCost + (selected ? 0 : cost) <= points && !overTargets;
-          return (
-            <TouchableOpacity
-              key={fi.id}
-              style={[
-                styles.quickChip,
-                selected && styles.quickChipSelected,
-                (!affordable || overTargets) && styles.quickChipDisabled,
-              ]}
-              onPress={() => {
-                if (!affordable) return;
-                toggleItem(fi.id);
-              }}
-            >
-              <Text style={[styles.quickChipText, (!affordable || overTargets) && styles.quickChipTextDisabled]}>
-                {fi.name} · {cost} pts
-              </Text>
-              {/* Tooltip éducatif basé sur le coût */}
-              {cost === 0 && (
-                <Text style={styles.tooltipText}>🎉 Gratuit! Protéines/légumes</Text>
-              )}
-              {cost >= 1 && cost <= 2 && (
-                <Text style={styles.tooltipText}>⚡ Bon choix énergétique</Text>
-              )}
-              {cost >= 6 && (
-                <Text style={styles.tooltipText}>
-                  💰 {cost} pts = {fi.calories_kcal || 0} cal · {Math.round((cost / (points || 1)) * 100)}% budget
-                </Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <Text style={styles.label}>Repas favoris</Text>
-      <View style={styles.quickRow}>
-        {filteredMeals.map((qm) => {
-          const totalCost = qm.items.reduce((sum, ref) => {
-            const fi = filteredItems.find((f) => f.id === ref.foodId);
-            return sum + (fi ? computeFoodPoints(fi as any) : 0);
-          }, 0);
+        {filteredMeals.length === 0 ? (
+          <Text style={styles.emptyText}>
+            Aucun repas favori pour l'instant. Utilise l'IA ou cherche un aliment ci-dessous.
+          </Text>
+        ) : (
+          filteredMeals.map((qm) => {
+            const totalCost = qm.items.reduce((sum, ref) => {
+              const fi = allFoods.find((f) => f.id === ref.foodId);
+              return sum + (fi ? computeFoodPoints(fi as any) : 0);
+            }, 0);
           const macrosSum = qm.items.reduce(
             (acc, ref) => {
               const fi = allFoods.find((f) => f.id === ref.foodId);
@@ -2114,7 +2175,7 @@ function AddEntryScreen({
               </Text>
             </TouchableOpacity>
           );
-        })}
+        }))}
       </View>
 
       <View style={styles.actionsRow}>
@@ -2277,15 +2338,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   settingsOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
   },
   settingsModal: {
     width: '90%',
@@ -2511,6 +2567,11 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     gap: 4,
   },
+  historyItemActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   historyItem: {
     color: '#e5e7eb',
     fontSize: 14,
@@ -2561,9 +2622,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
+  historyReuseButton: {
+    padding: 4,
+  },
+  historyReuseText: {
+    color: '#3b82f6',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   historyDeleteButton: {
     padding: 4,
-    marginLeft: 8,
   },
   historyDeleteText: {
     color: '#ef4444',

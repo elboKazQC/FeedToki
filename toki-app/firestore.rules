@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function: vérifier si l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function: vérifier si l'utilisateur est le propriétaire
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper function: vérifier si l'utilisateur est admin
+    function isAdmin() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Collection users: chaque utilisateur peut lire/écrire son propre profil
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+      
+      // Sous-collection: meals (repas)
+      match /meals/{mealId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Sous-collection: points (points quotidiens)
+      match /points/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Sous-collection: targets (objectifs nutritionnels)
+      match /targets/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Sous-collection: weights (poids historiques)
+      match /weights/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // Collection globalFoods: lecture publique, écriture admin seulement
+    match /globalFoods/{foodId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Collection user_logs: chaque utilisateur peut créer ses logs, lire les siens seulement
+    match /user_logs/{logId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+    
+    // Collection food_requests: création publique, lecture/admin pour les admins
+    match /food_requests/{requestId} {
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
+    }
+    
+    // Collection api_usage: chaque utilisateur peut lire/écrire sa propre utilisation
+    match /api_usage/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+
+

@@ -8,11 +8,7 @@ import { db } from '@/lib/firebase-config';
 import { collection, getDocs, query, orderBy, limit, doc, getDoc } from 'firebase/firestore';
 import { FoodItem } from '@/lib/food-db';
 
-// Liste des emails admin (doit correspondre à admin-requests.tsx)
-const ADMIN_EMAILS = [
-  'vcasaubon@noovelia.com',
-  'casaubonvincent@gmail.com', // Email principal de l'utilisateur
-];
+import { checkIsAdmin } from '@/lib/admin-utils';
 
 type CustomFoodWithUser = FoodItem & {
   userId: string;
@@ -31,7 +27,7 @@ export default function AdminCustomFoodsScreen() {
   const [selectedFood, setSelectedFood] = useState<CustomFoodWithUser | null>(null);
   
   const userEmail = profile?.email || (user as any)?.email || '';
-  const isAdmin = ADMIN_EMAILS.includes(userEmail);
+  const isAdmin = checkIsAdmin(user, profile);
 
   // Charger tous les aliments personnalisés depuis tous les utilisateurs
   useEffect(() => {
@@ -208,6 +204,12 @@ Créé par: ${food.userEmail || food.userId}`;
 }
 
 const styles = StyleSheet.create({
+  loadingText: {
+    fontSize: 16,
+    color: '#e5e7eb',
+    textAlign: 'center',
+    marginTop: 40,
+  },
   container: {
     flex: 1,
   },

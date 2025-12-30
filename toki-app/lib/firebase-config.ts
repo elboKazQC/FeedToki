@@ -34,13 +34,17 @@ if (FIREBASE_ENABLED) {
     authInstance = getAuth(app);
     dbInstance = getFirestore(app);
     
-    console.log('[Firebase] Initialisé avec succès');
+    if (__DEV__) {
+      console.log('[Firebase] Initialisé avec succès');
+    }
   } catch (error: any) {
     console.error('[Firebase] Erreur d\'initialisation:', error);
     // Ne pas throw - on continue en mode local si Firebase échoue
   }
 } else {
-  console.log('[Firebase] Désactivé - mode local');
+  if (__DEV__) {
+    console.log('[Firebase] Désactivé - mode local');
+  }
 }
 
 // Exporter avec des noms différents pour éviter les conflits

@@ -2,12 +2,20 @@
 // Utilise l'API OpenAI pour extraire les aliments d'une description textuelle
 
 import { ParsedFoodItem, ParsedMealResult } from './ai-meal-parser';
+import { checkUserAPILimit, incrementAPICall } from './api-rate-limit';
+import { logger } from './logger';
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
-// Log au chargement du module pour vérifier si la clé est détectée
-if (typeof window !== 'undefined') {
+// Rate limiting côté client (première ligne de défense)
+const MAX_REQUESTS_PER_MINUTE = 10;
+let requestCountInWindow = 0;
+let lastRequestTime = Date.now();
+let lastCallTimestamp = 0; // Timestamp du dernier appel (pour délai minimum)
+
+// Log au chargement du module pour vérifier si la clé est détectée (dev seulement)
+if (typeof window !== 'undefined' && __DEV__) {
   if (OPENAI_API_KEY) {
     console.log('[OpenAI] Clé API détectée (longueur:', OPENAI_API_KEY.length, 'caractères)');
   } else {
@@ -16,14 +24,54 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * Attendre si nécessaire pour respecter le rate limiting côté client
+ */
+async function waitForClientRateLimit(): Promise<void> {
+  const now = Date.now();
+  const timeElapsed = now - lastRequestTime;
+
+  // Réinitialiser le compteur si plus d'une minute s'est écoulée
+  if (timeElapsed > 60000) {
+    requestCountInWindow = 0;
+    lastRequestTime = now;
+  }
+
+  // Vérifier la limite par minute
+  if (requestCountInWindow >= MAX_REQUESTS_PER_MINUTE) {
+    const timeToWait = 60000 - timeElapsed;
+    logger.warn(`[OpenAI] Limite côté client atteinte. Attente de ${Math.ceil(timeToWait / 1000)}s.`);
+    await new Promise(resolve => setTimeout(resolve, timeToWait + 1000));
+    requestCountInWindow = 0;
+    lastRequestTime = Date.now();
+  }
+
+  // Vérifier le délai minimum entre appels (2 secondes)
+  const timeSinceLastCall = now - lastCallTimestamp;
+  if (lastCallTimestamp > 0 && timeSinceLastCall < 2000) {
+    const waitTime = 2000 - timeSinceLastCall;
+    logger.warn(`[OpenAI] Délai minimum entre appels: ${Math.ceil(waitTime / 1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+
+  requestCountInWindow++;
+  lastCallTimestamp = Date.now();
+}
+
+/**
  * Parser une description de repas avec OpenAI
  * Retourne une liste structurée d'aliments avec quantités
+ * 
+ * @param description Description du repas à parser
+ * @param userId ID de l'utilisateur (optionnel, requis pour rate limiting)
+ * @param userEmailVerified Vérification que l'email est vérifié (optionnel, requis pour utilisation)
  */
 export async function parseMealWithOpenAI(
-  description: string
+  description: string,
+  userId?: string,
+  userEmailVerified?: boolean
 ): Promise<ParsedMealResult> {
   if (!OPENAI_API_KEY) {
-    console.warn('[OpenAI] Appel bloqué: clé API non configurée');
+    logger.warn('[OpenAI] Appel bloqué: clé API non configurée');
     return {
       items: [],
       error: 'Clé API OpenAI non configurée. Utilisation du parser basique.',
@@ -37,8 +85,30 @@ export async function parseMealWithOpenAI(
     };
   }
 
+  // Vérifier que l'email est vérifié (si userId fourni)
+  if (userId && userId !== 'guest' && userEmailVerified === false) {
+    return {
+      items: [],
+      error: 'Veuillez vérifier votre adresse email avant d\'utiliser l\'analyse IA. Consultez vos emails pour le lien de vérification.',
+    };
+  }
+
+  // Rate limiting côté client (première ligne de défense)
+  await waitForClientRateLimit();
+
+  // Rate limiting par utilisateur dans Firestore (si userId fourni)
+  if (userId && userId !== 'guest') {
+    const limitCheck = await checkUserAPILimit(userId);
+    if (!limitCheck.allowed) {
+      return {
+        items: [],
+        error: limitCheck.reason || 'Limite d\'appels API atteinte. Réessayez plus tard.',
+      };
+    }
+  }
+
   try {
-    console.log('[OpenAI] Envoi de la requête pour:', description.substring(0, 50) + '...');
+    logger.log('[OpenAI] Envoi de la requête pour:', description.substring(0, 50) + '...');
     
     const response = await fetch(OPENAI_API_URL, {
       method: 'POST',
@@ -250,21 +320,35 @@ Règles importantes:
       }),
     });
 
+    // Incrémenter le compteur d'appels après l'appel réussi (si userId fourni)
+    if (userId && userId !== 'guest') {
+      await incrementAPICall(userId).catch(err => {
+        logger.warn('[OpenAI] Erreur incrément compteur:', err);
+      });
+    }
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('[OpenAI] Erreur API:', {
+      logger.error('[OpenAI] Erreur API:', {
         status: response.status,
         statusText: response.statusText,
         error: errorData,
       });
       
-      // Gestion d'erreurs spécifiques
+      // Gestion d'erreurs spécifiques avec retry pour 429
       let errorMessage = `Erreur API OpenAI: ${response.status} ${response.statusText}`;
       
       if (response.status === 401) {
         errorMessage = 'Erreur d\'authentification: Clé API OpenAI invalide ou expirée.';
       } else if (response.status === 429) {
-        errorMessage = 'Limite de taux dépassée: Trop de requêtes à l\'API OpenAI. Réessayez plus tard.';
+        // Gérer les rate limits avec backoff exponentiel
+        const retryAfter = response.headers.get('Retry-After');
+        if (retryAfter) {
+          const delay = parseInt(retryAfter) * 1000;
+          errorMessage = `Limite de taux dépassée. Réessayez dans ${Math.ceil(delay / 1000)} seconde(s).`;
+        } else {
+          errorMessage = 'Limite de taux dépassée: Trop de requêtes à l\'API OpenAI. Réessayez dans quelques instants.';
+        }
       } else if (response.status >= 500) {
         errorMessage = 'Erreur serveur OpenAI: Le service est temporairement indisponible.';
       } else if (errorData?.error?.message) {
@@ -281,20 +365,22 @@ Règles importantes:
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
-      console.error('[OpenAI] Réponse invalide: pas de contenu dans choices[0].message');
+      logger.error('[OpenAI] Réponse invalide: pas de contenu dans choices[0].message');
       return {
         items: [],
         error: 'Réponse OpenAI invalide: aucun contenu retourné',
       };
     }
 
-    console.log('[OpenAI] Réponse reçue, longueur:', content.length, 'caractères');
+    if (__DEV__) {
+      logger.log('[OpenAI] Réponse reçue, longueur:', content.length, 'caractères');
+    }
 
     // Extraire le JSON de la réponse (au cas où il y aurait du texte autour)
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('[OpenAI] Format invalide: aucun JSON trouvé dans la réponse');
-      console.error('[OpenAI] Contenu reçu:', content.substring(0, 200));
+      logger.error('[OpenAI] Format invalide: aucun JSON trouvé dans la réponse');
+      logger.error('[OpenAI] Contenu reçu:', content.substring(0, 200));
       return {
         items: [],
         error: 'Format de réponse OpenAI invalide: aucun JSON détecté',
@@ -305,8 +391,8 @@ Règles importantes:
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch (parseError: any) {
-      console.error('[OpenAI] Erreur parsing JSON:', parseError);
-      console.error('[OpenAI] JSON extrait:', jsonMatch[0].substring(0, 200));
+      logger.error('[OpenAI] Erreur parsing JSON:', parseError);
+      logger.error('[OpenAI] JSON extrait:', jsonMatch[0].substring(0, 200));
       return {
         items: [],
         error: `Erreur parsing JSON OpenAI: ${parseError.message}`,
@@ -314,15 +400,17 @@ Règles importantes:
     }
     
     if (!parsed.items || !Array.isArray(parsed.items)) {
-      console.error('[OpenAI] Format JSON invalide: items manquant ou n\'est pas un tableau');
-      console.error('[OpenAI] Objet parsé:', parsed);
+      logger.error('[OpenAI] Format JSON invalide: items manquant ou n\'est pas un tableau');
+      logger.error('[OpenAI] Objet parsé:', parsed);
       return {
         items: [],
         error: 'Format JSON OpenAI invalide: items manquant ou invalide',
       };
     }
 
-    console.log('[OpenAI] ✅ Parsing réussi:', parsed.items.length, 'aliment(s) détecté(s)');
+    if (__DEV__) {
+      logger.log('[OpenAI] ✅ Parsing réussi:', parsed.items.length, 'aliment(s) détecté(s)');
+    }
 
     // Convertir les items en format ParsedFoodItem
     const items: ParsedFoodItem[] = parsed.items.map((item: any) => ({
@@ -345,14 +433,14 @@ Règles importantes:
   } catch (error: any) {
     // Distinguer les types d'erreurs
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      console.error('[OpenAI] Erreur réseau:', error);
+      logger.error('[OpenAI] Erreur réseau:', error);
       return {
         items: [],
         error: 'Erreur réseau: Impossible de contacter l\'API OpenAI. Vérifiez votre connexion internet.',
       };
     }
     
-    console.error('[OpenAI] Erreur inattendue:', error);
+    logger.error('[OpenAI] Erreur inattendue:', error);
     return {
       items: [],
       error: `Erreur lors de l'appel OpenAI: ${error.message || 'Erreur inconnue'}`,

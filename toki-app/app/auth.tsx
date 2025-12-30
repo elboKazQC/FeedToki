@@ -1,17 +1,128 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { signIn, signUp } from '../lib/firebase-auth';
+import { spacing } from '../constants/design-tokens';
+import { signIn, signUp, resendEmailVerification, getCurrentUser, signOut } from '../lib/firebase-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { localSignIn, localSignUp, getCurrentLocalUser } from '../lib/local-auth';
+import { useAuth } from '@/lib/auth-context';
+import { reload } from 'firebase/auth';
+import { checkIsAdmin } from '@/lib/admin-utils';
 
 export default function AuthScreen() {
+  // Tous les hooks doivent être déclarés en premier, dans le même ordre à chaque render
+  const { user } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
-
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+  
+  // Cooldown pour renvoi d'email (30 secondes)
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+  
+  // Vérifier périodiquement si l'email a été vérifié (doit être déclaré avant les fonctions)
+  useEffect(() => {
+    // Ne vérifier que si l'utilisateur Firebase est connecté et email non vérifié
+    if (!FIREBASE_ENABLED || !user || !('email' in user) || (user as any).emailVerified) {
+      return;
+    }
+    
+    const checkVerification = async () => {
+      try {
+        const currentUser = getCurrentUser();
+        if (currentUser && !currentUser.emailVerified) {
+          await reload(currentUser);
+          if (currentUser.emailVerified) {
+            // Email vérifié, recharger la page
+            if (typeof window !== 'undefined') {
+              window.location.reload();
+            }
+          }
+        }
+      } catch (error) {
+        // Ignorer les erreurs silencieusement (ex: utilisateur déjà déconnecté)
+        console.error('[Auth Screen] Erreur vérification email:', error);
+      }
+    };
+    
+    // Vérifier immédiatement puis toutes les 3 secondes
+    checkVerification();
+    const interval = setInterval(checkVerification, 3000);
+    
+    return () => clearInterval(interval);
+  }, [user]);
+  
+  // Vérifier si l'utilisateur est connecté mais email non vérifié (calculé après les hooks)
+  const isFirebaseUser = FIREBASE_ENABLED && user && 'email' in user;
+  const isEmailVerified = isFirebaseUser ? (user as any).emailVerified : true;
+  const isAdmin = checkIsAdmin(user, profile);
+  // Ne pas afficher la vérification email pour les admins (bypass)
+  const showEmailVerification = isFirebaseUser && !isEmailVerified && !isAdmin;
+  const userEmail = isFirebaseUser ? (user as any).email : '';
+  
+  // Fonction pour renvoyer l'email de vérification
+  const handleResendEmail = async () => {
+    if (resendCooldown > 0 || resendLoading || !user || !isFirebaseUser) return;
+    
+    setResendLoading(true);
+    setResendSuccess(false);
+    try {
+      await resendEmailVerification(user as any);
+      setResendSuccess(true);
+      setResendCooldown(30); // Cooldown de 30 secondes
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('✅ Courriel envoyé !\n\nVérifiez votre boîte mail (et vos spams).');
+      }
+    } catch (error: any) {
+      let errorMessage = 'Erreur lors de l\'envoi de l\'email';
+      
+      // Messages d'erreur Firebase propres
+      if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Trop de demandes. Veuillez attendre quelques minutes.';
+        setResendCooldown(60); // Cooldown plus long si trop de demandes
+      } else if (error.code === 'auth/user-not-found') {
+        errorMessage = 'Utilisateur non trouvé.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Erreur: ${errorMessage}`);
+      }
+      Alert.alert('Erreur', errorMessage);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+  
+  // Fonction pour se déconnecter
+  const handleSignOut = async () => {
+    try {
+      if (FIREBASE_ENABLED && user) {
+        await signOut();
+      } else {
+        const { localSignOut } = await import('../lib/local-auth');
+        await localSignOut();
+      }
+      // Recharger la page pour réinitialiser l'état
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
+    } catch (error: any) {
+      Alert.alert('Erreur', error.message || 'Erreur lors de la déconnexion');
+    }
+  };
+  
   const handleAuth = async () => {
     if (!email || !password) {
       Alert.alert('Erreur', 'Merci de remplir tous les champs');
@@ -28,11 +139,39 @@ export default function AuthScreen() {
       if (FIREBASE_ENABLED) {
         // Mode Firebase
         if (mode === 'signup') {
-          await signUp(email, password, displayName);
-          // Après inscription réussie, attendre un peu pour que le contexte se mette à jour
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          // Redirection vers onboarding (nouveau compte)
-          router.replace('/onboarding');
+          console.log('[Auth Screen] Début création compte pour:', email);
+          const user = await signUp(email, password, displayName);
+          console.log('[Auth Screen] Compte créé avec succès, user ID:', user?.uid);
+          setLoading(false);
+          
+          // Email de vérification envoyé automatiquement par signUp
+          const message = `Un email de vérification a été envoyé à ${email}.\n\nVeuillez vérifier votre boîte mail (et vos spams) et cliquer sur le lien de vérification.\n\nVous pouvez continuer, mais certaines fonctionnalités (comme l'IA) nécessitent une vérification email.`;
+          
+          console.log('[Auth Screen] Affichage de l\'alerte de confirmation...');
+          
+          // Sur web, utiliser window.alert en plus pour être sûr que l'utilisateur voit le message
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            console.log('[Auth Screen] Affichage window.alert (web)');
+            window.alert('Compte créé ! ✅\n\n' + message);
+          }
+          
+          console.log('[Auth Screen] Affichage Alert.alert');
+          Alert.alert(
+            'Compte créé ! ✅',
+            message,
+            [{ 
+              text: 'J\'ai compris, continuer', 
+              onPress: () => {
+                console.log('[Auth Screen] Bouton "Continuer" cliqué, redirection vers onboarding');
+                // Après inscription réussie, attendre un peu pour que le contexte se mette à jour
+                setTimeout(() => {
+                  router.replace('/onboarding');
+                }, 500);
+              }
+            }]
+          );
+          console.log('[Auth Screen] Alert.alert appelé, return...');
+          return; // Important : return pour éviter d'exécuter le code après
         } else {
           const user = await signIn(email, password);
           console.log('[Auth Screen] Connexion réussie, user:', user?.uid);
@@ -133,7 +272,46 @@ export default function AuthScreen() {
         <Text style={styles.logo}>🐉 Toki</Text>
         <Text style={styles.tagline}>Nourris ton dragon, apprends la modération</Text>
 
-        <View style={styles.form}>
+        {/* Affichage si email non vérifié */}
+        {showEmailVerification ? (
+          <View style={styles.verificationBox}>
+            <Text style={styles.verificationTitle}>⚠️ Ton email n'est pas vérifié</Text>
+            <Text style={styles.verificationText}>
+              Un email de vérification a été envoyé à :{'\n'}
+              <Text style={styles.verificationEmail}>{userEmail}</Text>
+            </Text>
+            
+            {resendSuccess && (
+              <View style={styles.successBox}>
+                <Text style={styles.successText}>✅ Courriel envoyé !</Text>
+              </View>
+            )}
+            
+            <TouchableOpacity
+              style={[styles.resendButton, (resendCooldown > 0 || resendLoading) && styles.buttonDisabled]}
+              onPress={handleResendEmail}
+              disabled={resendCooldown > 0 || resendLoading}
+            >
+              {resendLoading ? (
+                <ActivityIndicator color="#fbbf24" />
+              ) : (
+                <Text style={styles.resendButtonText}>
+                  {resendCooldown > 0 
+                    ? `Renvoyer le mail (${resendCooldown}s)`
+                    : '📤 Renvoyer le mail'}
+                </Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.signOutButton}
+              onPress={handleSignOut}
+            >
+              <Text style={styles.signOutButtonText}>Se déconnecter</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.form}>
           {mode === 'signup' && (
             <TextInput
               style={styles.input}
@@ -199,6 +377,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
           )}
         </View>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -271,6 +450,76 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   skipButtonText: {
+    color: '#6b7280',
+    fontSize: 14,
+    textDecorationLine: 'underline',
+  },
+  verificationBox: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#1f2937',
+    borderWidth: 2,
+    borderColor: '#f59e0b',
+    borderRadius: 12,
+    padding: 24,
+    alignItems: 'center',
+  },
+  verificationTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f59e0b',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  verificationText: {
+    fontSize: 14,
+    color: '#d1d5db',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  verificationEmail: {
+    fontWeight: '600',
+    color: '#fbbf24',
+  },
+  successBox: {
+    backgroundColor: '#065f46',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    width: '100%',
+  },
+  successText: {
+    color: '#10b981',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  resendButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resendButtonText: {
+    color: '#fbbf24',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signOutButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    width: '100%',
+    alignItems: 'center',
+  },
+  signOutButtonText: {
     color: '#6b7280',
     fontSize: 14,
     textDecorationLine: 'underline',

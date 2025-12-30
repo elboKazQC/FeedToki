@@ -1,6 +1,8 @@
 import { Redirect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { FIREBASE_ENABLED } from '@/lib/firebase-config';
+import { checkIsAdmin } from '@/lib/admin-utils';
 
 export default function Index() {
   const { profile, user, loading } = useAuth();
@@ -19,9 +21,18 @@ export default function Index() {
     return <Redirect href="/auth" />;
   }
 
-  // Cas spécial: email non vérifié (mode local)
-  if ((profile as any).emailVerified === false) {
-    return <Redirect href="/verify-email" />;
+  // Cas spécial: email non vérifié - rediriger vers auth qui affichera le message
+  // Exception: les admins peuvent bypasser la vérification email
+  const isEmailVerified = (user as any)?.emailVerified ?? (profile as any)?.emailVerified ?? true;
+  const isAdmin = checkIsAdmin(user, profile);
+  if (!isEmailVerified && user && !isAdmin) {
+    if (FIREBASE_ENABLED && 'email' in user) {
+      // Mode Firebase: rediriger vers auth qui affichera l'UI de vérification
+      return <Redirect href="/auth" />;
+    } else {
+      // Mode local: utiliser l'écran existant
+      return <Redirect href="/verify-email" />;
+    }
   }
 
   // Profil non complété = rediriger vers onboarding
