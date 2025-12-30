@@ -180,3 +180,93 @@ export function mergeFoodsWithCustom(baseFoods: FoodItem[], customFoods: FoodIte
   return Array.from(foodMap.values());
 }
 
+/**
+ * Migrer tous les aliments locaux vers la collection globale Firestore
+ * Cette fonction est appelée une fois au démarrage pour s'assurer que tous les items
+ * créés localement sont partagés avec tous les utilisateurs
+ */
+export async function migrateLocalFoodsToGlobal(userId?: string): Promise<{ migrated: number; errors: number }> {
+  if (!FIREBASE_ENABLED || !db) {
+    console.log('[Custom Foods Migration] ⚠️ Firebase non disponible, migration ignorée');
+    return { migrated: 0, errors: 0 };
+  }
+
+  try {
+    console.log('[Custom Foods Migration] 🔄 Démarrage migration des aliments locaux vers globalFoods...');
+    
+    // Vérifier si la migration a déjà été effectuée
+    const migrationFlagKey = 'feedtoki_custom_foods_migration_completed_v1';
+    const migrationCompleted = await AsyncStorage.getItem(migrationFlagKey);
+    if (migrationCompleted === 'true') {
+      console.log('[Custom Foods Migration] ✅ Migration déjà effectuée, ignorée');
+      return { migrated: 0, errors: 0 };
+    }
+
+    // Charger tous les aliments depuis AsyncStorage (clé globale actuelle)
+    const storageKey = 'feedtoki_custom_foods_global_v1';
+    const raw = await AsyncStorage.getItem(storageKey);
+    const localFoods: FoodItem[] = raw ? JSON.parse(raw) : [];
+    
+    console.log(`[Custom Foods Migration] 📥 ${localFoods.length} aliments trouvés localement`);
+
+    if (localFoods.length === 0) {
+      console.log('[Custom Foods Migration] ✅ Aucun aliment à migrer');
+      await AsyncStorage.setItem(migrationFlagKey, 'true');
+      return { migrated: 0, errors: 0 };
+    }
+
+    // Charger les aliments existants dans Firestore pour éviter les doublons
+    const existingFirestoreFoods = await loadCustomFoodsFromFirestore();
+    const existingIds = new Set(existingFirestoreFoods.map(f => f.id));
+    console.log(`[Custom Foods Migration] 📊 ${existingFirestoreFoods.length} aliments déjà dans Firestore`);
+
+    // Migrer chaque aliment qui n'existe pas déjà dans Firestore
+    let migrated = 0;
+    let errors = 0;
+
+    for (const food of localFoods) {
+      // Si l'aliment existe déjà dans Firestore, on le skip
+      if (existingIds.has(food.id)) {
+        console.log(`[Custom Foods Migration] ⏭️  "${food.name}" (${food.id}) existe déjà dans Firestore, ignoré`);
+        continue;
+      }
+
+      try {
+        console.log(`[Custom Foods Migration] 📤 Migration de "${food.name}" (${food.id})...`);
+        const globalFoodRef = doc(db, 'globalFoods', food.id);
+        await setDoc(globalFoodRef, {
+          ...food,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          migratedAt: new Date().toISOString(), // Indiquer que c'est une migration
+        });
+        migrated++;
+        console.log(`[Custom Foods Migration] ✅ "${food.name}" migré avec succès`);
+      } catch (error: any) {
+        errors++;
+        console.error(`[Custom Foods Migration] ❌ Erreur migration "${food.name}" (${food.id}):`, error);
+        console.error('[Custom Foods Migration]   Détails:', {
+          message: error?.message,
+          code: error?.code,
+          foodId: food.id,
+          foodName: food.name,
+        });
+      }
+    }
+
+    // Marquer la migration comme complétée
+    await AsyncStorage.setItem(migrationFlagKey, 'true');
+    
+    console.log(`[Custom Foods Migration] ✅ Migration terminée: ${migrated} aliments migrés, ${errors} erreurs`);
+    
+    return { migrated, errors };
+  } catch (error: any) {
+    console.error('[Custom Foods Migration] ❌ Erreur lors de la migration:', error);
+    console.error('[Custom Foods Migration]   Détails:', {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack,
+    });
+    return { migrated: 0, errors: 1 };
+  }
+}
