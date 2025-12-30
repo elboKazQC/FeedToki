@@ -90,8 +90,8 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
         setScanned(true);
         onBarcodeScanned(barcode);
       } else {
-        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives');
-        setDecodingError('Aucun code-barres détecté après plusieurs tentatives. Essayez de mieux centrer le code sur la ligne verte, d\'améliorer l\'éclairage, ou entrez le code manuellement.');
+        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives (QuaggaJS + ZXing)');
+        setDecodingError('Aucun code-barres détecté. Conseils:\n• Centrez bien le code sur la ligne verte\n• Approchez-vous (10-15 cm)\n• Améliorez l\'éclairage et évitez les reflets\n• Ou entrez le code manuellement ci-dessous');
       }
     } catch (error: any) {
       logger.error('[BarcodeScanner] Erreur lors de la capture/décodage', { 
