@@ -51,7 +51,7 @@ import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon 
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
 import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
-import { loadCustomFoods, mergeFoodsWithCustom } from '../../lib/custom-foods';
+import { loadCustomFoods, mergeFoodsWithCustom, migrateLocalFoodsToGlobal } from '../../lib/custom-foods';
 import { userLogger, logError } from '../../lib/user-logger';
 import { trackMealLogged, trackStreakMilestone, trackTargetUpdated } from '../../lib/analytics';
 import { Button } from '../../components/ui/Button';
@@ -270,6 +270,11 @@ export default function App() {
           if (syncResult.mealsMerged > 0) {
             console.log('[Index] 🔄 Rechargement forcé des entrées après sync...');
           }
+          
+          // FORCER le rechargement des custom foods après la sync pour avoir les nouveaux items partagés
+          console.log('[Index] 🔄 Rechargement des custom foods après sync...');
+          await loadCustomFoodsData();
+          console.log('[Index] ✅ Custom foods rechargés');
         } catch (syncError) {
           console.error('[Index] ❌ Erreur sync Firestore:', syncError);
           console.warn('[Index] ⚠️ Erreur sync Firestore, utilisation locale:', syncError);
@@ -676,6 +681,32 @@ export default function App() {
     const custom = await loadCustomFoods(currentUserId);
     setCustomFoods(custom);
   };
+
+  // Migration automatique des aliments locaux vers globalFoods (une seule fois au démarrage)
+  useEffect(() => {
+    if (!currentUserId || currentUserId === 'guest' || !isReady) {
+      return;
+    }
+
+    const runMigration = async () => {
+      try {
+        console.log('[Index] 🔄 Vérification migration des aliments locaux vers globalFoods...');
+        const result = await migrateLocalFoodsToGlobal(currentUserId);
+        if (result.migrated > 0) {
+          console.log(`[Index] ✅ ${result.migrated} aliments migrés vers la base globale`);
+          // Recharger les custom foods après migration pour avoir les données à jour
+          await loadCustomFoodsData();
+        }
+        if (result.errors > 0) {
+          console.warn(`[Index] ⚠️ ${result.errors} erreurs lors de la migration`);
+        }
+      } catch (error) {
+        console.error('[Index] ❌ Erreur lors de la migration:', error);
+      }
+    };
+
+    runMigration();
+  }, [currentUserId, isReady]); // Se déclenche une fois au démarrage quand userId est disponible
 
   // Vérification et correction automatique des points au chargement initial seulement
   // (Désactivé pour éviter les race conditions - la déduction se fait directement dans handleAddEntry)

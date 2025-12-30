@@ -71,14 +71,29 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
  * Charger les aliments personnalisés depuis Firestore (collection globale partagée)
  */
 export async function loadCustomFoodsFromFirestore(): Promise<FoodItem[]> {
-  if (!FIREBASE_ENABLED || !db) return [];
+  if (!FIREBASE_ENABLED || !db) {
+    console.log('[Custom Foods] ⚠️ Firebase non disponible (FIREBASE_ENABLED:', FIREBASE_ENABLED, ', db:', !!db, ')');
+    return [];
+  }
 
   try {
+    console.log('[Custom Foods] 🔍 Démarrage chargement depuis Firestore (globalFoods)...');
     const globalFoodsRef = collection(db, 'globalFoods');
     const snapshot = await getDocs(globalFoodsRef);
-    return snapshot.docs.map(doc => doc.data() as FoodItem);
-  } catch (error) {
-    console.error('[Custom Foods] Erreur chargement Firestore:', error);
+    const foods = snapshot.docs.map(doc => {
+      const data = doc.data() as FoodItem;
+      console.log(`[Custom Foods]   - ${data.name} (${data.id})`);
+      return data;
+    });
+    console.log(`[Custom Foods] ✅ Chargement Firestore réussi: ${foods.length} aliments trouvés`);
+    return foods;
+  } catch (error: any) {
+    console.error('[Custom Foods] ❌ Erreur chargement Firestore:', error);
+    console.error('[Custom Foods]   Détails:', {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack,
+    });
     return [];
   }
 }
@@ -103,19 +118,36 @@ export async function addCustomFood(food: FoodItem, userId?: string): Promise<vo
   // Sauvegarder dans Firestore (collection globale partagée)
   if (FIREBASE_ENABLED && db) {
     try {
-      console.log(`[Custom Foods] 📤 Envoi vers Firestore (globalFoods)...`, { foodId: food.id, name: food.name });
+      console.log(`[Custom Foods] 📤 Envoi vers Firestore (globalFoods)...`, { 
+        foodId: food.id, 
+        name: food.name,
+        calories: food.calories_kcal,
+        protein: food.protein_g,
+        carbs: food.carbs_g,
+        fat: food.fat_g,
+      });
       const globalFoodRef = doc(db, 'globalFoods', food.id);
-      await setDoc(globalFoodRef, {
+      const foodData = {
         ...food,
         createdAt: new Date().toISOString(), // Ajouter timestamp pour référence
-      });
-      console.log(`[Custom Foods] ✅ Sauvegardé dans Firestore (globalFoods/${food.id})`);
-    } catch (error) {
+        updatedAt: new Date().toISOString(), // Timestamp de mise à jour
+      };
+      await setDoc(globalFoodRef, foodData, { merge: true });
+      console.log(`[Custom Foods] ✅ Sauvegardé dans Firestore (globalFoods/${food.id}) - Partagé avec tous les utilisateurs`);
+    } catch (error: any) {
       console.error('[Custom Foods] ❌ Erreur sauvegarde Firestore:', error);
-      // Continue même si Firestore échoue
+      console.error('[Custom Foods]   Détails:', {
+        message: error?.message,
+        code: error?.code,
+        foodId: food.id,
+        foodName: food.name,
+        stack: error?.stack,
+      });
+      // Continue même si Firestore échoue (l'aliment est quand même dans AsyncStorage)
+      console.warn('[Custom Foods] ⚠️ L\'aliment est sauvegardé localement mais pas synchronisé. Il sera synchronisé au prochain chargement.');
     }
   } else {
-    console.warn('[Custom Foods] ⚠️ Firebase non activé, pas de sync Firestore');
+    console.warn('[Custom Foods] ⚠️ Firebase non activé (FIREBASE_ENABLED:', FIREBASE_ENABLED, ', db:', !!db, '), pas de sync Firestore');
   }
 }
 
