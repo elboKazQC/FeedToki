@@ -101,51 +101,79 @@ export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string 
  */
 async function decodeBarcodeWithCloudAPI(dataUrl: string): Promise<string | null> {
   try {
+    logger.info('[barcode-decode-web] ════════════════════════════════════');
+    logger.info('[barcode-decode-web] Tentative avec Google Cloud Vision API');
+    
     // Vérifier que Firebase est initialisé
     if (!app) {
-      logger.warn('[barcode-decode-web] Firebase non initialisé, skip Cloud API');
+      logger.warn('[barcode-decode-web] ❌ Firebase non initialisé, skip Cloud API');
       return null;
     }
     
+    logger.info('[barcode-decode-web] Firebase initialisé, connexion à Functions...');
     const functions = getFunctions(app);
     const decodeBarcodeCloud = httpsCallable(functions, 'decodeBarcodeCloud');
+    logger.info('[barcode-decode-web] Function decodeBarcodeCloud chargée');
     
     // Extraire le base64 de la data URL
     const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+    logger.info('[barcode-decode-web] Image préparée, taille base64:', base64Data.length, 'caractères');
     
     // Appeler la Firebase Function avec timeout (10 secondes)
+    const startTime = Date.now();
     const timeoutPromise = new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), 10000);
+      setTimeout(() => {
+        logger.warn('[barcode-decode-web] ⏱️ Timeout Cloud API (10s)');
+        resolve(null);
+      }, 10000);
     });
     
     const apiPromise = decodeBarcodeCloud({ imageBase64: base64Data })
       .then((result: any) => {
+        const duration = Date.now() - startTime;
+        logger.info('[barcode-decode-web] Réponse Cloud API reçue (durée:', duration, 'ms)');
+        
         if (result.data?.success && result.data?.barcode) {
+          logger.info('[barcode-decode-web] ✅ Cloud API: Code-barres détecté:', result.data.barcode);
           return result.data.barcode;
         }
+        
+        logger.warn('[barcode-decode-web] ❌ Cloud API: Aucun code-barres dans la réponse');
         return null;
       })
       .catch((error: any) => {
+        const duration = Date.now() - startTime;
+        logger.warn('[barcode-decode-web] ❌ Cloud API erreur (durée:', duration, 'ms):', { 
+          code: error.code, 
+          message: error.message,
+          details: error.details,
+        });
+        
         // Gérer les erreurs spécifiques
         if (error.code === 'functions/permission-denied') {
-          logger.warn('[barcode-decode-web] Cloud API: Vision API non activée ou permissions manquantes');
+          logger.error('[barcode-decode-web] ❌ PERMISSION_DENIED - Vision API non activée ou permissions manquantes');
         } else if (error.code === 'functions/invalid-argument') {
-          logger.warn('[barcode-decode-web] Cloud API: Image invalide');
-        } else {
-          logger.warn('[barcode-decode-web] Cloud API erreur:', { 
-            code: error.code, 
-            message: error.message 
-          });
+          logger.error('[barcode-decode-web] ❌ INVALID_ARGUMENT - Format d\'image invalide');
+        } else if (error.code === 'functions/unavailable') {
+          logger.error('[barcode-decode-web] ❌ UNAVAILABLE - Function non déployée ou plan Blaze non activé');
         }
+        
         return null;
       });
     
     const result = await Promise.race([apiPromise, timeoutPromise]);
     
+    if (result) {
+      logger.info('[barcode-decode-web] ════════════════════════════════════');
+    } else {
+      logger.warn('[barcode-decode-web] ════════════════════════════════════');
+    }
+    
     return result;
   } catch (error: any) {
-    logger.warn('[barcode-decode-web] Erreur Cloud API (fallback vers local):', { 
-      error: error?.message || String(error) 
+    logger.error('[barcode-decode-web] ❌ Erreur fatale Cloud API (fallback vers local):', { 
+      error: error?.message || String(error),
+      stack: error?.stack,
     });
     return null;
   }
