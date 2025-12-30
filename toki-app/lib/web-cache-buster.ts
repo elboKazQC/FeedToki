@@ -4,13 +4,20 @@
  * 
  * Résout le problème de versions bloquées sur le web où un ancien bundle
  * reste servi même après déploiement d'une nouvelle version.
+ * 
+ * STRATÉGIE:
+ * - Utilise localStorage (persistant entre sessions) pour tracker la version
+ * - Si BUILD_VERSION != localStorage version -> hard reload automatique
+ * - Logs détaillés à chaque étape pour diagnostic
+ * - Protection contre boucles infinies (max 3 reloads)
  */
 
 import { Platform } from 'react-native';
 import { logger } from './logger';
 
-const CACHE_BUST_FLAG = 'feedtoki_cache_busted';
-const CACHE_BUST_VERSION = '1.0.3'; // Incrémenter pour forcer un nouveau bust
+const CACHE_BUST_VERSION_KEY = 'feedtoki_cached_version';
+const CACHE_BUST_RELOAD_COUNT_KEY = 'feedtoki_reload_count';
+const MAX_RELOAD_ATTEMPTS = 3;
 
 /**
  * Unregister tous les Service Workers actifs
@@ -63,86 +70,143 @@ async function clearCacheStorage(): Promise<void> {
 }
 
 /**
- * Vérifier si un cache bust est nécessaire pour cette version
+ * Récupérer la version en cache (localStorage)
  */
-function shouldCacheBust(): boolean {
-  if (typeof sessionStorage === 'undefined') {
-    return false;
+function getCachedVersion(): string | null {
+  if (typeof localStorage === 'undefined') {
+    return null;
   }
-
-  const lastBustedVersion = sessionStorage.getItem(CACHE_BUST_FLAG);
-  return lastBustedVersion !== CACHE_BUST_VERSION;
+  return localStorage.getItem(CACHE_BUST_VERSION_KEY);
 }
 
 /**
- * Marquer le cache bust comme effectué pour cette session
+ * Mettre à jour la version en cache
  */
-function markCacheBusted(): void {
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.setItem(CACHE_BUST_FLAG, CACHE_BUST_VERSION);
+function setCachedVersion(version: string): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(CACHE_BUST_VERSION_KEY, version);
+    console.log(`[Cache Buster] Version cached: ${version}`);
   }
 }
 
 /**
- * Nettoyer les caches web et recharger la page (une seule fois)
+ * Gérer le compteur de reload pour éviter les boucles infinies
+ */
+function getReloadCount(): number {
+  if (typeof localStorage === 'undefined') {
+    return 0;
+  }
+  const count = localStorage.getItem(CACHE_BUST_RELOAD_COUNT_KEY);
+  return count ? parseInt(count, 10) : 0;
+}
+
+function incrementReloadCount(): void {
+  if (typeof localStorage !== 'undefined') {
+    const count = getReloadCount() + 1;
+    localStorage.setItem(CACHE_BUST_RELOAD_COUNT_KEY, count.toString());
+    console.log(`[Cache Buster] Reload count: ${count}/${MAX_RELOAD_ATTEMPTS}`);
+  }
+}
+
+function resetReloadCount(): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(CACHE_BUST_RELOAD_COUNT_KEY);
+    console.log('[Cache Buster] Reload count reset');
+  }
+}
+
+/**
+ * Nettoyer les caches web et recharger la page (appel manuel depuis /version)
  * 
- * @param forceReload - Si true, force le reload même si déjà effectué cette session
+ * @param currentVersion - La version actuelle du build
  */
-export async function bustWebCache(forceReload: boolean = false): Promise<void> {
+export async function bustWebCache(currentVersion: string): Promise<void> {
   // Web uniquement
   if (Platform.OS !== 'web') {
+    console.log('[Cache Buster] Skipping: not web platform');
     return;
   }
 
-  // Éviter la boucle infinie: ne recharger qu'une fois par session
-  if (!forceReload && !shouldCacheBust()) {
-    logger.debug('[Cache Buster] Already busted in this session, skipping');
-    return;
-  }
-
-  logger.info('[Cache Buster] Starting cache cleanup...');
+  console.log('[Cache Buster] === MANUAL CACHE BUST START ===');
+  console.log(`[Cache Buster] Current version: ${currentVersion}`);
 
   // Nettoyer les service workers et caches
+  console.log('[Cache Buster] 🧹 Cleaning all caches...');
   await Promise.all([
     unregisterServiceWorkers(),
     clearCacheStorage(),
   ]);
 
-  // Marquer comme effectué
-  markCacheBusted();
+  // Reset le compteur de reload
+  resetReloadCount();
 
-  // Recharger la page pour récupérer le nouveau bundle
-  if (forceReload || shouldCacheBust()) {
-    logger.info('[Cache Buster] Reloading page to fetch fresh bundle...');
-    
-    // Délai court pour laisser les logs s'afficher
-    setTimeout(() => {
-      window.location.reload();
-    }, 100);
-  }
+  // Mettre à jour la version en cache
+  setCachedVersion(currentVersion);
+
+  // Hard reload
+  console.warn('[Cache Buster] 🔄 Forcing hard reload...');
+  setTimeout(() => {
+    // @ts-ignore - location.reload(true) force un hard reload sans cache
+    window.location.reload(true);
+  }, 500);
 }
 
 /**
  * Auto-cleanup au démarrage de l'app (appelé depuis _layout.tsx)
- * Ne reload que si nécessaire (première visite ou nouvelle version)
+ * Vérifie la version et force un hard reload si nécessaire
  */
-export async function autoCleanupWebCache(): Promise<void> {
+export async function autoCleanupWebCache(currentVersion: string): Promise<void> {
   if (Platform.OS !== 'web') {
+    console.log('[Cache Buster] Skipping: not web platform');
     return;
   }
 
-  // Vérifier si on doit faire le cleanup
-  if (!shouldCacheBust()) {
+  console.log(`[Cache Buster] === AUTO CLEANUP START ===`);
+  console.log(`[Cache Buster] Current BUILD_VERSION: ${currentVersion}`);
+
+  const cachedVersion = getCachedVersion();
+  console.log(`[Cache Buster] Cached version: ${cachedVersion || 'none'}`);
+
+  // Si les versions correspondent, tout va bien
+  if (cachedVersion === currentVersion) {
+    console.log('[Cache Buster] ✅ Versions match, no action needed');
+    resetReloadCount(); // Reset le compteur si on a la bonne version
     return;
   }
 
-  // Nettoyer silencieusement sans reload (pour ne pas perturber l'UX)
+  // Nouvelle version détectée!
+  console.warn(`[Cache Buster] ⚠️  Version mismatch! Cached: ${cachedVersion}, Current: ${currentVersion}`);
+
+  // Vérifier qu'on n'est pas dans une boucle infinie
+  const reloadCount = getReloadCount();
+  console.log(`[Cache Buster] Reload attempt ${reloadCount + 1}/${MAX_RELOAD_ATTEMPTS}`);
+
+  if (reloadCount >= MAX_RELOAD_ATTEMPTS) {
+    console.error(`[Cache Buster] ❌ Max reload attempts reached. Giving up and updating cached version.`);
+    setCachedVersion(currentVersion);
+    resetReloadCount();
+    return;
+  }
+
+  // Nettoyer les caches
+  console.log('[Cache Buster] 🧹 Cleaning caches...');
   await Promise.all([
     unregisterServiceWorkers(),
     clearCacheStorage(),
   ]);
 
-  markCacheBusted();
+  // Incrémenter le compteur AVANT le reload
+  incrementReloadCount();
+
+  // Mettre à jour la version en cache
+  setCachedVersion(currentVersion);
+
+  // Hard reload pour récupérer le nouveau bundle
+  console.warn('[Cache Buster] 🔄 Forcing hard reload...');
+  setTimeout(() => {
+    // @ts-ignore - location.reload(true) force un hard reload sans cache
+    window.location.reload(true);
+  }, 500);
 }
 
 /**
@@ -153,17 +217,21 @@ export async function getCacheStatus(): Promise<{
   serviceWorkerCount: number;
   cacheNames: string[];
   lastBustedVersion: string | null;
+  reloadCount: number;
 }> {
   const status = {
     hasServiceWorker: false,
     serviceWorkerCount: 0,
     cacheNames: [] as string[],
     lastBustedVersion: null as string | null,
+    reloadCount: 0,
   };
 
   if (Platform.OS !== 'web') {
     return status;
   }
+
+  console.log('[Cache Status] Checking cache status...');
 
   // Service Workers
   if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
@@ -171,8 +239,9 @@ export async function getCacheStatus(): Promise<{
       const registrations = await navigator.serviceWorker.getRegistrations();
       status.hasServiceWorker = registrations.length > 0;
       status.serviceWorkerCount = registrations.length;
+      console.log(`[Cache Status] Service Workers: ${registrations.length}`);
     } catch (error) {
-      logger.warn('[Cache Status] Failed to check service workers:', error);
+      console.warn('[Cache Status] Failed to check service workers:', error);
     }
   }
 
@@ -180,15 +249,16 @@ export async function getCacheStatus(): Promise<{
   if (typeof caches !== 'undefined') {
     try {
       status.cacheNames = await caches.keys();
+      console.log(`[Cache Status] Cache Storage: ${status.cacheNames.length} cache(s)`);
     } catch (error) {
-      logger.warn('[Cache Status] Failed to check cache storage:', error);
+      console.warn('[Cache Status] Failed to check cache storage:', error);
     }
   }
 
-  // Session flag
-  if (typeof sessionStorage !== 'undefined') {
-    status.lastBustedVersion = sessionStorage.getItem(CACHE_BUST_FLAG);
-  }
+  // localStorage
+  status.lastBustedVersion = getCachedVersion();
+  status.reloadCount = getReloadCount();
+  console.log(`[Cache Status] Cached version: ${status.lastBustedVersion}, Reload count: ${status.reloadCount}`);
 
   return status;
 }

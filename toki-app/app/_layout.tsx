@@ -8,6 +8,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/lib/auth-context';
 import { ThemeProvider as TokiThemeProvider } from '@/lib/theme-context';
 import { autoCleanupWebCache } from '@/lib/web-cache-buster';
+import { BUILD_VERSION } from '@/lib/build-version';
 import * as Sentry from '@sentry/react-native';
 
 // Initialiser Sentry (seulement en production ou avec DSN configuré)
@@ -42,8 +43,8 @@ export default function RootLayout() {
 
   // Auto-cleanup des caches web au démarrage (web uniquement)
   useEffect(() => {
-    autoCleanupWebCache().catch(err => {
-      console.warn('[RootLayout] Cache cleanup failed:', err);
+    autoCleanupWebCache(BUILD_VERSION).catch(err => {
+      console.error('[RootLayout] Cache cleanup failed:', err);
     });
   }, []);
 

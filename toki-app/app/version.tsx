@@ -28,6 +28,7 @@ export default function VersionScreen() {
     serviceWorkerCount: number;
     cacheNames: string[];
     lastBustedVersion: string | null;
+    reloadCount: number;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCleaning, setIsCleaning] = useState(false);
@@ -64,8 +65,8 @@ export default function VersionScreen() {
           onPress: async () => {
             setIsCleaning(true);
             try {
-              // Force le reload même si déjà effectué cette session
-              await bustWebCache(true);
+              // Passer BUILD_VERSION pour forcer le reload
+              await bustWebCache(BUILD_VERSION);
             } catch (error) {
               console.error('[Version] Cache cleanup failed:', error);
               Alert.alert('Erreur', 'Impossible de nettoyer le cache. Essaie de vider le cache de ton navigateur manuellement.');
@@ -279,9 +280,16 @@ export default function VersionScreen() {
                 </View>
                 
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Dernier nettoyage:</Text>
+                  <Text style={styles.infoLabel}>Version en cache:</Text>
                   <Text style={styles.infoValue}>
-                    {cacheStatus.lastBustedVersion || 'Jamais'}
+                    {cacheStatus.lastBustedVersion || 'Aucune'}
+                  </Text>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Compteur reload:</Text>
+                  <Text style={styles.infoValue}>
+                    {cacheStatus.reloadCount}/3
                   </Text>
                 </View>
               </>
