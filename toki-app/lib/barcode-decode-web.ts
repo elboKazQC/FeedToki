@@ -41,50 +41,97 @@ const QUAGGA_CONFIG = {
 /**
  * Décode un code-barres depuis une data URL (base64)
  * Ordre de priorité: Google Cloud Vision API → QuaggaJS → ZXing
+ * Avec tentatives multiples: crops, rotations, preprocessing
  * 
  * @param dataUrl - Image en format data:image/...;base64,...
  * @returns Le code-barres détecté, ou null si aucun n'est trouvé
  */
 export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string | null> {
   try {
-    logger.info('[barcode-decode-web] Démarrage du décodage (Cloud API → QuaggaJS → ZXing)');
+    logger.info('[barcode-decode-web] ════════════════════════════════════');
+    logger.info('[barcode-decode-web] Démarrage du décodage avec stratégies multiples');
     
-    // Étape 1: Essayer Google Cloud Vision API (le plus fiable)
-    logger.info('[barcode-decode-web] Tentative avec Google Cloud Vision API...');
-    const cloudResult = await decodeBarcodeWithCloudAPI(dataUrl);
+    // Charger l'image une fois
+    const img = await loadImage(dataUrl);
+    logger.info('[barcode-decode-web] Image chargée', { width: img.width, height: img.height });
     
-    if (cloudResult) {
-      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec Cloud API', { 
-        barcode: cloudResult 
-      });
-      return cloudResult;
+    // Stratégies de décodage: différentes zones de l'image
+    const cropStrategies = [
+      { name: 'full', x: 0, y: 0, w: 1.0, h: 1.0 }, // Image complète
+      { name: 'center_horizontal', x: 0, y: 0.3, w: 1.0, h: 0.4 }, // Bande horizontale centrale (30% haut, 40% hauteur)
+      { name: 'center_wide', x: 0, y: 0.25, w: 1.0, h: 0.5 }, // Bande plus large (25% haut, 50% hauteur)
+      { name: 'upper_third', x: 0, y: 0, w: 1.0, h: 0.33 }, // Tiers supérieur
+      { name: 'middle_third', x: 0, y: 0.33, w: 1.0, h: 0.33 }, // Tiers central
+    ];
+    
+    // Pour chaque stratégie de crop, essayer toutes les méthodes
+    for (const cropStrategy of cropStrategies) {
+      logger.info(`[barcode-decode-web] Essai avec crop: ${cropStrategy.name}`);
+      
+      // Créer une image cropée pour cette stratégie
+      const croppedDataUrl = await createCroppedImage(img, cropStrategy);
+      
+      // Étape 1: Essayer Google Cloud Vision API avec ce crop
+      const cloudResult = await decodeBarcodeWithCloudAPI(croppedDataUrl);
+      if (cloudResult) {
+        logger.info('[barcode-decode-web] ✅ Code-barres détecté avec Cloud API', { 
+          barcode: cloudResult,
+          crop: cropStrategy.name
+        });
+        return cloudResult;
+      }
+      
+      // Étape 2: Essayer QuaggaJS avec ce crop
+      const quaggaResult = await decodeBarcodeWithQuagga(croppedDataUrl);
+      if (quaggaResult) {
+        logger.info('[barcode-decode-web] ✅ Code-barres détecté avec QuaggaJS', { 
+          barcode: quaggaResult,
+          crop: cropStrategy.name
+        });
+        return quaggaResult;
+      }
+      
+      // Étape 3: Essayer ZXing avec ce crop
+      const zxingResult = await decodeBarcodeWithZXing(croppedDataUrl);
+      if (zxingResult) {
+        logger.info('[barcode-decode-web] ✅ Code-barres détecté avec ZXing', { 
+          barcode: zxingResult,
+          crop: cropStrategy.name
+        });
+        return zxingResult;
+      }
     }
     
-    logger.warn('[barcode-decode-web] Cloud API n\'a pas détecté de code, essai avec QuaggaJS...');
+    // Si aucun crop n'a fonctionné, essayer avec rotations
+    logger.warn('[barcode-decode-web] Aucun crop n\'a fonctionné, essai avec rotations...');
+    const rotations = [90, 180, 270];
     
-    // Étape 2: Fallback QuaggaJS (meilleur pour web mobile)
-    const quaggaResult = await decodeBarcodeWithQuagga(dataUrl);
-    
-    if (quaggaResult) {
-      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec QuaggaJS (fallback)', { 
-        barcode: quaggaResult 
-      });
-      return quaggaResult;
+    for (const rotation of rotations) {
+      logger.info(`[barcode-decode-web] Essai avec rotation: ${rotation}°`);
+      const rotatedDataUrl = await createRotatedImage(img, rotation);
+      
+      // Essayer Cloud API avec rotation
+      const cloudResult = await decodeBarcodeWithCloudAPI(rotatedDataUrl);
+      if (cloudResult) {
+        logger.info('[barcode-decode-web] ✅ Code-barres détecté avec Cloud API (rotation)', { 
+          barcode: cloudResult,
+          rotation
+        });
+        return cloudResult;
+      }
+      
+      // Essayer QuaggaJS avec rotation
+      const quaggaResult = await decodeBarcodeWithQuagga(rotatedDataUrl);
+      if (quaggaResult) {
+        logger.info('[barcode-decode-web] ✅ Code-barres détecté avec QuaggaJS (rotation)', { 
+          barcode: quaggaResult,
+          rotation
+        });
+        return quaggaResult;
+      }
     }
     
-    logger.warn('[barcode-decode-web] QuaggaJS n\'a pas détecté de code, essai avec ZXing...');
-    
-    // Étape 3: Fallback ZXing (dernier recours)
-    const zxingResult = await decodeBarcodeWithZXing(dataUrl);
-    
-    if (zxingResult) {
-      logger.info('[barcode-decode-web] ✅ Code-barres détecté avec ZXing (fallback)', { 
-        barcode: zxingResult 
-      });
-      return zxingResult;
-    }
-    
-    logger.warn('[barcode-decode-web] ❌ Aucun code-barres détecté (Cloud API + QuaggaJS + ZXing ont échoué)');
+    logger.warn('[barcode-decode-web] ❌ Aucun code-barres détecté après toutes les stratégies');
     return null;
 
   } catch (error: any) {
@@ -93,6 +140,64 @@ export async function decodeBarcodeFromDataUrl(dataUrl: string): Promise<string 
     });
     return null;
   }
+}
+
+/**
+ * Crée une image cropée selon une stratégie
+ */
+async function createCroppedImage(
+  img: HTMLImageElement,
+  strategy: { name: string; x: number; y: number; w: number; h: number }
+): Promise<string> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Impossible de créer le contexte canvas');
+  }
+  
+  const cropX = Math.floor(img.width * strategy.x);
+  const cropY = Math.floor(img.height * strategy.y);
+  const cropW = Math.floor(img.width * strategy.w);
+  const cropH = Math.floor(img.height * strategy.h);
+  
+  canvas.width = cropW;
+  canvas.height = cropH;
+  
+  ctx.drawImage(
+    img,
+    cropX, cropY, cropW, cropH,
+    0, 0, cropW, cropH
+  );
+  
+  return canvas.toDataURL('image/jpeg', 0.95);
+}
+
+/**
+ * Crée une image tournée
+ */
+async function createRotatedImage(img: HTMLImageElement, degrees: number): Promise<string> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Impossible de créer le contexte canvas');
+  }
+  
+  // Calculer les dimensions après rotation
+  const rad = (degrees * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const newWidth = Math.floor(img.width * cos + img.height * sin);
+  const newHeight = Math.floor(img.width * sin + img.height * cos);
+  
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+  
+  // Centrer et tourner
+  ctx.translate(newWidth / 2, newHeight / 2);
+  ctx.rotate(rad);
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  
+  return canvas.toDataURL('image/jpeg', 0.95);
 }
 
 /**
@@ -111,9 +216,22 @@ async function decodeBarcodeWithCloudAPI(dataUrl: string): Promise<string | null
     }
     
     logger.info('[barcode-decode-web] Firebase initialisé, connexion à Functions...');
-    const functions = getFunctions(app);
-    const decodeBarcodeCloud = httpsCallable(functions, 'decodeBarcodeCloud');
-    logger.info('[barcode-decode-web] Function decodeBarcodeCloud chargée');
+    
+    let functions: ReturnType<typeof getFunctions>;
+    let decodeBarcodeCloud: ReturnType<typeof httpsCallable>;
+    
+    try {
+      functions = getFunctions(app);
+      decodeBarcodeCloud = httpsCallable(functions, 'decodeBarcodeCloud');
+      logger.info('[barcode-decode-web] ✅ Function decodeBarcodeCloud chargée avec succès');
+    } catch (functionsError: any) {
+      logger.error('[barcode-decode-web] ❌ Erreur chargement Firebase Functions', {
+        error: functionsError?.message || String(functionsError),
+        code: functionsError?.code,
+      });
+      logger.warn('[barcode-decode-web] ⚠️ Cloud API non disponible, utilisation des fallbacks locaux uniquement');
+      return null;
+    }
     
     // Extraire le base64 de la data URL
     const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');

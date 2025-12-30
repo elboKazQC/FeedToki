@@ -5,6 +5,127 @@ import { ParsedFoodItem, ParsedMealResult } from './ai-meal-parser';
 import { checkUserAPILimit, incrementAPICall } from './api-rate-limit';
 import { logger } from './logger';
 
+/**
+ * Extraire le code-barres (chiffres) d'une photo en utilisant OpenAI Vision
+ * Fallback ultime quand les bibliothèques de décodage échouent
+ */
+export async function extractBarcodeWithOpenAI(
+  photoBase64: string,
+  userId?: string,
+  userEmailVerified?: boolean
+): Promise<string | null> {
+  const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  
+  try {
+    logger.info('[OpenAI Parser] Tentative extraction code-barres avec OpenAI Vision...');
+    
+    if (!OPENAI_API_KEY) {
+      logger.error('[OpenAI Parser] Clé API OpenAI manquante');
+      return null;
+    }
+
+    // Vérifier que l'email est vérifié (si userId fourni)
+    if (userId && userId !== 'guest' && userEmailVerified === false) {
+      logger.warn('[OpenAI Parser] Email non vérifié, extraction bloquée');
+      return null;
+    }
+
+    // Rate limiting côté client
+    await waitForClientRateLimit();
+
+    // Rate limiting par utilisateur dans Firestore (si userId fourni)
+    if (userId && userId !== 'guest') {
+      const canUse = await checkUserAPILimit(userId);
+      if (!canUse) {
+        logger.warn('[OpenAI Parser] Limite quotidienne atteinte pour extraction code-barres');
+        return null;
+      }
+    }
+
+    const prompt = `Tu es un expert en lecture de codes-barres. Analyse cette image et extrais UNIQUEMENT les chiffres du code-barres (EAN-13, EAN-8, UPC, etc.).
+
+INSTRUCTIONS CRITIQUES:
+1. Cherche une série de chiffres (généralement 8, 12, ou 13 chiffres)
+2. Les chiffres sont souvent sous des barres verticales noires et blanches
+3. Retourne UNIQUEMENT les chiffres, sans espaces ni tirets
+4. Si tu vois plusieurs séries de chiffres, prends la plus longue (code-barres principal)
+5. Si aucun code-barres n'est visible, réponds "AUCUN"
+
+EXEMPLES:
+- Si tu vois "3 017620 422003" → réponds "3017620422003"
+- Si tu vois "8712100..." → réponds "8712100..."
+- Si pas de code-barres → réponds "AUCUN"
+
+Réponds UNIQUEMENT avec les chiffres ou "AUCUN", rien d'autre.`;
+
+    logger.info('[OpenAI Parser] Envoi de la requête à OpenAI Vision...');
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${photoBase64}`,
+                  detail: 'high', // Haute résolution pour mieux lire les chiffres
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 100,
+        temperature: 0, // Température 0 pour réponse déterministe
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('[OpenAI Parser] Erreur API OpenAI:', response.status, errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    const result = data.choices[0]?.message?.content?.trim() || '';
+    logger.info('[OpenAI Parser] Réponse OpenAI:', result);
+
+    // Incrémenter le compteur d'utilisation si userId fourni
+    if (userId && userId !== 'guest') {
+      await incrementAPICall(userId);
+    }
+
+    // Vérifier si c'est un code-barres valide (uniquement des chiffres)
+    if (result === 'AUCUN' || result === '') {
+      logger.warn('[OpenAI Parser] Aucun code-barres détecté par OpenAI');
+      return null;
+    }
+
+    // Nettoyer la réponse (enlever espaces, tirets, etc.)
+    const cleanedBarcode = result.replace(/[^0-9]/g, '');
+    
+    // Vérifier que c'est une longueur valide pour un code-barres (8, 12, ou 13 chiffres généralement)
+    if (cleanedBarcode.length < 8 || cleanedBarcode.length > 14) {
+      logger.warn('[OpenAI Parser] Code-barres invalide (longueur incorrecte):', cleanedBarcode.length);
+      return null;
+    }
+
+    logger.info('[OpenAI Parser] ✅ Code-barres extrait avec succès:', cleanedBarcode);
+    return cleanedBarcode;
+  } catch (error: any) {
+    logger.error('[OpenAI Parser] Erreur extraction code-barres:', error?.message || String(error));
+    return null;
+  }
+}
+
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 

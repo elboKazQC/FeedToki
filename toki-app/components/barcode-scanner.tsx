@@ -3,9 +3,11 @@
 // Fallback photo + ZXing pour iPhone Safari web (scan live non supporté)
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, TextInput, ActivityIndicator, Image, ScrollView } from 'react-native';
 import { CameraView, Camera, BarcodeScanningResult } from 'expo-camera';
 import { decodeBarcodeFromDataUrl, isIOSSafari } from '../lib/barcode-decode-web';
+import { extractBarcodeWithOpenAI } from '../lib/openai-parser';
+import { useAuth } from '../lib/auth-context';
 import { logger } from '../lib/logger';
 
 type BarcodeScannerProps = {
@@ -14,6 +16,7 @@ type BarcodeScannerProps = {
 };
 
 export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProps) {
+  const { user: authUser, profile: authProfile } = useAuth();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
@@ -23,8 +26,25 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   const [isDecoding, setIsDecoding] = useState(false);
   const [decodingError, setDecodingError] = useState<string | null>(null);
   const [usePhotoMode, setUsePhotoMode] = useState(false);
-  const [decodingStatus, setDecodingStatus] = useState<string>(''); // Status: 'cloud', 'local', ''
+  const [decodingStatus, setDecodingStatus] = useState<string>(''); // Status: 'cloud', 'local', 'openai', ''
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null); // URI de la photo capturée pour aperçu
+  const [showPhotoPreview, setShowPhotoPreview] = useState(false); // Afficher l'aperçu de la photo
   const cameraRef = useRef<CameraView>(null);
+  
+  // Mode debug
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [capturedPhotoData, setCapturedPhotoData] = useState<string | null>(null); // Base64 pour debug
+  
+  const addDebugLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setDebugLogs(prev => [...prev, `[${timestamp}] ${message}`]);
+    console.log(`[DEBUG] ${message}`);
+  };
+  
+  // Récupérer les infos utilisateur pour OpenAI
+  const currentUserId = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+  const userEmailVerified = (authUser as any)?.emailVerified || false;
 
   useEffect(() => {
     (async () => {
@@ -52,62 +72,174 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
     onBarcodeScanned(manualBarcode.trim());
   };
 
-  // Mode photo: capturer une image et la décoder avec ZXing
+  // Mode photo: capturer une image et la décoder avec plusieurs tentatives
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isDecoding) return;
     
     try {
       setIsDecoding(true);
       setDecodingError(null);
-      
-      logger.info('[BarcodeScanner] Capture de la photo...');
-      
-      // Amélioration qualité: quality 0.9 et skipProcessing false pour meilleure détection
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.9, // Augmenté de 0.7 à 0.9 pour meilleure qualité
-        skipProcessing: false, // Laisser le traitement natif (améliore la netteté)
-      });
-      
-      if (!photo || !photo.base64) {
-        throw new Error('Photo non capturée ou base64 manquant');
+      if (debugMode) {
+        setDebugLogs([]);
+        addDebugLog('Démarrage capture avec tentatives multiples...');
       }
       
-      logger.info('[BarcodeScanner] Photo capturée, décodage en cours (Cloud API → QuaggaJS → ZXing)...');
+      logger.info('[BarcodeScanner] Démarrage capture avec tentatives multiples...');
       
-      // Construire la data URL
-      const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+      // Essayer jusqu'à 3 fois si échec
+      const maxAttempts = 3;
+      let lastError: string | null = null;
       
-      // Décoder avec timeout (max 15 secondes pour inclure Cloud API)
-      setDecodingStatus('cloud');
-      const decodePromise = decodeBarcodeFromDataUrl(dataUrl).then((barcode) => {
-        setDecodingStatus('');
-        return barcode;
-      });
-      const timeoutPromise = new Promise<null>((resolve) => {
-        setTimeout(() => {
-          setDecodingStatus('');
-          resolve(null);
-        }, 15000);
-      });
-      
-      const barcode = await Promise.race([decodePromise, timeoutPromise]);
-      
-      if (barcode) {
-        logger.info('[BarcodeScanner] Code-barres décodé avec succès', { barcode });
-        setScanned(true);
-        onBarcodeScanned(barcode);
-      } else {
-        logger.warn('[BarcodeScanner] Aucun code-barres détecté après toutes les tentatives (Cloud API + QuaggaJS + ZXing)');
-        setDecodingError('Aucun code-barres détecté. Conseils:\n• Centrez bien le code sur la ligne verte\n• Approchez-vous (10-15 cm)\n• Améliorez l\'éclairage et évitez les reflets\n• Ou entrez le code manuellement ci-dessous');
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          if (debugMode) addDebugLog(`Tentative ${attempt}/${maxAttempts}...`);
+          logger.info(`[BarcodeScanner] Tentative ${attempt}/${maxAttempts}...`);
+          
+          // Délai de stabilisation pour éviter le flou de mouvement
+          if (attempt > 1) {
+            if (debugMode) addDebugLog('Attente stabilisation (500ms)...');
+            logger.info('[BarcodeScanner] Attente stabilisation (500ms)...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          // Amélioration qualité: quality 1.0 (maximum) pour meilleure détection
+          if (debugMode) addDebugLog('Capture de la photo (qualité maximale)...');
+          logger.info('[BarcodeScanner] Capture de la photo (qualité maximale)...');
+          const photo = await cameraRef.current.takePictureAsync({
+            base64: true,
+            quality: 1.0, // Qualité maximale pour meilleure détection
+            skipProcessing: false, // Laisser le traitement natif (améliore la netteté)
+            exif: false, // Pas besoin d'EXIF pour le décodage
+          });
+          
+          if (!photo || !photo.base64) {
+            throw new Error('Photo non capturée ou base64 manquant');
+          }
+          
+          // Mode debug: sauvegarder la photo capturée
+          if (debugMode) {
+            setCapturedPhotoData(`data:image/jpeg;base64,${photo.base64}`);
+            addDebugLog(`Photo capturée: ${photo.width}x${photo.height}, base64 length: ${photo.base64.length}`);
+          }
+          
+          // Afficher l'aperçu de la photo
+          setCapturedPhotoUri(photo.uri);
+          setShowPhotoPreview(true);
+          
+          // Attendre que l'utilisateur confirme ou recapture
+          // Pour l'instant, on continue automatiquement (peut être amélioré avec un bouton de confirmation)
+          await new Promise(resolve => setTimeout(resolve, 500)); // Petit délai pour voir l'aperçu
+          
+          if (debugMode) addDebugLog('Photo capturée, décodage en cours (Cloud API → QuaggaJS → ZXing)...');
+          logger.info('[BarcodeScanner] Photo capturée, décodage en cours (Cloud API → QuaggaJS → ZXing)...');
+          
+          // Construire la data URL
+          const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+          
+          // Décoder avec timeout (max 15 secondes pour inclure Cloud API)
+          setDecodingStatus('cloud');
+          const decodePromise = decodeBarcodeFromDataUrl(dataUrl).then((barcode) => {
+            setDecodingStatus('');
+            return barcode;
+          });
+          const timeoutPromise = new Promise<null>((resolve) => {
+            setTimeout(() => {
+              setDecodingStatus('');
+              resolve(null);
+            }, 15000);
+          });
+          
+          const barcode = await Promise.race([decodePromise, timeoutPromise]);
+          
+          if (barcode) {
+            if (debugMode) addDebugLog(`✅ Code-barres décodé avec succès: ${barcode}`);
+            logger.info('[BarcodeScanner] ✅ Code-barres décodé avec succès', { barcode, attempt });
+            setShowPhotoPreview(false);
+            setCapturedPhotoUri(null);
+            setScanned(true);
+            onBarcodeScanned(barcode);
+            return; // Succès, sortir de la boucle
+          } else {
+            if (debugMode) addDebugLog(`Tentative ${attempt} échouée: aucun code-barres détecté`);
+            logger.warn(`[BarcodeScanner] Tentative ${attempt} échouée: aucun code-barres détecté`);
+            lastError = `Tentative ${attempt}/${maxAttempts} échouée`;
+            
+            // Si c'est la dernière tentative, essayer OpenAI Vision comme fallback ultime
+            if (attempt === maxAttempts && photo.base64) {
+              if (debugMode) addDebugLog('Tentative finale avec OpenAI Vision...');
+              logger.info('[BarcodeScanner] Tentative finale avec OpenAI Vision...');
+              setDecodingStatus('openai');
+              
+              try {
+                const openaiBarcode = await extractBarcodeWithOpenAI(
+                  photo.base64,
+                  currentUserId !== 'guest' ? currentUserId : undefined,
+                  userEmailVerified
+                );
+                
+                if (openaiBarcode) {
+                  if (debugMode) addDebugLog(`✅ Code-barres extrait avec OpenAI: ${openaiBarcode}`);
+                  logger.info('[BarcodeScanner] ✅ Code-barres extrait avec OpenAI Vision', { barcode: openaiBarcode });
+                  setShowPhotoPreview(false);
+                  setCapturedPhotoUri(null);
+                  setScanned(true);
+                  onBarcodeScanned(openaiBarcode);
+                  return; // Succès avec OpenAI
+                } else {
+                  if (debugMode) addDebugLog('OpenAI Vision n\'a pas pu extraire le code-barres');
+                  logger.warn('[BarcodeScanner] OpenAI Vision n\'a pas pu extraire le code-barres');
+                }
+              } catch (openaiError: any) {
+                if (debugMode) addDebugLog(`Erreur OpenAI: ${openaiError?.message || String(openaiError)}`);
+                logger.error('[BarcodeScanner] Erreur OpenAI Vision:', openaiError);
+              }
+            }
+            
+            setShowPhotoPreview(false);
+            setCapturedPhotoUri(null);
+            if (attempt < maxAttempts) {
+              // Attendre un peu avant la prochaine tentative
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        } catch (error: any) {
+          if (debugMode) addDebugLog(`Erreur tentative ${attempt}: ${error?.message || String(error)}`);
+          logger.warn(`[BarcodeScanner] Erreur tentative ${attempt}:`, error?.message || String(error));
+          lastError = error?.message || 'Erreur lors de la capture';
+          if (attempt < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
       }
+      
+      // Toutes les tentatives ont échoué
+      if (debugMode) addDebugLog('❌ Toutes les tentatives ont échoué');
+      logger.warn('[BarcodeScanner] ❌ Toutes les tentatives ont échoué');
+      
+      // Message d'erreur amélioré avec conseils spécifiques
+      const errorDetails = [];
+      errorDetails.push(`❌ Aucun code-barres détecté après ${maxAttempts} tentatives`);
+      errorDetails.push('');
+      errorDetails.push('💡 Conseils pour améliorer la détection:');
+      errorDetails.push('• Centrez bien le code sur la ligne verte');
+      errorDetails.push('• Approchez-vous (10-15 cm du produit)');
+      errorDetails.push('• Assurez-vous d\'avoir un bon éclairage');
+      errorDetails.push('• Évitez les reflets sur l\'emballage');
+      errorDetails.push('• Tenez le téléphone stable pendant la capture');
+      errorDetails.push('• Le code doit être net et bien visible');
+      errorDetails.push('');
+      errorDetails.push('💭 Si le problème persiste, entrez le code manuellement ci-dessous.');
+      
+      setDecodingError(errorDetails.join('\n'));
     } catch (error: any) {
-      logger.error('[BarcodeScanner] Erreur lors de la capture/décodage', { 
+      if (debugMode) addDebugLog(`Erreur fatale: ${error?.message || String(error)}`);
+      logger.error('[BarcodeScanner] Erreur fatale lors de la capture/décodage', { 
         error: error?.message || String(error) 
       });
       setDecodingError('Erreur lors de la capture. Réessayez ou entrez le code manuellement.');
     } finally {
       setIsDecoding(false);
+      setDecodingStatus('');
     }
   };
 
@@ -208,20 +340,38 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
             {usePhotoMode ? (
               // Mode photo pour iPhone Safari
               <>
-                <Text style={styles.instructionText}>
-                  Placez le code-barres dans la bande verte, puis appuyez sur le bouton.
-                </Text>
-                
-                {decodingError && (
-                  <View style={styles.errorContainer}>
-                    <Text style={styles.errorText}>❌ {decodingError}</Text>
+                {showPhotoPreview && capturedPhotoUri && (
+                  <View style={styles.previewContainer}>
+                    <Text style={styles.previewTitle}>Aperçu de la photo</Text>
+                    <Image source={{ uri: capturedPhotoUri }} style={styles.previewImage} />
+                    <Text style={styles.previewHint}>Analyse en cours...</Text>
                   </View>
                 )}
                 
-                {isDecoding && decodingStatus === 'cloud' && (
-                  <View style={styles.statusContainer}>
-                    <Text style={styles.statusText}>☁️ Analyse cloud en cours...</Text>
-                  </View>
+                {!showPhotoPreview && (
+                  <>
+                    <Text style={styles.instructionText}>
+                      Placez le code-barres dans la bande verte, puis appuyez sur le bouton.
+                    </Text>
+                    
+                    {decodingError && (
+                      <View style={styles.errorContainer}>
+                        <Text style={styles.errorText}>❌ {decodingError}</Text>
+                      </View>
+                    )}
+                    
+                    {isDecoding && decodingStatus === 'cloud' && (
+                      <View style={styles.statusContainer}>
+                        <Text style={styles.statusText}>☁️ Analyse cloud en cours...</Text>
+                      </View>
+                    )}
+                    
+                    {isDecoding && decodingStatus === 'openai' && (
+                      <View style={styles.statusContainer}>
+                        <Text style={styles.statusText}>🤖 Lecture des chiffres avec IA...</Text>
+                      </View>
+                    )}
+                  </>
                 )}
                 
                 <TouchableOpacity 
@@ -248,6 +398,38 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
                 >
                   <Text style={styles.manualInputButtonText}>✏️ Entrer manuellement</Text>
                 </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.debugButton} 
+                  onPress={() => setDebugMode(!debugMode)}
+                  disabled={isDecoding}
+                >
+                  <Text style={styles.debugButtonText}>
+                    {debugMode ? '🔍 Mode Debug ON' : '🔍 Mode Debug OFF'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {debugMode && debugLogs.length > 0 && (
+                  <ScrollView style={styles.debugLogsContainer}>
+                    <Text style={styles.debugLogsTitle}>📋 Logs de Debug:</Text>
+                    {debugLogs.map((log, index) => (
+                      <Text key={index} style={styles.debugLogText}>{log}</Text>
+                    ))}
+                    {capturedPhotoData && (
+                      <View style={styles.debugImageContainer}>
+                        <Text style={styles.debugLogsTitle}>📷 Image capturée:</Text>
+                        <Image 
+                          source={{ uri: capturedPhotoData }} 
+                          style={styles.debugImage}
+                          resizeMode="contain"
+                        />
+                        <Text style={styles.debugImageInfo}>
+                          Taille base64: {capturedPhotoData.length} caractères
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                )}
               </>
             ) : (
               // Mode scan live (navigateurs compatibles)
@@ -288,12 +470,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topOverlay: {
-    flex: 1,
+    flex: 2, // Augmenté de 1 à 2 pour pousser le cadre plus bas
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   middleRow: {
     flexDirection: 'row',
-    height: 170,
+    height: 200, // Augmenté de 170 à 200 pour un cadre plus grand et mieux visible
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sideOverlay: {
     flex: 1,
@@ -301,18 +485,27 @@ const styles = StyleSheet.create({
   },
   scanArea: {
     width: 320,
-    height: 110,
+    height: 140, // Augmenté de 110 à 140 pour un cadre plus grand
     position: 'relative',
     borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: 'rgba(34, 197, 94, 0.3)', // Bordure subtile pour mieux voir le cadre
   },
   scanGuideLine: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 8,
+    right: 8,
     top: '50%',
-    height: 2,
-    backgroundColor: 'rgba(34, 197, 94, 0.8)',
+    marginTop: -1, // Centrer précisément la ligne
+    height: 3, // Augmenté de 2 à 3 pour meilleure visibilité
+    backgroundColor: '#22c55e', // Couleur plus vive (sans transparence)
     borderRadius: 2,
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 4, // Pour Android
   },
   corner: {
     position: 'absolute',
@@ -490,5 +683,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontWeight: '600',
+  },
+  previewContainer: {
+    backgroundColor: 'rgba(31, 41, 55, 0.95)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+    maxWidth: '90%',
+  },
+  previewTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  previewImage: {
+    width: 200,
+    height: 150,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#111827',
+  },
+  previewHint: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  debugButton: {
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  debugButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  debugLogsContainer: {
+    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    maxHeight: 200,
+    width: '90%',
+  },
+  debugLogsTitle: {
+    color: '#22c55e',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  debugLogText: {
+    color: '#d1d5db',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginBottom: 4,
+  },
+  debugImageContainer: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  debugImage: {
+    width: 250,
+    height: 150,
+    borderRadius: 8,
+    marginVertical: 8,
+    backgroundColor: '#111827',
+  },
+  debugImageInfo: {
+    color: '#9ca3af',
+    fontSize: 10,
+    textAlign: 'center',
   },
 });

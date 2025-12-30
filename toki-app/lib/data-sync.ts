@@ -22,9 +22,19 @@ function isFirebaseAvailable(): boolean {
  * Sauvegarder un seul repas dans Firestore
  */
 export async function syncMealEntryToFirestore(userId: string, entry: MealEntry): Promise<void> {
-  if (!isFirebaseAvailable()) return;
+  if (!isFirebaseAvailable()) {
+    console.warn('[Sync] Firebase non disponible, skip sync meal entry');
+    return;
+  }
 
   try {
+    console.log('[Sync] 📤 Envoi du repas vers Firestore...', {
+      userId,
+      entryId: entry.id,
+      label: entry.label,
+      itemsCount: entry.items?.length || 0,
+    });
+    
     const mealsRef = collection(db, 'users', userId, 'meals');
     const mealRef = doc(mealsRef, entry.id);
     await setDoc(mealRef, {
@@ -32,8 +42,12 @@ export async function syncMealEntryToFirestore(userId: string, entry: MealEntry)
       createdAt: entry.createdAt,
       updatedAt: Timestamp.now(),
     });
+    
+    console.log('[Sync] ✅ Repas sauvegardé dans Firestore avec succès', {
+      path: `users/${userId}/meals/${entry.id}`,
+    });
   } catch (error) {
-    console.error('[Sync] Erreur sync meal entry:', error);
+    console.error('[Sync] ❌ Erreur sync meal entry:', error);
     // Ne pas throw - on continue avec AsyncStorage
   }
 }
@@ -115,9 +129,19 @@ export async function syncPointsToFirestore(
   lastClaimDate: string,
   totalPoints: number
 ): Promise<void> {
-  if (!isFirebaseAvailable()) return;
+  if (!isFirebaseAvailable()) {
+    console.warn('[Sync] Firebase non disponible, skip sync points');
+    return;
+  }
 
   try {
+    console.log('[Sync] 📤 Envoi des points vers Firestore...', {
+      userId,
+      balance,
+      lastClaimDate,
+      totalPoints,
+    });
+    
     const pointsRef = doc(db, 'users', userId, 'points', 'current');
     
     // IMPORTANT: Ne jamais écraser avec une valeur plus basse
@@ -131,7 +155,7 @@ export async function syncPointsToFirestore(
       // Même jour: prendre la valeur la plus haute
       finalBalance = Math.max(balance, existingData.balance || 0);
       if (finalBalance !== balance) {
-        console.log('[Sync] Points: garde la valeur Firestore plus haute:', existingData.balance, 'vs local:', balance);
+        console.log('[Sync] ⚠️ Points: garde la valeur Firestore plus haute:', existingData.balance, 'vs local:', balance);
       }
     }
     
@@ -140,14 +164,24 @@ export async function syncPointsToFirestore(
       lastClaimDate,
       updatedAt: Timestamp.now(),
     });
+    
+    console.log('[Sync] ✅ Points balance sauvegardé dans Firestore', {
+      path: `users/${userId}/points/current`,
+      finalBalance,
+    });
 
     const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
     await setDoc(totalPointsRef, {
       value: totalPoints,
       updatedAt: Timestamp.now(),
     });
+    
+    console.log('[Sync] ✅ Points total sauvegardé dans Firestore', {
+      path: `users/${userId}/points/total`,
+      totalPoints,
+    });
   } catch (error) {
-    console.error('[Sync] Erreur sync points:', error);
+    console.error('[Sync] ❌ Erreur sync points:', error);
   }
 }
 
@@ -272,14 +306,22 @@ export async function syncFromFirestore(userId: string): Promise<{
     weightsMerged: 0,
   };
 
-  if (!isFirebaseAvailable()) return result;
+  if (!isFirebaseAvailable()) {
+    console.warn('[Sync] Firebase non disponible, skip syncFromFirestore');
+    return result;
+  }
 
   try {
+    console.log('[Sync] 📥 Démarrage synchronisation depuis Firestore...', { userId });
+    
     // 1. Synchroniser meals - FUSIONNER les deux sources
     const entriesKey = `feedtoki_entries_${userId}_v1`;
     const localEntriesRaw = await AsyncStorage.getItem(entriesKey);
     const localEntries: MealEntry[] = localEntriesRaw ? JSON.parse(localEntriesRaw) : [];
+    console.log('[Sync] Repas locaux:', localEntries.length);
+    
     const firestoreMeals = await loadMealsFromFirestore(userId);
+    console.log('[Sync] Repas Firestore:', firestoreMeals.length);
     
     // Fusionner: créer un Map par ID, Firestore prend priorité (plus récent)
     const mealsMap = new Map<string, MealEntry>();
@@ -301,18 +343,23 @@ export async function syncFromFirestore(userId: string): Promise<{
     if (mergedMeals.length > 0) {
       await AsyncStorage.setItem(entriesKey, JSON.stringify(mergedMeals));
       result.mealsMerged = mergedMeals.length;
+      console.log('[Sync] ✅ Repas fusionnés:', mergedMeals.length, '(local:', localEntries.length, ', firestore:', firestoreMeals.length, ')');
+    } else {
+      console.log('[Sync] ℹ️ Aucun repas à fusionner');
     }
 
     // 2. Synchroniser points - fusionner intelligemment (prendre la plus petite balance du même jour)
     const pointsKey = `feedtoki_points_${userId}_v2`;
     const localPointsRaw = await AsyncStorage.getItem(pointsKey);
     const localPointsData = localPointsRaw ? JSON.parse(localPointsRaw) : null;
+    console.log('[Sync] Points locaux:', localPointsData);
     
     const pointsRef = doc(db, 'users', userId, 'points', 'current');
     const pointsSnap = await getDoc(pointsRef);
     
     if (pointsSnap.exists()) {
       const firestorePointsData = pointsSnap.data();
+      console.log('[Sync] Points Firestore:', firestorePointsData);
       const today = new Date().toISOString().slice(0, 10);
       
       // Déterminer quelle balance utiliser
@@ -323,21 +370,24 @@ export async function syncFromFirestore(userId: string): Promise<{
         // Pas de données locales, utiliser Firestore
         finalBalance = firestorePointsData.balance || 0;
         finalLastClaimDate = firestorePointsData.lastClaimDate || '';
+        console.log('[Sync] Pas de points locaux, utilisation Firestore:', finalBalance);
       } else if (localPointsData.lastClaimDate === today && firestorePointsData.lastClaimDate === today) {
         // Même jour sur les deux sources - prendre la plus HAUTE balance
         // (pour préserver les remboursements de points après suppression d'entrées
         // et les corrections manuelles dans Firebase)
         finalBalance = Math.max(localPointsData.balance || 0, firestorePointsData.balance || 0);
         finalLastClaimDate = today;
-        console.log('[Sync] Points fusion: local=', localPointsData.balance, 'firestore=', firestorePointsData.balance, '-> final=', finalBalance);
+        console.log('[Sync] Points fusion (même jour): local=', localPointsData.balance, 'firestore=', firestorePointsData.balance, '-> final=', finalBalance);
       } else if (localPointsData.lastClaimDate === today) {
         // Local est plus récent (a réclamé les points aujourd'hui)
         finalBalance = localPointsData.balance;
         finalLastClaimDate = localPointsData.lastClaimDate;
+        console.log('[Sync] Local plus récent (aujourd\'hui):', finalBalance);
       } else if (firestorePointsData.lastClaimDate === today) {
         // Firestore est plus récent
         finalBalance = firestorePointsData.balance || 0;
         finalLastClaimDate = firestorePointsData.lastClaimDate || '';
+        console.log('[Sync] Firestore plus récent (aujourd\'hui):', finalBalance);
       } else {
         // Aucun n'est d'aujourd'hui, utiliser le plus récent
         const localDate = localPointsData.lastClaimDate || '';
@@ -345,9 +395,11 @@ export async function syncFromFirestore(userId: string): Promise<{
         if (localDate >= firestoreDate) {
           finalBalance = localPointsData.balance;
           finalLastClaimDate = localDate;
+          console.log('[Sync] Local plus récent (date):', finalBalance, localDate);
         } else {
           finalBalance = firestorePointsData.balance || 0;
           finalLastClaimDate = firestoreDate;
+          console.log('[Sync] Firestore plus récent (date):', finalBalance, firestoreDate);
         }
       }
       
@@ -355,6 +407,7 @@ export async function syncFromFirestore(userId: string): Promise<{
         balance: finalBalance,
         lastClaimDate: finalLastClaimDate,
       }));
+      console.log('[Sync] ✅ Points fusionnés et sauvegardés localement:', finalBalance);
 
       const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
       const totalPointsSnap = await getDoc(totalPointsRef);
@@ -366,9 +419,12 @@ export async function syncFromFirestore(userId: string): Promise<{
         // Prendre le plus grand total (car il ne peut qu'augmenter)
         const finalTotal = Math.max(localTotal, firestoreTotal);
         await AsyncStorage.setItem(totalPointsKey, JSON.stringify(finalTotal));
+        console.log('[Sync] ✅ Total points fusionné:', finalTotal, '(local:', localTotal, ', firestore:', firestoreTotal, ')');
       }
 
       result.pointsRestored = true;
+    } else {
+      console.log('[Sync] ℹ️ Aucun point dans Firestore');
     }
 
     // 3. Restore targets - ne remplace que si local est vide

@@ -251,22 +251,28 @@ export default function App() {
     const load = async () => {
       try {
         // IMPORTANT: Synchroniser d'abord depuis Firestore (fusion) pour avoir les données les plus récentes
+        console.log('[Index] 🔄 Démarrage synchronisation complète depuis Firestore...');
         try {
           const { syncFromFirestore } = await import('../../lib/data-sync');
           const syncResult = await syncFromFirestore(currentUserId);
-          if (__DEV__) console.log('[Index] Sync depuis Firestore terminée:', syncResult);
+          console.log('[Index] ✅ Sync depuis Firestore terminée:', {
+            mealsMerged: syncResult.mealsMerged,
+            pointsRestored: syncResult.pointsRestored,
+            targetsRestored: syncResult.targetsRestored,
+            weightsMerged: syncResult.weightsMerged,
+          });
         } catch (syncError) {
-          console.warn('[Index] Erreur sync Firestore, utilisation locale:', syncError);
+          console.warn('[Index] ⚠️ Erreur sync Firestore, utilisation locale:', syncError);
         }
         
         // Après synchronisation, charger depuis AsyncStorage (qui contient maintenant les données fusionnées)
         const key = getEntriesKey();
-        if (__DEV__) console.log('[Index] Loading entries for key:', key);
+        console.log('[Index] 📥 Chargement des entrées depuis AsyncStorage (clé:', key, ')');
         const json = await AsyncStorage.getItem(key);
         if (json) {
           try {
             const parsed = JSON.parse(json);
-            if (__DEV__) console.log('[Index] Loaded entries count:', parsed?.length);
+            console.log('[Index] ✅ Entrées chargées depuis AsyncStorage:', parsed?.length, 'repas');
             if (Array.isArray(parsed)) {
               const normalized: MealEntry[] = (parsed as any[]).map((e, idx) => {
                 // Validation et nettoyage de chaque entrée
@@ -287,16 +293,17 @@ export default function App() {
                 return entry;
               });
               setEntries(normalized);
+              console.log('[Index] ✅ Entrées normalisées et chargées dans le state:', normalized.length);
             } else {
-              console.warn('[Index] Données non-array, initialisation vide');
+              console.warn('[Index] ⚠️ Données non-array, initialisation vide');
               setEntries([]);
             }
           } catch (parseError) {
-            console.error('[Index] Erreur parsing JSON, initialisation vide:', parseError);
+            console.error('[Index] ❌ Erreur parsing JSON, initialisation vide:', parseError);
             setEntries([]);
           }
         } else {
-          if (__DEV__) console.log('[Index] No entries found for this user, starting fresh');
+          console.log('[Index] ℹ️ Aucune entrée trouvée pour cet utilisateur, démarrage à zéro');
           setEntries([]);
         }
       } catch (e) {
@@ -811,7 +818,15 @@ export default function App() {
       
       // Synchroniser avec Firestore
       if (currentUserId !== 'guest') {
+        console.log('[Index] 🔄 Synchronisation du repas vers Firestore...', { 
+          userId: currentUserId, 
+          entryId: newEntry.id,
+          label: newEntry.label
+        });
         await syncMealEntryToFirestore(currentUserId, newEntry);
+        console.log('[Index] ✅ Repas synchronisé vers Firestore');
+      } else {
+        console.log('[Index] ⚠️ Mode guest, pas de synchronisation Firestore');
       }
       
       // Calculer et déduire les points si l'entrée a des items

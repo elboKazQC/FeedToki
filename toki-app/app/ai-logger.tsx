@@ -41,6 +41,86 @@ import { parseMealPhotoWithOpenAI } from '../lib/openai-parser';
 
 type ItemSource = 'db' | 'off' | 'estimated';
 
+/**
+ * Normaliser un nom d'aliment pour la comparaison (enlever accents, minuscules, trim)
+ */
+function normalizeFoodName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[àáâãäå]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ç]/g, 'c')
+    .replace(/[^a-z0-9\s]/g, '') // Enlever caractères spéciaux
+    .replace(/\s+/g, ' ') // Normaliser espaces
+    .trim();
+}
+
+/**
+ * Convertir une quantité prédite par l'IA en multiplier de portion
+ * @param quantityNumber Nombre extrait (ex: 200 pour "200g", 2 pour "2 portions")
+ * @param quantity String de quantité (ex: "200g", "2 portions", "1 tasse")
+ * @param foodItem L'aliment pour déterminer la portion standard
+ * @param defaultPortion La portion par défaut pour cet aliment
+ * @returns Multiplier à appliquer (ex: 2.0 pour 200g si portion standard = 100g)
+ */
+function convertQuantityToMultiplier(
+  quantityNumber: number | undefined,
+  quantity: string | undefined,
+  foodItem: FoodItem,
+  defaultPortion: ReturnType<typeof getDefaultPortion>
+): number {
+  if (!quantityNumber || quantityNumber <= 0) {
+    return defaultPortion.multiplier; // Utiliser la portion par défaut
+  }
+
+  const quantityLower = (quantity || '').toLowerCase();
+  
+  // Si c'est en grammes (g, kg)
+  if (quantityLower.includes('g') || quantityLower.includes('gramme')) {
+    // Convertir kg en g si nécessaire
+    let grams = quantityNumber;
+    if (quantityLower.includes('kg')) {
+      grams = quantityNumber * 1000;
+    }
+    
+    // Calculer le multiplier basé sur les grammes par rapport à la portion standard
+    // La portion standard a un certain nombre de grammes (defaultPortion.grams)
+    if (defaultPortion.grams > 0) {
+      return grams / defaultPortion.grams;
+    }
+    // Fallback: utiliser quantityNumber directement si on ne peut pas calculer
+    return quantityNumber / 100; // Assume 100g = 1 portion
+  }
+  
+  // Si c'est en ml (millilitres)
+  if (quantityLower.includes('ml') || quantityLower.includes('l') || quantityLower.includes('litre')) {
+    let ml = quantityNumber;
+    if (quantityLower.includes('l') && !quantityLower.includes('ml')) {
+      ml = quantityNumber * 1000;
+    }
+    // Pour les liquides, assumer 250ml = 1 portion (1 tasse)
+    return ml / 250;
+  }
+  
+  // Si c'est en portions, toasts, tasses, etc.
+  if (quantityLower.includes('portion') || 
+      quantityLower.includes('toast') || 
+      quantityLower.includes('tasse') ||
+      quantityLower.includes('pc') ||
+      quantityLower.includes('piece') ||
+      quantityLower.includes('tranche')) {
+    // Le quantityNumber représente déjà le nombre de portions
+    return quantityNumber;
+  }
+  
+  // Par défaut, utiliser quantityNumber comme multiplier direct
+  return quantityNumber;
+}
+
 type DetectedItem = {
   originalName: string;
   matchedItem: FoodItem | null;
@@ -50,6 +130,8 @@ type DetectedItem = {
   itemRef: FoodItemRef;
   pointsCost: number;
   source: ItemSource;
+  quantity?: string; // Quantité prédite par l'IA (ex: "200g", "2 portions")
+  quantityNumber?: number; // Nombre extrait (ex: 200 pour "200g", 2 pour "2 portions")
 };
 
 export default function AILoggerScreen() {
@@ -65,6 +147,10 @@ export default function AILoggerScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<{ uri: string; base64: string } | null>(null);
   const cameraRef = useRef<any>(null);
+  
+  // États pour la modification de quantité
+  const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
+  const [quantityInput, setQuantityInput] = useState<string>('');
 
   const handleParse = async () => {
     // Validation de la description
@@ -226,21 +312,44 @@ export default function AILoggerScreen() {
             source = 'estimated';
           }
 
-          // Créer le FoodItemRef
-          const itemRef = createFoodItemRef(foodItem!, portion);
+          // Calculer le multiplier depuis la quantité prédite par l'IA
+          let finalPortion = portion;
+          if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
+            const calculatedMultiplier = convertQuantityToMultiplier(
+              parsedItem.quantityNumber,
+              parsedItem.quantity,
+              foodItem!,
+              portion
+            );
+            
+            // Créer une portion personnalisée avec le multiplier calculé
+            finalPortion = {
+              ...portion,
+              size: 'custom' as const,
+              label: 'Personnalisée',
+              multiplier: calculatedMultiplier,
+              grams: portion.grams * calculatedMultiplier,
+              visualRef: parsedItem.quantity,
+            };
+          }
+
+          // Créer le FoodItemRef avec la portion ajustée
+          const itemRef = createFoodItemRef(foodItem!, finalPortion);
 
           // Calculer le coût en points
-          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(portion.multiplier);
+          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(finalPortion.multiplier);
 
           items.push({
             originalName: parsedItem.name || 'Aliment inconnu',
             matchedItem: match || null,
             estimatedItem: (!offItem && !match) ? foodItem : undefined,
             offItem: offItem || undefined,
-            portion,
+            portion: finalPortion,
             itemRef,
             pointsCost: Math.round(pointsCost),
             source,
+            quantity: parsedItem.quantity,
+            quantityNumber: parsedItem.quantityNumber,
           });
         } catch (itemError: any) {
           console.error('Erreur traitement item:', itemError);
@@ -437,18 +546,42 @@ export default function AILoggerScreen() {
             source = 'estimated';
           }
 
-          const itemRef = createFoodItemRef(foodItem!, portion);
-          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(portion.multiplier);
+          // Calculer le multiplier depuis la quantité prédite par l'IA
+          let finalPortion = portion;
+          if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
+            const calculatedMultiplier = convertQuantityToMultiplier(
+              parsedItem.quantityNumber,
+              parsedItem.quantity,
+              foodItem!,
+              portion
+            );
+            
+            // Créer une portion personnalisée avec le multiplier calculé
+            finalPortion = {
+              ...portion,
+              size: 'custom' as const,
+              label: 'Personnalisée',
+              multiplier: calculatedMultiplier,
+              grams: portion.grams * calculatedMultiplier,
+              visualRef: parsedItem.quantity,
+            };
+          }
+
+          // Créer le FoodItemRef avec la portion ajustée
+          const itemRef = createFoodItemRef(foodItem!, finalPortion);
+          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(finalPortion.multiplier);
 
           items.push({
             originalName: parsedItem.name || 'Aliment inconnu',
             matchedItem: match || null,
             estimatedItem: (!offItem && !match) ? foodItem : undefined,
             offItem: offItem || undefined,
-            portion,
+            portion: finalPortion,
             itemRef,
             pointsCost: Math.round(pointsCost),
             source,
+            quantity: parsedItem.quantity,
+            quantityNumber: parsedItem.quantityNumber,
           });
         } catch (itemError: any) {
           console.error('Erreur traitement item photo:', itemError);
@@ -476,11 +609,55 @@ export default function AILoggerScreen() {
     }
 
     try {
-      // 1. Sauvegarder les aliments personnalisés (estimés) dans la DB
+      // 1. Sauvegarder TOUS les aliments analysés par l'IA dans la DB personnalisée
+      // Charger les custom foods existants pour vérifier les doublons
+      const existingCustomFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+      const existingNamesMap = new Map<string, FoodItem>();
+      for (const food of existingCustomFoods) {
+        const normalizedName = normalizeFoodName(food.name);
+        existingNamesMap.set(normalizedName, food);
+      }
+
+      let foodsAdded = 0;
+      let foodsUpdated = 0;
+
       for (const item of detectedItems) {
-        if (item.estimatedItem && !item.matchedItem) {
-          // C'est un nouvel aliment, l'ajouter à la DB personnalisée
-          await addCustomFood(item.estimatedItem, currentUserId !== 'guest' ? currentUserId : undefined);
+        // Déterminer quel aliment sauvegarder (priorité: offItem > matchedItem > estimatedItem)
+        const foodToSave: FoodItem | null = 
+          item.offItem || 
+          item.matchedItem || 
+          item.estimatedItem || 
+          null;
+
+        if (!foodToSave) continue;
+
+        // Normaliser le nom pour vérifier les doublons
+        const normalizedName = normalizeFoodName(foodToSave.name);
+        const existingFood = existingNamesMap.get(normalizedName);
+
+        if (existingFood) {
+          // Aliment existe déjà, mettre à jour avec les nouvelles données
+          const updatedFood: FoodItem = {
+            ...existingFood,
+            // Mettre à jour les valeurs nutritionnelles si elles sont meilleures/mises à jour
+            calories_kcal: foodToSave.calories_kcal || existingFood.calories_kcal || 0,
+            protein_g: foodToSave.protein_g !== undefined ? foodToSave.protein_g : (existingFood.protein_g || 0),
+            carbs_g: foodToSave.carbs_g !== undefined ? foodToSave.carbs_g : (existingFood.carbs_g || 0),
+            fat_g: foodToSave.fat_g !== undefined ? foodToSave.fat_g : (existingFood.fat_g || 0),
+            // Garder les tags si l'aliment existant en a, sinon utiliser ceux du nouvel aliment
+            tags: existingFood.tags.length > 0 ? existingFood.tags : foodToSave.tags,
+            // Garder le meilleur baseScore
+            baseScore: Math.max(existingFood.baseScore || 0, foodToSave.baseScore || 0),
+            // Garder le meilleur points
+            points: Math.max(existingFood.points || 0, foodToSave.points || 0),
+          };
+          await addCustomFood(updatedFood, currentUserId !== 'guest' ? currentUserId : undefined);
+          foodsUpdated++;
+        } else {
+          // Nouvel aliment, l'ajouter
+          await addCustomFood(foodToSave, currentUserId !== 'guest' ? currentUserId : undefined);
+          existingNamesMap.set(normalizedName, foodToSave); // Ajouter au map pour éviter doublons dans la même session
+          foodsAdded++;
         }
       }
 
@@ -511,7 +688,15 @@ export default function AILoggerScreen() {
 
       // 4. Synchroniser avec Firestore
       if (currentUserId !== 'guest') {
+        console.log('[AI Logger] 🔄 Synchronisation du repas vers Firestore...', { 
+          userId: currentUserId, 
+          entryId: newEntry.id,
+          label: newEntry.label
+        });
         await syncMealEntryToFirestore(currentUserId, newEntry);
+        console.log('[AI Logger] ✅ Repas synchronisé vers Firestore');
+      } else {
+        console.log('[AI Logger] ⚠️ Mode guest, pas de synchronisation Firestore');
       }
 
       // 5. Recharger les custom foods (incluant ceux qu'on vient de sauvegarder) et recalculer les points
@@ -553,7 +738,13 @@ export default function AILoggerScreen() {
           const totalPointsKey = `feedtoki_total_points_${currentUserId}_v1`;
           const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
           const totalPointsEarned = totalPointsRaw ? JSON.parse(totalPointsRaw) : 0;
+          console.log('[AI Logger] 🔄 Synchronisation des points vers Firestore...', {
+            newBalance,
+            lastClaimDate: pointsData.lastClaimDate,
+            totalPointsEarned,
+          });
           await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
+          console.log('[AI Logger] ✅ Points synchronisés vers Firestore');
         }
         
         // Logger l'événement
@@ -575,15 +766,31 @@ export default function AILoggerScreen() {
       }
 
       // 6. Retourner à l'écran principal avec succès
+      // Construire le message avec les informations sur les aliments sauvegardés
+      let successMessage = `✅ Repas enregistré!\n${detectedItems.length} aliment(s) enregistré(s).`;
+      if (totalPoints > 0) {
+        successMessage += `\n-${totalPoints} points`;
+      }
+      if (foodsAdded > 0 || foodsUpdated > 0) {
+        const foodsInfo = [];
+        if (foodsAdded > 0) {
+          foodsInfo.push(`${foodsAdded} ajouté${foodsAdded > 1 ? 's' : ''}`);
+        }
+        if (foodsUpdated > 0) {
+          foodsInfo.push(`${foodsUpdated} mis à jour`);
+        }
+        successMessage += `\n\n📦 ${foodsInfo.join(', ')} dans ta base de données. Tu pourras les réutiliser la prochaine fois !`;
+      }
+
       // Sur le web, Alert.alert ne fonctionne pas, donc on redirige directement
       if (typeof window !== 'undefined' && Platform.OS === 'web') {
         // Sur le web, afficher un message puis rediriger
-        window.alert(`✅ Repas enregistré!\n${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`);
+        window.alert(successMessage);
         router.replace('/');
       } else {
         Alert.alert(
           '✅ Repas enregistré!',
-          `${detectedItems.length} aliment(s) enregistré(s). ${totalPoints > 0 ? `-${totalPoints} points` : ''}`,
+          successMessage,
           [{ 
             text: 'OK', 
             onPress: () => {
@@ -604,6 +811,72 @@ export default function AILoggerScreen() {
   const handleEditItem = (index: number) => {
     // TODO: Ouvrir un modal pour éditer l'item
     Alert.alert('Édition', 'Fonctionnalité d\'édition à venir');
+  };
+
+  const handleEditQuantity = (index: number) => {
+    const item = detectedItems[index];
+    if (!item) return;
+    
+    setQuantityInput(item.quantity || '1 portion');
+    setEditingQuantityIndex(index);
+  };
+
+  const handleSaveQuantity = (index: number) => {
+    const item = detectedItems[index];
+    if (!item) return;
+
+    const foodItem = item.matchedItem || item.offItem || item.estimatedItem;
+    if (!foodItem) return;
+
+    // Parser la quantité entrée
+    const quantityLower = quantityInput.toLowerCase().trim();
+    let newQuantityNumber: number | undefined;
+    
+    // Extraire le nombre
+    const numberMatch = quantityInput.match(/(\d+(?:\.\d+)?)/);
+    if (numberMatch) {
+      newQuantityNumber = parseFloat(numberMatch[1]);
+    } else {
+      newQuantityNumber = 1; // Par défaut
+    }
+
+    // Calculer le nouveau multiplier
+    const defaultPortion = getDefaultPortion(foodItem.tags);
+    const newMultiplier = convertQuantityToMultiplier(
+      newQuantityNumber,
+      quantityInput,
+      foodItem,
+      defaultPortion
+    );
+
+    // Créer une nouvelle portion avec le multiplier
+    const newPortion = {
+      ...defaultPortion,
+      size: 'custom' as const,
+      label: 'Personnalisée',
+      multiplier: newMultiplier,
+      grams: defaultPortion.grams * newMultiplier,
+      visualRef: quantityInput,
+    };
+
+    // Recalculer le FoodItemRef et les points
+    const newItemRef = createFoodItemRef(foodItem, newPortion);
+    const newPointsCost = Math.round(computeFoodPoints(foodItem) * Math.sqrt(newMultiplier));
+
+    // Mettre à jour l'item
+    const updatedItems = [...detectedItems];
+    updatedItems[index] = {
+      ...item,
+      portion: newPortion,
+      itemRef: newItemRef,
+      pointsCost: newPointsCost,
+      quantity: quantityInput,
+      quantityNumber: newQuantityNumber,
+    };
+
+    setDetectedItems(updatedItems);
+    setEditingQuantityIndex(null);
+    setQuantityInput('');
   };
 
   const handleRemoveItem = (index: number) => {
@@ -747,15 +1020,42 @@ export default function AILoggerScreen() {
       // Calculer le coût en points
       const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
 
+      // Calculer le multiplier depuis la quantité prédite par l'IA
+      let finalPortion = portion;
+      if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
+        const calculatedMultiplier = convertQuantityToMultiplier(
+          parsedItem.quantityNumber,
+          parsedItem.quantity,
+          foodItem,
+          portion
+        );
+        
+        // Créer une portion personnalisée avec le multiplier calculé
+        finalPortion = {
+          ...portion,
+          size: 'custom' as const,
+          label: 'Personnalisée',
+          multiplier: calculatedMultiplier,
+          grams: portion.grams * calculatedMultiplier,
+          visualRef: parsedItem.quantity,
+        };
+      }
+
+      // Recalculer le FoodItemRef et les points avec la portion ajustée
+      const finalItemRef = createFoodItemRef(foodItem, finalPortion);
+      const finalPointsCost = Math.round(computeFoodPoints(foodItem) * Math.sqrt(finalPortion.multiplier));
+
       // Remplacer l'item à l'index donné
       const updatedItems = [...detectedItems];
       updatedItems[index] = {
         originalName: parsedItem.name || foodName,
         matchedItem: match || null,
         estimatedItem: match ? undefined : foodItem,
-        portion,
-        itemRef,
-        pointsCost: Math.round(pointsCost),
+        portion: finalPortion,
+        itemRef: finalItemRef,
+        pointsCost: finalPointsCost,
+        quantity: parsedItem.quantity,
+        quantityNumber: parsedItem.quantityNumber,
       };
 
       setDetectedItems(updatedItems);
@@ -858,8 +1158,13 @@ export default function AILoggerScreen() {
                       <Text style={styles.itemOff}>
                         ✓ Produit OFF: {item.offItem.name}
                       </Text>
+                      {item.quantity && (
+                        <Text style={styles.itemQuantity}>
+                          📏 Quantité: {item.quantity}
+                        </Text>
+                      )}
                       <Text style={styles.itemDetails}>
-                        🔥 {item.offItem.calories_kcal || 0} cal · 💪 {item.offItem.protein_g || 0}g prot · 🍞 {item.offItem.carbs_g || 0}g gluc · 🧈 {item.offItem.fat_g || 0}g lipides
+                        🔥 {Math.round((item.offItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.offItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.offItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.offItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : item.source === 'db' && item.matchedItem ? (
@@ -867,8 +1172,13 @@ export default function AILoggerScreen() {
                       <Text style={styles.itemMatch}>
                         ✓ Match DB: {item.matchedItem.name}
                       </Text>
+                      {item.quantity && (
+                        <Text style={styles.itemQuantity}>
+                          📏 Quantité: {item.quantity}
+                        </Text>
+                      )}
                       <Text style={styles.itemDetails}>
-                        🔥 {item.matchedItem.calories_kcal || 0} cal · 💪 {item.matchedItem.protein_g || 0}g prot · 🍞 {item.matchedItem.carbs_g || 0}g gluc · 🧈 {item.matchedItem.fat_g || 0}g lipides
+                        🔥 {Math.round((item.matchedItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.matchedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.matchedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.matchedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : item.source === 'estimated' && item.estimatedItem ? (
@@ -876,8 +1186,13 @@ export default function AILoggerScreen() {
                       <Text style={styles.itemEstimate}>
                         ⚠ Estimé (non trouvé)
                       </Text>
+                      {item.quantity && (
+                        <Text style={styles.itemQuantity}>
+                          📏 Quantité: {item.quantity}
+                        </Text>
+                      )}
                       <Text style={styles.itemDetails}>
-                        🔥 {item.estimatedItem.calories_kcal || 0} cal · 💪 {item.estimatedItem.protein_g || 0}g prot · 🍞 {item.estimatedItem.carbs_g || 0}g gluc · 🧈 {item.estimatedItem.fat_g || 0}g lipides
+                        🔥 {Math.round((item.estimatedItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.estimatedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.estimatedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.estimatedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : null}
@@ -892,10 +1207,10 @@ export default function AILoggerScreen() {
                       isDisabled={isProcessing}
                     />
                     <Button
-                      label="✏️ Modifier"
+                      label={item.quantity ? "✏️ Modifier quantité" : "✏️ Modifier"}
                       variant="ghost"
                       size="small"
-                      onPress={() => handleEditItem(index)}
+                      onPress={() => handleEditQuantity(index)}
                       style={{ flex: 1 }}
                     />
                     <Button
@@ -917,6 +1232,57 @@ export default function AILoggerScreen() {
         </View>
       )}
 
+      {/* Modal pour modifier la quantité */}
+      <Modal
+        visible={editingQuantityIndex !== null}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setEditingQuantityIndex(null);
+          setQuantityInput('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Modifier la quantité</Text>
+            {editingQuantityIndex !== null && detectedItems[editingQuantityIndex] && (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  {detectedItems[editingQuantityIndex].originalName}
+                </Text>
+                <TextInput
+                  style={styles.quantityInput}
+                  placeholder="Ex: 200g, 2 portions, 1 tasse"
+                  value={quantityInput}
+                  onChangeText={setQuantityInput}
+                  autoFocus
+                />
+                <Text style={styles.modalHint}>
+                  Exemples: 200g, 1.5 portions, 2 toasts, 250ml
+                </Text>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonCancel]}
+                    onPress={() => {
+                      setEditingQuantityIndex(null);
+                      setQuantityInput('');
+                    }}
+                  >
+                    <Text style={styles.modalButtonTextCancel}>Annuler</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonSave]}
+                    onPress={() => editingQuantityIndex !== null && handleSaveQuantity(editingQuantityIndex)}
+                  >
+                    <Text style={styles.modalButtonTextSave}>Enregistrer</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.hintBox}>
         <Text style={styles.hintTitle}>💡 Astuce</Text>
         <Text style={styles.hintText}>
@@ -925,6 +1291,57 @@ export default function AILoggerScreen() {
           {Platform.OS === 'web' && ' (Sur web: autorise l\'accès caméra dans ton navigateur)'}
         </Text>
       </View>
+
+      {/* Modal pour modifier la quantité */}
+      <Modal
+        visible={editingQuantityIndex !== null}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setEditingQuantityIndex(null);
+          setQuantityInput('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Modifier la quantité</Text>
+            {editingQuantityIndex !== null && detectedItems[editingQuantityIndex] && (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  {detectedItems[editingQuantityIndex].originalName}
+                </Text>
+                <TextInput
+                  style={styles.quantityInput}
+                  placeholder="Ex: 200g, 2 portions, 1 tasse"
+                  value={quantityInput}
+                  onChangeText={setQuantityInput}
+                  autoFocus
+                />
+                <Text style={styles.modalHint}>
+                  Exemples: 200g, 1.5 portions, 2 toasts, 250ml
+                </Text>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonCancel]}
+                    onPress={() => {
+                      setEditingQuantityIndex(null);
+                      setQuantityInput('');
+                    }}
+                  >
+                    <Text style={styles.modalButtonTextCancel}>Annuler</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonSave]}
+                    onPress={() => editingQuantityIndex !== null && handleSaveQuantity(editingQuantityIndex)}
+                  >
+                    <Text style={styles.modalButtonTextSave}>Enregistrer</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal caméra (photo) */}
       <Modal
@@ -1255,6 +1672,83 @@ const styles = StyleSheet.create({
   itemDetails: {
     fontSize: 12,
     color: '#9ca3af',
+  },
+  itemQuantity: {
+    color: '#60a5fa',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#e5e7eb',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginBottom: 16,
+  },
+  quantityInput: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#e5e7eb',
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 8,
+  },
+  modalHint: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#374151',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  modalButtonSave: {
+    backgroundColor: '#22c55e',
+  },
+  modalButtonTextCancel: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonTextSave: {
+    color: '#0b1220',
+    fontSize: 16,
+    fontWeight: '700',
   },
   itemActions: {
     flexDirection: 'row',

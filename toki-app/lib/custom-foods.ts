@@ -20,12 +20,14 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
     const raw = await AsyncStorage.getItem(storageKey);
     const localFoods: FoodItem[] = raw ? JSON.parse(raw) : [];
     
-    if (__DEV__) console.log(`[Custom Foods] Chargés depuis AsyncStorage (${storageKey}):`, localFoods.length, 'aliments');
+    console.log(`[Custom Foods] 📥 Chargés depuis AsyncStorage (${storageKey}):`, localFoods.length, 'aliments');
     
     // Charger depuis Firestore (collection globale partagée)
     if (FIREBASE_ENABLED && db) {
       try {
+        console.log(`[Custom Foods] 📥 Chargement depuis Firestore (globalFoods)...`);
         const firestoreFoods = await loadCustomFoodsFromFirestore();
+        console.log(`[Custom Foods] Chargés depuis Firestore:`, firestoreFoods.length, 'aliments');
         
         // Fusionner: Firestore prend priorité (plus récent)
         const foodMap = new Map<string, FoodItem>();
@@ -41,7 +43,7 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
         }
         
         const mergedFoods = Array.from(foodMap.values());
-        if (__DEV__) console.log(`[Custom Foods] Après fusion:`, mergedFoods.length, 'aliments');
+        console.log(`[Custom Foods] ✅ Après fusion:`, mergedFoods.length, 'aliments (local:', localFoods.length, ', firestore:', firestoreFoods.length, ')');
         
         // Sauvegarder la version fusionnée dans AsyncStorage pour la prochaine fois
         if (mergedFoods.length > 0) {
@@ -50,15 +52,17 @@ export async function loadCustomFoods(userId?: string): Promise<FoodItem[]> {
         
         return mergedFoods;
       } catch (error) {
-        console.error('[Custom Foods] Erreur chargement Firestore, utilisation locale:', error);
+        console.error('[Custom Foods] ❌ Erreur chargement Firestore, utilisation locale:', error);
         // En cas d'erreur, retourner les aliments locaux
         return localFoods;
       }
+    } else {
+      console.warn('[Custom Foods] ⚠️ Firebase non activé, utilisation locale uniquement');
     }
     
     return localFoods;
   } catch (error) {
-    console.error('[Custom Foods] Erreur chargement:', error);
+    console.error('[Custom Foods] ❌ Erreur chargement:', error);
     return [];
   }
 }
@@ -90,24 +94,28 @@ export async function addCustomFood(food: FoodItem, userId?: string): Promise<vo
   const existing = await loadCustomFoods(userId);
   const updated = [...existing.filter(f => f.id !== food.id), food];
   
-  if (__DEV__) console.log(`[Custom Foods] Ajout de "${food.name}" (${food.id}), total:`, updated.length, 'aliments');
+  console.log(`[Custom Foods] 💾 Ajout de "${food.name}" (${food.id}), total:`, updated.length, 'aliments');
   
   // Sauvegarder dans AsyncStorage (cache local global)
   await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
+  console.log(`[Custom Foods] ✅ Sauvegardé dans AsyncStorage`);
 
   // Sauvegarder dans Firestore (collection globale partagée)
   if (FIREBASE_ENABLED && db) {
     try {
+      console.log(`[Custom Foods] 📤 Envoi vers Firestore (globalFoods)...`, { foodId: food.id, name: food.name });
       const globalFoodRef = doc(db, 'globalFoods', food.id);
       await setDoc(globalFoodRef, {
         ...food,
         createdAt: new Date().toISOString(), // Ajouter timestamp pour référence
       });
-      if (__DEV__) console.log(`[Custom Foods] Sauvegardé dans Firestore (globalFoods): ${food.id}`);
+      console.log(`[Custom Foods] ✅ Sauvegardé dans Firestore (globalFoods/${food.id})`);
     } catch (error) {
-      console.error('[Custom Foods] Erreur sauvegarde Firestore:', error);
+      console.error('[Custom Foods] ❌ Erreur sauvegarde Firestore:', error);
       // Continue même si Firestore échoue
     }
+  } else {
+    console.warn('[Custom Foods] ⚠️ Firebase non activé, pas de sync Firestore');
   }
 }
 
