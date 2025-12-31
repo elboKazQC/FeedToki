@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { spacing } from '../constants/design-tokens';
+// import { spacing } from '../constants/design-tokens';
 import { signIn, signUp, resendEmailVerification, getCurrentUser, signOut } from '../lib/firebase-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { localSignIn, localSignUp, getCurrentLocalUser } from '../lib/local-auth';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth } from '../lib/auth-context';
 import { reload } from 'firebase/auth';
-import { checkIsAdmin } from '@/lib/admin-utils';
+import { checkIsAdmin } from '../lib/admin-utils';
 
 export default function AuthScreen() {
   // Tous les hooks doivent être déclarés en premier, dans le même ordre à chaque render
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -275,13 +275,13 @@ export default function AuthScreen() {
         {/* Affichage si email non vérifié */}
         {showEmailVerification ? (
           <View style={styles.verificationBox}>
-            <Text style={styles.verificationTitle}>⚠️ Ton email n'est pas vérifié</Text>
+            <Text style={styles.verificationTitle}>⚠️ Ton email n&apos;est pas vérifié</Text>
             <Text style={styles.verificationText}>
               Un email de vérification a été envoyé à :{'\n'}
               <Text style={styles.verificationEmail}>{userEmail}</Text>
               {'\n\n'}
               <Text style={styles.spamWarning}>
-                🔍 IMPORTANT : L'email se trouve très probablement dans ton dossier SPAM/COURRIER INDÉSIRABLE. Va le chercher là-bas !
+                🔍 IMPORTANT : L&apos;email se trouve très probablement dans ton dossier SPAM/COURRIER INDÉSIRABLE. Va le chercher là-bas !
               </Text>
             </Text>
             

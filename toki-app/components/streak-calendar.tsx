@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 type DayData = {
   date: string; // YYYY-MM-DD
@@ -8,7 +8,7 @@ type DayData = {
 };
 
 type StreakCalendarProps = {
-  entries: Array<{ createdAt: string }>;
+  entries: { createdAt: string }[];
   weeksToShow?: number;
 };
 
@@ -16,11 +16,7 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [calendarData, setCalendarData] = useState<DayData[]>([]);
 
-  useEffect(() => {
-    generateCalendarData();
-  }, [entries, weeksToShow]);
-
-  const generateCalendarData = () => {
+  const generateCalendarData = useCallback(() => {
     const today = new Date();
     const daysToShow = weeksToShow * 7;
     const data: DayData[] = [];
@@ -46,7 +42,13 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
     }
 
     setCalendarData(data);
-  };
+  }, [entries, weeksToShow]);
+
+  useEffect(() => {
+    generateCalendarData();
+  }, [generateCalendarData]);
+
+
 
   const getIntensityColor = (hasMeal: boolean) => {
     if (!hasMeal) return '#1f2937'; // Gris foncé

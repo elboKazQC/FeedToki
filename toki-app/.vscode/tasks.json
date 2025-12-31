@@ -11,6 +11,13 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Expo build and start",
+			"type": "shell",
+			"command": "npx expo start",
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }

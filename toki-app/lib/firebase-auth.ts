@@ -8,7 +8,7 @@ import {
   User,
   updateProfile
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase-config';
 import { UserProfile } from './types';
 
@@ -130,6 +130,11 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
  * Se déconnecter
  */
 export async function signOut(): Promise<void> {
+  if (!auth) {
+    console.warn('[Firebase Auth] signOut called but auth not initialized');
+    return;
+  }
+
   try {
     await firebaseSignOut(auth);
   } catch (error: any) {
@@ -141,6 +146,10 @@ export async function signOut(): Promise<void> {
  * Écouter les changements d'état d'authentification
  */
 export function onAuthChange(callback: (user: AuthUser | null) => void): () => void {
+  if (!auth) {
+    console.warn('[Firebase Auth] onAuthChange called but auth not initialized');
+    return () => {};
+  }
   return onAuthStateChanged(auth, callback);
 }
 
@@ -148,10 +157,15 @@ export function onAuthChange(callback: (user: AuthUser | null) => void): () => v
  * Récupérer le profil utilisateur depuis Firestore
  */
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  if (!db) {
+    console.warn('[Firebase Auth] getUserProfile called but Firestore not initialized');
+    return null;
+  }
+
   try {
     const docRef = doc(db, 'users', userId);
     const docSnap = await getDoc(docRef);
-    
+
     if (docSnap.exists()) {
       return docSnap.data() as UserProfile;
     }
@@ -166,6 +180,10 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
  * Mettre à jour le profil utilisateur
  */
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
+  if (!db) {
+    throw new Error('Firestore not initialized');
+  }
+
   try {
     // Filtrer les valeurs undefined pour Firestore (Firestore n'accepte pas undefined)
     const cleanUpdates: any = {};
@@ -176,7 +194,7 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     }
     // S'assurer que userId est toujours défini
     cleanUpdates.userId = userId;
-    
+
     const docRef = doc(db, 'users', userId);
     await setDoc(docRef, cleanUpdates, { merge: true });
   } catch (error) {
@@ -189,12 +207,8 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
  * Obtenir l'utilisateur actuellement connecté
  */
 export function getCurrentUser(): AuthUser | null {
-  return auth.currentUser;
+  return auth?.currentUser ?? null;
 }
-
-/**
- * Renvoyer l'email de vérification
- */
 export async function resendEmailVerification(user: AuthUser): Promise<void> {
   if (!auth || !user) {
     throw new Error('Firebase n\'est pas correctement initialisé ou utilisateur non connecté.');

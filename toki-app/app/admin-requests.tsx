@@ -1,16 +1,15 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Share } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
-import { useAuth } from '@/lib/auth-context';
-import { useTheme } from '@/lib/theme-context';
-import { Colors } from '@/constants/theme';
+import { useAuth } from '../lib/auth-context';
+import { useTheme } from '../lib/theme-context';
+import { Colors } from '../constants/theme';
 import { FoodRequest } from './food-request';
+import { checkIsAdmin } from '../lib/admin-utils';
 
 const REQUESTS_KEY = 'feedtoki_food_requests_v1';
-
-import { checkIsAdmin } from '@/lib/admin-utils';
 
 export default function AdminRequestsScreen() {
   const { profile, user } = useAuth();
@@ -100,7 +99,8 @@ export default function AdminRequestsScreen() {
         '📋 Copié!',
         `${pendingOnly.length} demande(s) copiée(s) dans le presse-papiers.\n\nColle ce JSON dans food-requests.json puis demande à l'agent IA de les traiter.`
       );
-    } catch (e) {
+    } catch (error) {
+      console.warn('[Admin] Export clipboard failed:', error);
       // Fallback: afficher le JSON
       Alert.alert('Export JSON', jsonString);
     }

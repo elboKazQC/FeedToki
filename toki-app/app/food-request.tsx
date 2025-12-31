@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addFoodRequest } from '../lib/requests-store';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
@@ -24,7 +24,7 @@ export type FoodRequest = {
   createdAt: string;
 };
 
-const REQUESTS_KEY = 'feedtoki_food_requests_v1';
+// const REQUESTS_KEY = 'feedtoki_food_requests_v1';
 
 export default function FoodRequestScreen() {
   const { profile, user } = useAuth();

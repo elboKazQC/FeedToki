@@ -22,13 +22,13 @@ export interface UserProfile {
 
 export interface SimulatedMeal {
   category: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-  items: Array<{
+  items: {
     id: string;
     name: string;
     quantity: number;
     points: number;
     calories: number;
-  }>;
+  }[];
   totalPoints: number;
   totalCalories: number;
 }

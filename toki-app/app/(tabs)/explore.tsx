@@ -1,8 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../lib/auth-context';
-import { Button } from '../../components/ui/Button';
-import { spacing } from '../../constants/design-tokens';
 import { useTheme } from '../../lib/theme-context';
 import { Colors } from '../../constants/theme';
 import { localSignOut } from '../../lib/local-auth';
@@ -70,7 +68,7 @@ export default function TabTwoScreen() {
     // Efface l'ID user courant
     await localSignOut();
     // Efface le profil local associé
-    const userId = user?.id || profile?.userId;
+    const userId = (user as any)?.userId || profile?.userId;
     if (userId) {
       await AsyncStorage.removeItem(`toki_user_profile_${userId}`);
     }
@@ -153,57 +151,21 @@ export default function TabTwoScreen() {
         </View>
 
         {/* Boutons */}
-        <View style={{ width: '100%', gap: spacing.md, marginTop: spacing.lg }}>
-          <Button
-            label="✏️ Modifier mes objectifs"
-            variant="secondary"
-            size="medium"
-            onPress={handleEditProfile}
-            fullWidth
-          />
+        <TouchableOpacity style={styles.button} onPress={handleEditProfile}>
+          <Text style={styles.buttonText}>✏️ Modifier mes objectifs</Text>
+        </TouchableOpacity>
 
-          <Button
-            label="❓ Aide & FAQ"
-            variant="secondary"
-            size="medium"
-            onPress={() => router.push('/help')}
-            fullWidth
-          />
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/food-request')}>
+          <Text style={styles.buttonText}>🍽️ Demander un aliment</Text>
+        </TouchableOpacity>
 
-          <Button
-            label="💡 Système de Points"
-            variant="secondary"
-            size="medium"
-            onPress={() => router.push('/points-explanation')}
-            fullWidth
-          />
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-requests')}>
+          <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
+        </TouchableOpacity>
 
-
-          <Button
-            label="📋 Voir les demandes (Admin)"
-            variant="secondary"
-            size="medium"
-            onPress={() => router.push('/admin-requests')}
-            fullWidth
-          />
-
-          <Button
-            label="🍽️ Aliments personnalisés (Admin)"
-            variant="secondary"
-            size="medium"
-            onPress={() => router.push('/admin-custom-foods')}
-            fullWidth
-          />
-
-          <Button
-            label="🚪 Déconnexion"
-            variant="danger"
-            size="medium"
-            onPress={handleSignOut}
-            fullWidth
-            style={{ marginTop: spacing.lg }}
-          />
-        </View>
+        <TouchableOpacity style={[styles.button, styles.buttonDanger]} onPress={handleSignOut}>
+          <Text style={styles.buttonText}>🚪 Déconnexion</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );

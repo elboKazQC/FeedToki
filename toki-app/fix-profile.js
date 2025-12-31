@@ -1,5 +1,5 @@
 // Script pour corriger le profil avec le bon poids (210 lbs = 95.25 kg)
-const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+// const AsyncStorage = require('@react-native-async-storage/async-storage').default;
 
 // Conversion: 210 lbs = 95.25 kg
 const weightLbs = 210;

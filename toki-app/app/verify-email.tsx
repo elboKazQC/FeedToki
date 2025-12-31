@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getCurrentLocalUser, verifyEmail, resendVerificationCode } from '../lib/local-auth';
@@ -11,11 +11,7 @@ export default function VerifyEmailScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    loadUserData();
-  }, []);
-
-  const loadUserData = async () => {
+  const loadUserData = useCallback(async () => {
     try {
       const user = await getCurrentLocalUser();
       if (!user) {
@@ -37,7 +33,11 @@ export default function VerifyEmailScreen() {
       console.error('Erreur chargement utilisateur:', error);
       Alert.alert('Erreur', 'Impossible de charger les données utilisateur');
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    loadUserData();
+  }, [loadUserData]);
 
   const handleVerify = async () => {
     const cleanCode = code.replace(/\s/g, '').trim();
@@ -130,7 +130,7 @@ export default function VerifyEmailScreen() {
           disabled={loading}
         >
           <Text style={styles.resendText}>
-            Vous n'avez pas reçu le code ? Renvoyer
+            Vous n&apos;avez pas reçu le code ? Renvoyer
           </Text>
         </TouchableOpacity>
       </View>

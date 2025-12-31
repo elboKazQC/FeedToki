@@ -39,7 +39,6 @@ export function getSmartRecommendationsByTaste(
   const carbsPct = currentTotals.carbs_g / targets.carbs_g;
 
   const needsProtein = proteinPct < 0.7;
-  const needsCalories = caloriesPct < 0.8;
   const nearCalorieLimit = caloriesPct > 0.9;
   const tooManyCarbs = carbsPct > 0.9; // Si trop de glucides, éviter les aliments riches en glucides
 
@@ -72,7 +71,6 @@ export function getSmartRecommendationsByTaste(
     const itemProtein = item.protein_g || 0;
     const itemCalories = item.calories_kcal || 0;
     const itemCarbs = item.carbs_g || 0;
-    const itemFat = item.fat_g || 0;
 
     // Skip if item would exceed remaining calories significantly
     if (itemCalories > remaining.calories * 1.2 && !nearCalorieLimit) {

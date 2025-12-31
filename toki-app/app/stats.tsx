@@ -9,9 +9,7 @@ import { DragonSprite } from '../components/dragon-sprite';
 import { StreakCalendar } from '../components/streak-calendar';
 import { 
   MealEntry, 
-  computeStreak, 
   computeStreakWithCalories,
-  computeDragonState, 
   computeDragonStateWithCalories,
   normalizeDate,
   StreakStats,
