@@ -7,8 +7,8 @@ import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/f
 import { FIREBASE_ENABLED } from './firebase-config';
 import { FoodItem } from './food-db';
 import { MealEntry } from './stats';
-import { loadCustomFoods, loadCustomFoodsFromFirestore } from './custom-foods';
-import { FOOD_DB, mergeFoodsWithCustom } from './food-db';
+import { loadCustomFoods, loadCustomFoodsFromFirestore, mergeFoodsWithCustom } from './custom-foods';
+import { FOOD_DB } from './food-db';
 import { computeFoodPoints } from './points-utils';
 import { validateAndFixMealEntries } from './data-sync';
 
