@@ -1532,6 +1532,9 @@ function HomeScreen({
   customFoods: typeof FOOD_DB;
   dayCaloriesMap: Record<string, number>;
 }) {
+  const { profile: authProfile, user: authUser } = useAuth();
+  const currentUserId = (authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest');
+  
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<{ entryId: string; itemIndex: number; itemRef: FoodItemRef; foodItem: FoodItem } | null>(null);
 
@@ -1750,6 +1753,7 @@ function HomeScreen({
               style={[styles.settingsOption, styles.settingsOptionLast]}
               onPress={async () => {
                 setShowSettingsModal(false);
+                
                 if (!userProfile || !currentUserId || currentUserId === 'guest') {
                   if (Platform.OS === 'web' && typeof window !== 'undefined') {
                     window.alert('Tu dois être connecté pour utiliser la réparation de synchronisation.');

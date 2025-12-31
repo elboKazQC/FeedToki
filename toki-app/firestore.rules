@@ -45,10 +45,12 @@ service cloud.firestore {
       }
     }
     
-    // Collection globalFoods: lecture publique, écriture admin seulement
+    // Collection globalFoods: lecture et écriture pour tous les utilisateurs authentifiés
+    // (base de données collaborative partagée par tous les utilisateurs)
     match /globalFoods/{foodId} {
       allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
+      allow create, update: if isAuthenticated(); // Tous les utilisateurs authentifiés peuvent ajouter/modifier
+      allow delete: if isAdmin(); // Seuls les admins peuvent supprimer
     }
     
     // Collection user_logs: chaque utilisateur peut créer ses logs, lire les siens seulement
