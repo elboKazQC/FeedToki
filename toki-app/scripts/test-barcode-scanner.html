@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Scanner Code-Barres Local</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .image-preview {
+            max-width: 400px;
+            margin: 20px 0;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        .logs {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 600px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .log-info { color: #4ec9b0; }
+        .log-warn { color: #dcdcaa; }
+        .log-error { color: #f48771; }
+        .log-success { color: #4ec9b0; font-weight: bold; }
+        .log-trace { color: #c586c0; }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #005a9e;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 18px;
+        }
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .stat {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 4px solid #007acc;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test Scanner Code-Barres Local</h1>
+        <p>Image de test: <strong>img_1343.jpg</strong> (Code-barres attendu: <code>0 55653 68450 3</code>)</p>
+        
+        <div>
+            <button id="testBtn">▶️ Lancer le test</button>
+            <button id="clearBtn">🗑️ Effacer les logs</button>
+        </div>
+        
+        <div id="imageContainer" style="display: none;">
+            <h3>Image de test:</h3>
+            <img id="testImage" class="image-preview" alt="Image de test">
+        </div>
+        
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat">
+                <div class="stat-label">Durée totale</div>
+                <div class="stat-value" id="totalDuration">-</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Résultat</div>
+                <div class="stat-value" id="result">-</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Méthode utilisée</div>
+                <div class="stat-value" id="method">-</div>
+            </div>
+        </div>
+        
+        <div id="resultContainer" style="display: none;"></div>
+        
+        <h3>Logs détaillés:</h3>
+        <div id="logs" class="logs"></div>
+    </div>
+
+    <!-- Charger les dépendances nécessaires -->
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <!-- ZXing avec CDN alternatifs (fallback si jsdelivr échoue) -->
+    <script>
+        // Fonction pour charger ZXing avec fallback (retourne une Promise)
+        window.zxingLoaded = new Promise((resolve, reject) => {
+            const cdnUrls = [
+                'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/dist/index.umd.min.js',
+                'https://unpkg.com/@zxing/library@0.20.0/dist/index.umd.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/zxing-library/0.20.0/index.umd.min.js'
+            ];
+            
+            let loaded = false;
+            let timeoutId;
+            
+            // Vérifier périodiquement si ZXing est disponible
+            function checkZXingAvailable() {
+                if (typeof ZXing !== 'undefined') {
+                    console.log('[ZXing] ✅ ZXing disponible globalement');
+                    clearTimeout(timeoutId);
+                    if (!loaded) {
+                        loaded = true;
+                        resolve();
+                    }
+                    return true;
+                }
+                return false;
+            }
+            
+            // Timeout global de 10 secondes
+            timeoutId = setTimeout(() => {
+                if (!loaded) {
+                    console.error('[ZXing] ❌ Timeout: ZXing non chargé après 10 secondes');
+                    loaded = true;
+                    reject(new Error('ZXing non disponible (timeout)'));
+                }
+            }, 10000);
+            
+            function tryLoad(index) {
+                if (index >= cdnUrls.length) {
+                    console.error('[ZXing] ❌ Tous les CDN ont échoué');
+                    clearTimeout(timeoutId);
+                    if (!loaded) {
+                        loaded = true;
+                        reject(new Error('ZXing non disponible'));
+                    }
+                    return;
+                }
+                
+                console.log(`[ZXing] Tentative de chargement depuis CDN ${index + 1}/${cdnUrls.length}: ${cdnUrls[index]}`);
+                const script = document.createElement('script');
+                script.src = cdnUrls[index];
+                script.async = false; // Charger de manière synchrone pour éviter les problèmes de timing
+                
+                script.onload = () => {
+                    console.log(`[ZXing] ✅ Script chargé depuis CDN ${index + 1}/${cdnUrls.length}`);
+                    // Vérifier immédiatement
+                    if (checkZXingAvailable()) {
+                        return;
+                    }
+                    // Si pas encore disponible, vérifier périodiquement
+                    let checkCount = 0;
+                    const checkInterval = setInterval(() => {
+                        checkCount++;
+                        if (checkZXingAvailable()) {
+                            clearInterval(checkInterval);
+                        } else if (checkCount > 20) { // 2 secondes max
+                            clearInterval(checkInterval);
+                            console.warn('[ZXing] ⚠️ Script chargé mais ZXing non disponible après 2s, essai suivant...');
+                            tryLoad(index + 1);
+                        }
+                    }, 100);
+                };
+                
+                script.onerror = (error) => {
+                    console.warn(`[ZXing] ❌ CDN ${index + 1} échoué:`, error);
+                    tryLoad(index + 1);
+                };
+                
+                document.head.appendChild(script);
+            }
+            
+            // Démarrer le chargement
+            tryLoad(0);
+        });
+        
+        // Log initial
+        console.log('[ZXing] Système de chargement initialisé');
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/exifreader@4.15.0/dist/exif-reader.js"></script>
+    
+    <script type="module">
+        // Importer la fonction de décodage depuis le projet
+        // Note: Cela nécessite que le serveur serve les fichiers avec les bons headers CORS
+        let decodeBarcodeFromDataUrl = null;
+        
+        // Essayer d'importer la fonction depuis le projet
+        try {
+            // Pour l'instant, on va utiliser une version simplifiée locale
+            // car les imports ES6 nécessitent un bundler
+            console.log('⚠️ Mode test local: utilisation des fonctions simplifiées');
+        } catch (error) {
+            console.warn('Impossible d\'importer les fonctions du projet, utilisation de la version simplifiée');
+        }
+        // Simuler les imports nécessaires
+        // Note: Ce script doit être exécuté dans un environnement qui supporte les modules ES6
+        
+        const logsDiv = document.getElementById('logs');
+        const testBtn = document.getElementById('testBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const imageContainer = document.getElementById('imageContainer');
+        const testImage = document.getElementById('testImage');
+        const resultContainer = document.getElementById('resultContainer');
+        const statsDiv = document.getElementById('stats');
+        
+        let startTime = null;
+        
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = startTime ? `[${(Date.now() - startTime).toFixed(0)}ms] ` : '';
+            entry.textContent = `${timestamp}${message}`;
+            logsDiv.appendChild(entry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function clearLogs() {
+            logsDiv.innerHTML = '';
+            resultContainer.style.display = 'none';
+            statsDiv.style.display = 'none';
+        }
+        
+        clearBtn.addEventListener('click', clearLogs);
+        
+        // Fonction pour charger l'image et la convertir en data URL
+        async function loadImageAsDataUrl(imagePath) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                    resolve(dataUrl);
+                };
+                img.onerror = reject;
+                img.src = imagePath;
+            });
+        }
+        
+        // Fonction pour tester le décodage avec tous les logs détaillés
+        async function testBarcodeDecoding() {
+            clearLogs();
+            startTime = Date.now();
+            testBtn.disabled = true;
+            
+            addLog('════════════════════════════════════', 'info');
+            addLog('Démarrage du test de décodage', 'info');
+            addLog('Image: test-images/img_1343.jpg', 'info');
+            addLog('Code-barres attendu: 0 55653 68450 3', 'info');
+            addLog('════════════════════════════════════', 'info');
+            
+            try {
+                // Charger l'image
+                const loadStartTime = Date.now();
+                addLog('Étape 1: Chargement de l\'image...', 'trace');
+                const imagePath = '/test-images/img_1343.jpg';
+                addLog(`  → Chemin de l'image: ${imagePath}`, 'trace');
+                const dataUrl = await loadImageAsDataUrl(imagePath);
+                const loadDuration = Date.now() - loadStartTime;
+                addLog(`✅ Image chargée en ${loadDuration}ms`, 'success');
+                addLog(`   Taille base64: ${Math.round(dataUrl.length / 1024)} KB`, 'info');
+                
+                // Afficher l'image
+                testImage.src = dataUrl;
+                imageContainer.style.display = 'block';
+                
+                // Charger l'image pour obtenir ses dimensions
+                const img = await loadImageFromDataUrl(dataUrl);
+                addLog(`   Dimensions: ${img.width}x${img.height}px`, 'info');
+                
+                // Tester avec ZXing
+                addLog('', 'info');
+                addLog('Étape 2: Tentative de décodage avec ZXing...', 'trace');
+                
+                // Attendre que ZXing soit chargé
+                addLog('  → Attente du chargement de ZXing...', 'trace');
+                try {
+                    if (window.zxingLoaded) {
+                        await window.zxingLoaded;
+                        addLog('  → ✅ ZXing chargé', 'success');
+                    } else {
+                        addLog('  → ⚠️ Promise zxingLoaded non disponible, vérification directe...', 'warn');
+                    }
+                } catch (error) {
+                    addLog(`  → ❌ ZXing non disponible: ${error.message}`, 'error');
+                }
+                
+                const zxingStartTime = Date.now();
+                const zxingResult = await testWithZXing(dataUrl);
+                const zxingDuration = Date.now() - zxingStartTime;
+                
+                if (zxingResult) {
+                    addLog(`✅ Code-barres détecté avec ZXing: ${zxingResult} (${zxingDuration}ms)`, 'success');
+                    showResult(zxingResult, 'ZXing', true, Date.now() - startTime);
+                    return;
+                } else {
+                    addLog(`❌ ZXing n'a pas pu décoder (${zxingDuration}ms)`, 'warn');
+                }
+                
+                // Tester avec QuaggaJS
+                addLog('', 'info');
+                addLog('Étape 3: Tentative de décodage avec QuaggaJS...', 'trace');
+                const quaggaStartTime = Date.now();
+                const quaggaResult = await testWithQuagga(dataUrl);
+                const quaggaDuration = Date.now() - quaggaStartTime;
+                
+                if (quaggaResult) {
+                    addLog(`✅ Code-barres détecté avec QuaggaJS: ${quaggaResult} (${quaggaDuration}ms)`, 'success');
+                    showResult(quaggaResult, 'QuaggaJS', true, Date.now() - startTime);
+                    return;
+                } else {
+                    addLog(`❌ QuaggaJS n'a pas pu décoder (${quaggaDuration}ms)`, 'warn');
+                }
+                
+                // Aucune méthode n'a fonctionné
+                addLog('', 'info');
+                addLog('❌ Aucune méthode n\'a pu décoder le code-barres', 'error');
+                showResult(null, 'Aucune', false, Date.now() - startTime);
+                
+            } catch (error) {
+                addLog(`❌ Erreur fatale: ${error.message}`, 'error');
+                addLog(`Stack: ${error.stack}`, 'error');
+                showResult(null, 'Erreur', false, Date.now() - startTime);
+            } finally {
+                const totalDuration = Date.now() - startTime;
+                addLog('', 'info');
+                addLog(`════════════════════════════════════`, 'info');
+                addLog(`Test terminé en ${totalDuration}ms`, 'info');
+                testBtn.disabled = false;
+            }
+        }
+        
+        async function testWithZXing(dataUrl) {
+            try {
+                addLog('  → Création du canvas pour ZXing...', 'trace');
+                const canvasStartTime = Date.now();
+                const img = await loadImageFromDataUrl(dataUrl);
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                const canvasDuration = Date.now() - canvasStartTime;
+                addLog(`  → Canvas créé en ${canvasDuration}ms (${canvas.width}x${canvas.height})`, 'trace');
+                
+                addLog('  → Configuration ZXing...', 'trace');
+                
+                // Vérifier que ZXing est disponible
+                if (typeof ZXing === 'undefined') {
+                    addLog('  → ❌ ZXing n\'est pas chargé (CDN non disponible)', 'error');
+                    addLog('  → Vérifiez la connexion internet ou le CDN jsdelivr', 'warn');
+                    return null;
+                }
+                
+                const hints = new Map();
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.EAN_13,
+                    ZXing.BarcodeFormat.EAN_8,
+                    ZXing.BarcodeFormat.UPC_A,
+                    ZXing.BarcodeFormat.UPC_E
+                ]);
+                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                
+                addLog('  → Appel ZXing.decodeFromCanvas...', 'trace');
+                const decodeStartTime = Date.now();
+                const reader = new ZXing.BrowserMultiFormatReader(hints);
+                
+                // Timeout de 5 secondes pour ZXing
+                const zxingPromise = reader.decodeFromCanvas(canvas);
+                const timeoutPromise = new Promise((resolve) => {
+                    setTimeout(() => resolve(null), 5000);
+                });
+                
+                const result = await Promise.race([zxingPromise, timeoutPromise]);
+                const decodeDuration = Date.now() - decodeStartTime;
+                
+                if (result && result.getText) {
+                    const barcode = result.getText();
+                    addLog(`  → ZXing a retourné: ${barcode} (${decodeDuration}ms)`, 'success');
+                    return barcode;
+                } else if (result === null && decodeDuration >= 5000) {
+                    addLog(`  → ZXing timeout après 5s`, 'warn');
+                } else {
+                    addLog(`  → ZXing: aucun résultat (${decodeDuration}ms)`, 'warn');
+                }
+                return null;
+            } catch (error) {
+                if (error.name === 'NotFoundException') {
+                    addLog('  → ZXing: Code-barres non trouvé (NotFoundException)', 'warn');
+                } else {
+                    addLog(`  → Erreur ZXing: ${error.message}`, 'error');
+                    addLog(`  → Stack: ${error.stack}`, 'error');
+                }
+                return null;
+            }
+        }
+        
+        async function testWithQuagga(dataUrl) {
+            try {
+                addLog('  → Préparation de l\'image pour QuaggaJS...', 'trace');
+                const prepStartTime = Date.now();
+                const img = await loadImageFromDataUrl(dataUrl);
+                
+                // Downscale si nécessaire (QuaggaJS fonctionne mieux avec images < 1024px)
+                const maxWidth = 1024;
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > maxWidth) {
+                    const ratio = maxWidth / width;
+                    width = maxWidth;
+                    height = Math.floor(height * ratio);
+                    addLog(`  → Image downscalée: ${img.width}x${img.height} → ${width}x${height}`, 'trace');
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const prepDuration = Date.now() - prepStartTime;
+                addLog(`  → Image préparée en ${prepDuration}ms (${width}x${height})`, 'trace');
+                
+                addLog('  → Configuration QuaggaJS...', 'trace');
+                const config = {
+                    decoder: {
+                        readers: ['ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader']
+                    },
+                    locate: true,
+                    src: canvas.toDataURL()
+                };
+                
+                addLog('  → Appel Quagga.decodeSingle...', 'trace');
+                const decodeStartTime = Date.now();
+                
+                return new Promise((resolve) => {
+                    // Timeout de 5 secondes pour QuaggaJS
+                    const timeout = setTimeout(() => {
+                        addLog(`  → QuaggaJS timeout après 5s`, 'warn');
+                        resolve(null);
+                    }, 5000);
+                    
+                    Quagga.decodeSingle(config, (result) => {
+                        clearTimeout(timeout);
+                        const decodeDuration = Date.now() - decodeStartTime;
+                        
+                        if (result && result.codeResult && result.codeResult.code) {
+                            const barcode = result.codeResult.code;
+                            addLog(`  → QuaggaJS a retourné: ${barcode} (${decodeDuration}ms)`, 'success');
+                            resolve(barcode);
+                        } else {
+                            addLog(`  → QuaggaJS: aucun résultat (${decodeDuration}ms)`, 'warn');
+                            resolve(null);
+                        }
+                    });
+                });
+            } catch (error) {
+                addLog(`  → Erreur QuaggaJS: ${error.message}`, 'error');
+                addLog(`  → Stack: ${error.stack}`, 'error');
+                return null;
+            }
+        }
+        
+        function loadImageFromDataUrl(dataUrl) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = dataUrl;
+            });
+        }
+        
+        function showResult(barcode, method, success, totalDuration) {
+            totalDuration = totalDuration || (Date.now() - startTime);
+            statsDiv.style.display = 'grid';
+            document.getElementById('totalDuration').textContent = `${totalDuration}ms`;
+            document.getElementById('result').textContent = barcode || 'Aucun';
+            document.getElementById('method').textContent = method;
+            
+            resultContainer.style.display = 'block';
+            resultContainer.className = `result ${success ? 'success' : 'error'}`;
+            
+            // Normaliser les codes-barres pour comparaison
+            const normalizeBarcode = (code) => {
+                if (!code) return '';
+                // Enlever espaces
+                let normalized = code.replace(/\s/g, '');
+                // Enlever les zéros de tête pour les codes EAN-13/UPC-A
+                // Si le code a 14 chiffres et commence par 0, enlever le zéro (→ 13 chiffres)
+                if (normalized.length === 14 && normalized.startsWith('0')) {
+                    normalized = normalized.substring(1);
+                }
+                // Si le code a 13 chiffres et commence par 0, enlever le zéro (→ 12 chiffres)
+                if (normalized.length === 13 && normalized.startsWith('0')) {
+                    normalized = normalized.substring(1);
+                }
+                // Si le code a moins de 13 chiffres, ajouter des zéros de tête si nécessaire
+                // (mais on ne fait pas ça pour l'instant, on garde tel quel)
+                return normalized;
+            };
+            
+            // Le code attendu avec espaces : "0 55653 68450 3"
+            const expectedBarcodeWithSpaces = '0 55653 68450 3';
+            const expectedRaw = expectedBarcodeWithSpaces.replace(/\s/g, ''); // "055653684503" (13 chiffres)
+            const detectedRaw = barcode ? barcode.replace(/\s/g, '') : '';
+            const normalizedExpected = normalizeBarcode(expectedBarcodeWithSpaces);
+            const normalizedDetected = normalizeBarcode(barcode);
+            
+            // Debug: afficher les valeurs avant comparaison
+            console.log('DEBUG Comparaison:', {
+                expectedBarcodeWithSpaces,
+                expectedRaw,
+                expectedRawLength: expectedRaw.length,
+                detectedRaw,
+                detectedRawLength: detectedRaw.length,
+                normalizedExpected,
+                normalizedExpectedLength: normalizedExpected.length,
+                normalizedDetected,
+                normalizedDetectedLength: normalizedDetected.length,
+                matchNormalized: normalizedDetected === normalizedExpected,
+                matchRaw: detectedRaw === expectedRaw,
+                matchLast12: detectedRaw.slice(-12) === expectedRaw.slice(-12),
+                normalizedExpectedStr: JSON.stringify(normalizedExpected),
+                normalizedDetectedStr: JSON.stringify(normalizedDetected)
+            });
+            
+            // Comparaison : soit les codes bruts sont identiques, soit les codes normalisés sont identiques
+            const isCorrect = success && barcode && (
+                detectedRaw === expectedRaw || 
+                normalizedDetected === normalizedExpected ||
+                // Tolérance : si les 12 derniers chiffres sont identiques (pour gérer les zéros de tête)
+                detectedRaw.slice(-12) === expectedRaw.slice(-12)
+            );
+            
+            // Log de comparaison détaillé
+            if (success && barcode) {
+                addLog('', 'info');
+                addLog('════════════════════════════════════', 'info');
+                addLog('Comparaison des codes-barres:', 'info');
+                addLog(`  Attendu (brut): "${expectedBarcodeWithSpaces}" → "${expectedRaw}" (${expectedRaw.length} chiffres)`, 'info');
+                addLog(`  Détecté (brut): "${barcode}" (${detectedRaw.length} chiffres)`, 'info');
+                addLog(`  Attendu (normalisé): "${normalizedExpected}" (${normalizedExpected.length} chiffres)`, 'info');
+                addLog(`  Détecté (normalisé): "${normalizedDetected}" (${normalizedDetected.length} chiffres)`, 'info');
+                addLog(`  Match brut: ${detectedRaw === expectedRaw ? '✅' : '❌'}`, detectedRaw === expectedRaw ? 'success' : 'warn');
+                addLog(`  Match normalisé: ${normalizedDetected === normalizedExpected ? '✅' : '❌'}`, normalizedDetected === normalizedExpected ? 'success' : 'warn');
+                addLog(`  Match 12 derniers: ${detectedRaw.slice(-12) === expectedRaw.slice(-12) ? '✅' : '❌'}`, detectedRaw.slice(-12) === expectedRaw.slice(-12) ? 'success' : 'warn');
+                addLog(`  Résultat final: ${isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}`, isCorrect ? 'success' : 'error');
+                addLog('════════════════════════════════════', 'info');
+            }
+            
+            resultContainer.innerHTML = success 
+                ? `✅ <strong>Code-barres détecté:</strong> ${barcode}<br>Méthode: ${method}<br>Durée: ${totalDuration}ms${isCorrect ? '<br>✅ Code-barres correct!' : '<br>⚠️ Code-barres différent de celui attendu (0 55653 68450 3)'}`
+                : `❌ <strong>Aucun code-barres détecté</strong><br>Méthode: ${method}<br>Durée: ${totalDuration}ms<br>Code-barres attendu: 0 55653 68450 3`;
+        }
+        
+        testBtn.addEventListener('click', testBarcodeDecoding);
+        
+        addLog('Script de test chargé. Cliquez sur "Lancer le test" pour commencer.', 'info');
+    </script>
+</body>
+</html>

@@ -15,7 +15,9 @@ export type AnalyticsEvent =
   | 'points_spent'
   | 'points_earned'
   | 'screen_view'
-  | 'ai_parser_used';
+  | 'ai_parser_used'
+  | 'barcode_scan_success'
+  | 'barcode_scan_failure';
 
 // Paramètres pour événements
 export interface AnalyticsEventParams {

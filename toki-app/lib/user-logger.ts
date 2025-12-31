@@ -73,14 +73,31 @@ export async function logUserEvent(
 
       // Ajouter au cache
       logCache.push(userLog);
+      
+      console.log(`[Logger] Log ajouté au cache (${logCache.length}/${MAX_CACHE_SIZE}):`, {
+        level,
+        context: context || 'app',
+        message,
+        userId: userId.substring(0, 8) + '...', // Masquer l'userId complet dans les logs
+      });
 
       // Si le cache est plein, flush immédiatement
       if (logCache.length >= MAX_CACHE_SIZE) {
+        console.log('[Logger] Cache plein, flush immédiat...');
         await flushLogs();
       }
     } catch (error) {
       // Ne pas bloquer l'app si le logging échoue
       console.error('[Logger] Erreur lors de l\'enregistrement du log:', error);
+    }
+  } else {
+    // Logger pourquoi le log n'est pas enregistré
+    if (!FIREBASE_ENABLED) {
+      console.log('[Logger] Firebase non activé, log non enregistré');
+    } else if (!db) {
+      console.log('[Logger] db non disponible, log non enregistré');
+    } else if (!userId || userId === 'guest') {
+      console.log('[Logger] Utilisateur guest ou userId manquant, log non enregistré:', userId);
     }
   }
 }
@@ -89,14 +106,24 @@ export async function logUserEvent(
  * Envoyer tous les logs en cache à Firestore
  */
 async function flushLogs(): Promise<void> {
-  if (!FIREBASE_ENABLED || !db || logCache.length === 0) return;
+  if (!FIREBASE_ENABLED || !db || logCache.length === 0) {
+    if (logCache.length > 0) {
+      console.log('[Logger] Firebase non activé ou db non disponible, logs en cache:', logCache.length);
+    }
+    return;
+  }
 
   try {
     const logsRef = collection(db, 'user_logs');
+    const logsToFlush = [...logCache]; // Copier le cache
+    logCache.length = 0; // Vider le cache immédiatement pour éviter les doublons
+    
+    console.log(`[Logger] Envoi de ${logsToFlush.length} logs vers Firestore...`);
+    
     const batch: Promise<void>[] = [];
 
     // Créer les documents Firestore
-    for (const log of logCache) {
+    for (const log of logsToFlush) {
       batch.push(
         addDoc(logsRef, {
           ...log,

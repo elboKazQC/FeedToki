@@ -52,7 +52,7 @@ import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
 import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
 import { loadCustomFoods, mergeFoodsWithCustom, migrateLocalFoodsToGlobal } from '../../lib/custom-foods';
-import { userLogger, logError } from '../../lib/user-logger';
+import { userLogger, logError, flushLogsNow } from '../../lib/user-logger';
 import { trackMealLogged, trackStreakMilestone, trackTargetUpdated } from '../../lib/analytics';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -61,8 +61,6 @@ import { Badge } from '../../components/ui/Badge';
 import { spacing, typography, borderRadius, darkTheme, lightTheme } from '../../constants/design-tokens';
 import { useTheme as useAppTheme } from '../../lib/theme-context';
 import { getFormattedAppVersion } from '../../lib/app-version';
-import { BarcodeScanner } from '../../components/barcode-scanner';
-import { fetchProductByBarcode, mapOffProductToFoodItem } from '../../lib/open-food-facts';
 
 type StatsUI = {
   scorePct: number;
@@ -95,12 +93,21 @@ function mapScore7ToStatsUI(score: number): StatsUI {
 }
 
 function buildDayFeeds(entries: MealEntry[]): Record<string, { date: string; mealIds: string[] }> {
-  return entries.reduce((acc, entry) => {
+  const result = entries.reduce((acc, entry) => {
     const dateKey = normalizeDate(entry.createdAt);
     const existing = acc[dateKey] ?? { date: dateKey, mealIds: [] };
     acc[dateKey] = { ...existing, mealIds: [...existing.mealIds, entry.id] };
     return acc;
   }, {} as Record<string, { date: string; mealIds: string[] }>);
+  
+  // Logs de diagnostic
+  console.log('[buildDayFeeds] 📊 Total repas:', entries.length);
+  console.log('[buildDayFeeds] 📅 Jours avec repas:', Object.keys(result).sort());
+  Object.entries(result).forEach(([date, feed]) => {
+    console.log(`[buildDayFeeds]   ${date}: ${feed.mealIds.length} repas`);
+  });
+  
+  return result;
 }
 
 function scoreToCategory(score: number): MealEntry['category'] {
@@ -328,6 +335,52 @@ export default function App() {
               const currentCustomFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
               const allFoods = mergeFoodsWithCustom(FOOD_DB, currentCustomFoods);
               
+              // Étape 4.5: Réparer les items manquants (ajouter les items mentionnés dans le titre)
+              // Cela doit être fait AVANT la validation pour que les nouveaux items soient validés aussi
+              console.log('[Index] 🔧 AVANT réparation - currentUserId:', currentUserId);
+              try {
+                console.log('[Index] 🔧 Démarrage réparation des items manquants dans les repas...');
+                console.log('[Index] 🔧 Import du module sync-repair...');
+                const repairModule = await import('../../lib/sync-repair');
+                console.log('[Index] 🔧 Module importé:', Object.keys(repairModule));
+                const { repairMissingItemsInMeals } = repairModule;
+                console.log('[Index] 🔧 Fonction repairMissingItemsInMeals:', typeof repairMissingItemsInMeals);
+                console.log('[Index] 🔧 Appel de repairMissingItemsInMeals avec userId:', currentUserId);
+                const repairResult = await repairMissingItemsInMeals(currentUserId);
+                console.log('[Index] ✅ Réparation terminée:', {
+                  itemsAdded: repairResult.itemsAdded,
+                  mealsFixed: repairResult.mealsFixed,
+                  success: repairResult.success,
+                  errors: repairResult.errors.length,
+                });
+                if (repairResult.itemsAdded > 0) {
+                  console.log(`[Index] ✅ ${repairResult.itemsAdded} items ajoutés dans ${repairResult.mealsFixed} repas lors du chargement`);
+                  // Recharger les repas après réparation
+                  const jsonAfterRepair = await AsyncStorage.getItem(key);
+                  if (jsonAfterRepair) {
+                    const parsedAfterRepair = JSON.parse(jsonAfterRepair);
+                    if (Array.isArray(parsedAfterRepair)) {
+                      // Mettre à jour normalized avec les repas réparés
+                      const repairedMap = new Map(parsedAfterRepair.map((e: any) => [e.id, e]));
+                      for (let i = 0; i < normalized.length; i++) {
+                        const repaired = repairedMap.get(normalized[i].id);
+                        if (repaired) {
+                          normalized[i] = {
+                            ...normalized[i],
+                            items: repaired.items || normalized[i].items,
+                          };
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (repairError: any) {
+                console.error('[Index] ❌ Erreur lors de la réparation des items manquants:', repairError);
+                console.error('[Index] ❌ Stack trace:', repairError?.stack);
+                console.error('[Index] ❌ Message:', repairError?.message);
+                // Continuer même en cas d'erreur
+              }
+              
               // Utiliser la fonction de validation dédiée
               const { validateAndFixMealEntries } = await import('../../lib/data-sync');
               const validatedEntries = validateAndFixMealEntries(normalized, allFoods);
@@ -494,17 +547,34 @@ export default function App() {
   // Calculer les calories par jour pour valider les journées "complètes"
   const dayCaloriesMap = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const entry of entries) {
-      const dateKey = normalizeDate(entry.createdAt);
-      const dayTotals = computeDailyTotals(entries, entry.createdAt, customFoods);
-      map[dateKey] = dayTotals.calories_kcal;
-    }
+    Object.keys(dayFeeds).forEach(date => {
+      const dayEntries = entries.filter(e => normalizeDate(e.createdAt) === date);
+      // Construire un ISO string à partir de la date normalisée en utilisant le timezone local
+      // On utilise midi (12:00) pour éviter les problèmes de timezone aux limites de jour
+      const [year, month, day] = date.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day, 12, 0, 0); // midi local
+      const dateIso = dateObj.toISOString();
+      const totals = computeDailyTotals(dayEntries, dateIso, customFoods);
+      map[date] = totals.calories_kcal;
+    });
+    
+    // Logs de diagnostic
+    console.log('[dayCaloriesMap] 🔥 Calories calculées par jour:');
+    Object.entries(map).sort().forEach(([date, calories]) => {
+      console.log(`[dayCaloriesMap]   ${date}: ${Math.round(calories)} cal`);
+    });
+    
     return map;
-  }, [entries, customFoods]);
+  }, [entries, dayFeeds, customFoods]);
   
   // Utiliser les nouvelles fonctions avec validation des calories
   const dragonState = computeDragonStateWithCalories(dayFeeds, dayCaloriesMap);
   const streak = computeStreakWithCalories(dayFeeds, dayCaloriesMap);
+  console.log('[Index] 📊 Streak calculée:', {
+    currentStreakDays: streak.currentStreakDays,
+    longestStreakDays: streak.longestStreakDays,
+    totalFedDays: streak.totalFedDays,
+  });
   const todayTotals = computeDailyTotals(entries, new Date().toISOString(), customFoods);
   
   // Tracker les milestones de streak
@@ -784,6 +854,182 @@ export default function App() {
     recalculatePointsFromEntries();
   }, [entries, isReady, userProfile, currentUserId]); // Se déclenche après chargement des entrées
 
+  // Recharger et valider les repas avec les custom foods à jour
+  const reloadAndValidateMeals = async () => {
+    if (!currentUserId) {
+      return;
+    }
+
+    try {
+      console.log('[Index] 🔄 Rechargement et validation des repas...');
+      
+      // 1. D'abord synchroniser depuis Firestore pour avoir les dernières données
+      const { syncFromFirestore } = await import('../../lib/data-sync');
+      await syncFromFirestore(currentUserId);
+      console.log('[Index] ✅ Synchronisation depuis Firestore terminée');
+      
+      // 2. Recharger les repas depuis AsyncStorage (qui contient maintenant les données fusionnées)
+      const entriesKey = getEntriesKey();
+      const json = await AsyncStorage.getItem(entriesKey);
+      
+      if (!json) {
+        console.log('[Index] ℹ️ Aucun repas à recharger');
+        return;
+      }
+
+      const parsed = JSON.parse(json);
+      if (!Array.isArray(parsed)) {
+        console.warn('[Index] ⚠️ Données repas non-array');
+        return;
+      }
+
+      // Normaliser les entrées
+      const normalized: MealEntry[] = (parsed as any[]).map((e, idx) => {
+        const entry: MealEntry = {
+          id: typeof e.id === 'string' && e.id.length > 0 ? e.id : `entry_${Date.now()}_${idx}`,
+          label: typeof e.label === 'string' ? e.label.substring(0, 200) : '',
+          category: typeof e.category === 'string' && ['ok', 'warning', 'danger'].includes(e.category) 
+            ? e.category 
+            : 'ok',
+          score: typeof e.score === 'number' && !isNaN(e.score) && e.score >= 0 && e.score <= 100
+            ? e.score
+            : mapManualCategoryToScore(e.category ?? 'ok'),
+          createdAt: typeof e.createdAt === 'string' && e.createdAt.length > 0
+            ? e.createdAt
+            : (typeof e.date === 'string' ? e.date : new Date().toISOString()),
+          items: Array.isArray(e.items) ? e.items : [],
+        };
+        return entry;
+      });
+
+      // 3. Réparer les items manquants (ajouter les items mentionnés dans le titre)
+      const { repairMissingItemsInMeals } = await import('../../lib/sync-repair');
+      const repairResult = await repairMissingItemsInMeals(currentUserId);
+      if (repairResult.itemsAdded > 0) {
+        console.log(`[Index] ✅ ${repairResult.itemsAdded} items ajoutés dans ${repairResult.mealsFixed} repas`);
+        // Recharger les repas après réparation
+        const jsonAfterRepair = await AsyncStorage.getItem(entriesKey);
+        if (jsonAfterRepair) {
+          const parsedAfterRepair = JSON.parse(jsonAfterRepair);
+          if (Array.isArray(parsedAfterRepair)) {
+            // Mettre à jour normalized avec les repas réparés
+            const repairedMap = new Map(parsedAfterRepair.map((e: any) => [e.id, e]));
+            for (let i = 0; i < normalized.length; i++) {
+              const repaired = repairedMap.get(normalized[i].id);
+              if (repaired) {
+                normalized[i] = {
+                  ...normalized[i],
+                  items: repaired.items || normalized[i].items,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Charger les custom foods à jour pour la validation
+      const currentCustomFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+      const allFoods = mergeFoodsWithCustom(FOOD_DB, currentCustomFoods);
+
+      // 5. Valider les repas avec les custom foods à jour
+      const { validateAndFixMealEntries } = await import('../../lib/data-sync');
+      const validatedEntries = validateAndFixMealEntries(normalized, allFoods);
+
+      // Mettre à jour le state
+      setEntries(validatedEntries);
+      console.log('[Index] ✅ Repas rechargés et validés:', validatedEntries.length);
+
+      // Sauvegarder les repas validés
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(validatedEntries));
+
+      // Recalculer les points si nécessaire
+      if (userProfile && currentUserId !== 'guest') {
+        setTimeout(async () => {
+          try {
+            const today = getTodayLocal();
+            const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
+            const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
+
+            // Charger les custom foods pour calculer les coûts
+            const customFoodsForCalc = await loadCustomFoods(currentUserId);
+            const allFoodsForCalc = mergeFoodsWithCustom(FOOD_DB, customFoodsForCalc);
+
+            // Filtrer les entrées d'aujourd'hui
+            const todayEntries = validatedEntries.filter(e => normalizeDate(e.createdAt) === today);
+            let totalSpentToday = 0;
+
+            for (const entry of todayEntries) {
+              if (entry.items && entry.items.length > 0) {
+                const entryCost = entry.items.reduce((sum, itemRef) => {
+                  const fi = allFoodsForCalc.find(f => f.id === itemRef.foodId);
+                  if (!fi) {
+                    console.warn('[Index] ⚠️ Aliment non trouvé pour recalcul points:', itemRef.foodId);
+                    return sum;
+                  }
+                  const multiplier = itemRef.multiplier || 1.0;
+                  const baseCost = computeFoodPoints(fi);
+                  const cost = Math.round(baseCost * Math.sqrt(multiplier));
+                  return sum + cost;
+                }, 0);
+                totalSpentToday += entryCost;
+              }
+            }
+
+            // Charger les points actuels
+            const pointsKey = getPointsKey();
+            const pointsRaw = await AsyncStorage.getItem(pointsKey);
+            if (pointsRaw) {
+              const pointsData = JSON.parse(pointsRaw);
+              const lastClaimDate = pointsData.lastClaimDate || '';
+
+              // Ne recalculer que si c'est aujourd'hui
+              if (lastClaimDate === today) {
+                let startOfDayBalance = pointsData.startOfDayBalance;
+                const currentBalance = pointsData.balance ?? 0;
+
+                // Si startOfDayBalance n'existe pas, l'estimer
+                if (startOfDayBalance === undefined) {
+                  startOfDayBalance = Math.min(maxCapFromProfile, currentBalance + totalSpentToday);
+                }
+
+                // Calculer le solde attendu
+                const expectedBalance = Math.max(0, startOfDayBalance - totalSpentToday);
+
+                if (expectedBalance !== currentBalance) {
+                  console.log('[Index] ✅ Correction des points après rechargement repas:', {
+                    startOfDayBalance,
+                    totalSpent: totalSpentToday,
+                    expectedBalance,
+                    currentBalance,
+                  });
+
+                  await AsyncStorage.setItem(pointsKey, JSON.stringify({
+                    ...pointsData,
+                    balance: expectedBalance,
+                    startOfDayBalance,
+                  }));
+                  setPoints(expectedBalance);
+
+                  // Synchroniser vers Firestore
+                  const totalPointsKey = getTotalPointsKey();
+                  const totalRaw = await AsyncStorage.getItem(totalPointsKey);
+                  const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
+                  const { syncPointsToFirestore } = await import('../../lib/data-sync');
+                  await syncPointsToFirestore(currentUserId, expectedBalance, today, totalPointsVal);
+                  console.log('[Index] ✅ Points recalculés après rechargement repas');
+                }
+              }
+            }
+          } catch (recalcError) {
+            console.error('[Index] ❌ Erreur recalcul points après rechargement:', recalcError);
+          }
+        }, 500);
+      }
+    } catch (error) {
+      console.error('[Index] ❌ Erreur rechargement repas:', error);
+    }
+  };
+
   // Charger les aliments personnalisés (depuis AsyncStorage + Firestore)
   const loadCustomFoodsData = async () => {
     if (!currentUserId || currentUserId === 'guest') {
@@ -837,6 +1083,9 @@ export default function App() {
           console.log(`[Index] ✅ Synchronisation custom foods: ${result.localToFirestore} envoyés, ${result.firestoreToLocal} reçus`);
           // Recharger les custom foods après synchronisation
           await loadCustomFoodsData();
+          // IMPORTANT: Recharger et valider les repas avec les nouveaux custom foods
+          // Cela permet de mettre à jour l'historique et recalculer les points
+          await reloadAndValidateMeals();
         } else {
           console.log('[Index] ✅ Tous les custom foods sont synchronisés');
         }
@@ -853,6 +1102,54 @@ export default function App() {
     const timeout = setTimeout(() => {
       syncMissingFoods();
     }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [currentUserId, isReady]);
+
+  // Détection automatique et synchronisation des repas manquants au démarrage
+  useEffect(() => {
+    if (!currentUserId || currentUserId === 'guest' || !isReady) {
+      return;
+    }
+
+    const syncMissingMealsData = async () => {
+      try {
+        console.log('[Index] 🔍 Vérification des repas manquants...');
+        
+        // D'abord synchroniser depuis Firestore pour avoir les dernières données
+        const { syncFromFirestore } = await import('../../lib/data-sync');
+        await syncFromFirestore(currentUserId);
+        console.log('[Index] ✅ Synchronisation depuis Firestore terminée avant comparaison');
+        
+        // Ensuite comparer et synchroniser les repas manquants
+        const { syncMissingMeals } = await import('../../lib/sync-repair');
+        const result = await syncMissingMeals(currentUserId);
+        
+        if (result.localToFirestore > 0 || result.firestoreToLocal > 0) {
+          console.log(`[Index] ✅ Synchronisation repas: ${result.localToFirestore} envoyés, ${result.firestoreToLocal} reçus`);
+          // Recharger les repas après synchronisation
+          const entriesKey = getEntriesKey();
+          const json = await AsyncStorage.getItem(entriesKey);
+          if (json) {
+            const parsed = JSON.parse(json);
+            setEntries(parsed);
+          }
+        } else {
+          console.log('[Index] ✅ Tous les repas sont synchronisés');
+        }
+        
+        if (result.errors.length > 0) {
+          console.warn(`[Index] ⚠️ Erreurs lors de la sync repas:`, result.errors);
+        }
+      } catch (error) {
+        console.error('[Index] ❌ Erreur sync repas:', error);
+      }
+    };
+
+    // Attendre un peu après le chargement initial pour ne pas surcharger
+    const timeout = setTimeout(() => {
+      syncMissingMealsData();
+    }, 3000); // Un peu plus tard que les custom foods pour éviter la surcharge
 
     return () => clearTimeout(timeout);
   }, [currentUserId, isReady]);
@@ -1783,11 +2080,19 @@ function HomeScreen({
                     const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
                     
                     if (result.success) {
+                      const mealsInfo = [
+                        result.meals.syncedFromFirestore > 0 && `${result.meals.syncedFromFirestore} reçus depuis Firestore`,
+                        result.meals.syncedToFirestore > 0 && `${result.meals.syncedToFirestore} envoyés vers Firestore`,
+                        result.meals.itemsAdded && result.meals.itemsAdded > 0 && `${result.meals.itemsAdded} items ajoutés`,
+                        result.meals.entriesFixed > 0 && `${result.meals.entriesFixed} corrigés`,
+                        result.meals.itemsRemoved > 0 && `${result.meals.itemsRemoved} items retirés`,
+                      ].filter(Boolean).join(', ') || 'Aucun changement';
+                      
                       window.alert(
                         '✅ Réparation terminée\n\n' +
                         `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
                         `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
-                        `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`
+                        `Repas: ${mealsInfo}`
                       );
                       // Recharger la page pour voir les changements
                       window.location.reload();
@@ -1819,11 +2124,19 @@ function HomeScreen({
                           const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
                           
                           if (result.success) {
+                            const mealsInfo = [
+                              result.meals.syncedFromFirestore > 0 && `${result.meals.syncedFromFirestore} reçus depuis Firestore`,
+                              result.meals.syncedToFirestore > 0 && `${result.meals.syncedToFirestore} envoyés vers Firestore`,
+                              result.meals.itemsAdded && result.meals.itemsAdded > 0 && `${result.meals.itemsAdded} items ajoutés`,
+                              result.meals.entriesFixed > 0 && `${result.meals.entriesFixed} corrigés`,
+                              result.meals.itemsRemoved > 0 && `${result.meals.itemsRemoved} items retirés`,
+                            ].filter(Boolean).join(', ') || 'Aucun changement';
+                            
                             Alert.alert(
                               '✅ Réparation terminée',
                               `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
                               `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
-                              `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`
+                              `Repas: ${mealsInfo}`
                             );
                             // Recharger les données
                             window.location?.reload();
@@ -2490,19 +2803,11 @@ function AddEntryScreen({
   const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => void } | null>(null);
   const [portionCount, setPortionCount] = useState<number>(1); // Nombre de portions (toujours visible)
   
-  // States pour scan code-barres
-  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
-  const [scannedProduct, setScannedProduct] = useState<FoodItem | null>(null);
-  const [showProductConfirmation, setShowProductConfirmation] = useState(false);
-  const [scannedProductQuantity, setScannedProductQuantity] = useState<number>(1);
-  const [scannedFoods, setScannedFoods] = useState<FoodItem[]>([]); // Produits scannés temporaires
 
-  // Fusionner FOOD_DB avec les aliments personnalisés ET les produits scannés
+  // Fusionner FOOD_DB avec les aliments personnalisés
   const allFoods = useMemo(() => {
-    const merged = mergeFoodsWithCustom(FOOD_DB, customFoods);
-    // Ajouter les produits scannés
-    return [...merged, ...scannedFoods];
-  }, [customFoods, scannedFoods]);
+    return mergeFoodsWithCustom(FOOD_DB, customFoods);
+  }, [customFoods]);
 
   const selectionNutrition = useMemo(() => {
     return items.reduce(
@@ -2673,81 +2978,6 @@ function AddEntryScreen({
     return filtered;
   }, [allFoods, searchLower, quickFilter]);
 
-  // Gérer le scan de code-barres
-  const handleBarcodeScan = async (barcode: string) => {
-    setShowBarcodeScanner(false);
-    
-    try {
-      console.log('[AddEntry] Scan code-barres:', barcode);
-      const product = await fetchProductByBarcode(barcode);
-      
-      if (!product) {
-        // Produit non trouvé -> proposer IA Photo
-        Alert.alert(
-          'Produit introuvable',
-          'Ce produit n\'est pas dans la base Open Food Facts. Voulez-vous prendre une photo pour l\'analyser avec l\'IA ?',
-          [
-            { text: 'Annuler', style: 'cancel' },
-            {
-              text: 'Analyser par photo',
-              onPress: () => {
-                onCancel(); // Fermer le modal actuel
-                router.push('/ai-logger?mode=photo&reason=barcode_not_found');
-              },
-            },
-          ]
-        );
-        return;
-      }
-      
-      // Mapper le produit OFF vers FoodItem
-      const foodItem = mapOffProductToFoodItem(product);
-      setScannedProduct(foodItem);
-      setScannedProductQuantity(1);
-      setShowProductConfirmation(true);
-    } catch (error) {
-      console.error('[AddEntry] Erreur scan:', error);
-      Alert.alert(
-        'Erreur',
-        'Impossible de récupérer les informations du produit. Vérifiez votre connexion internet.',
-        [{ text: 'OK' }]
-      );
-    }
-  };
-  
-  const handleAddScannedProduct = () => {
-    if (!scannedProduct) return;
-    
-    // Ajouter le produit aux scannedFoods s'il n'est pas déjà présent
-    const existingFood = allFoods.find(f => f.id === scannedProduct.id);
-    if (!existingFood) {
-      setScannedFoods((prev) => {
-        // Vérifier qu'il n'est pas déjà dans scannedFoods
-        if (prev.some(f => f.id === scannedProduct.id)) {
-          return prev;
-        }
-        return [...prev, scannedProduct];
-      });
-    }
-    
-    // Ajouter le produit scanné aux items
-    const mediumPortion = getDefaultPortion(scannedProduct.tags || []);
-    const portion = createPortionCustomPortion(scannedProductQuantity, mediumPortion, 'g');
-    
-    setItems((prev) => [
-      ...prev,
-      {
-        foodId: scannedProduct.id,
-        portionSize: portion.size,
-        portionGrams: portion.grams,
-        multiplier: portion.multiplier,
-        quantityHint: portion.visualRef,
-      },
-    ]);
-    
-    setShowProductConfirmation(false);
-    setScannedProduct(null);
-  };
 
   const handleSave = async () => {
     // Toujours exiger des items - le label est généré automatiquement
@@ -2796,14 +3026,6 @@ function AddEntryScreen({
           }}
         />
       </View>
-      
-      {/* Bouton scan code-barres */}
-      <TouchableOpacity
-        style={styles.scanButton}
-        onPress={() => setShowBarcodeScanner(true)}
-      >
-        <Text style={styles.scanButtonText}>📷 Scanner un code-barres</Text>
-      </TouchableOpacity>
       
       {/* Liste autocomplete directement sous le champ de recherche */}
       {showAutocomplete && searchLower.length > 0 && filteredFoods.length > 0 && (
@@ -3126,100 +3348,6 @@ function AddEntryScreen({
         />;
       })()}
       
-      {/* Modal scan code-barres */}
-      <Modal
-        visible={showBarcodeScanner}
-        transparent={false}
-        animationType="slide"
-        onRequestClose={() => setShowBarcodeScanner(false)}
-      >
-        <BarcodeScanner
-          onBarcodeScanned={handleBarcodeScan}
-          onClose={() => setShowBarcodeScanner(false)}
-        />
-      </Modal>
-      
-      {/* Modal confirmation produit scanné */}
-      {showProductConfirmation && scannedProduct && (
-        <Modal
-          visible={true}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowProductConfirmation(false)}
-        >
-          <View style={styles.portionModal}>
-            <View style={styles.portionModalContent}>
-              <Text style={styles.portionModalTitle}>
-                Ajouter ce produit ?
-              </Text>
-              <Text style={styles.portionModalSubtitle}>
-                {scannedProduct.name}
-              </Text>
-              
-              <View style={styles.portionCountControl}>
-                <Text style={styles.portionCountLabel}>Quantité:</Text>
-                <View style={styles.portionCountButtons}>
-                  <TouchableOpacity
-                    style={styles.portionCountButton}
-                    onPress={() => setScannedProductQuantity(Math.max(0.5, scannedProductQuantity - 0.5))}
-                  >
-                    <Text style={styles.portionCountButtonText}>−</Text>
-                  </TouchableOpacity>
-                  <TextInput
-                    style={styles.portionCountInput}
-                    value={scannedProductQuantity.toString()}
-                    onChangeText={(text) => {
-                      const val = parseFloat(text);
-                      if (!isNaN(val) && val > 0) {
-                        setScannedProductQuantity(val);
-                      }
-                    }}
-                    keyboardType="decimal-pad"
-                  />
-                  <TouchableOpacity
-                    style={styles.portionCountButton}
-                    onPress={() => setScannedProductQuantity(scannedProductQuantity + 0.5)}
-                  >
-                    <Text style={styles.portionCountButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              <View style={styles.customPortionPreview}>
-                <Text style={styles.customPortionPreviewTitle}>Infos nutritionnelles:</Text>
-                <Text style={styles.customPortionPreviewText}>
-                  🔥 {Math.round((scannedProduct.calories_kcal || 0) * scannedProductQuantity)} cal · 
-                  💪 {Math.round((scannedProduct.protein_g || 0) * scannedProductQuantity)}g prot · 
-                  🍞 {Math.round((scannedProduct.carbs_g || 0) * scannedProductQuantity)}g gluc
-                </Text>
-                <Text style={styles.customPortionPreviewCost}>
-                  Coût: {Math.round(computeFoodPoints(scannedProduct) * Math.sqrt(scannedProductQuantity))} pts
-                </Text>
-              </View>
-              
-              <View style={styles.customPortionActions}>
-                <TouchableOpacity
-                  style={styles.portionModalCancel}
-                  onPress={() => {
-                    setShowProductConfirmation(false);
-                    setScannedProduct(null);
-                  }}
-                >
-                  <Text style={styles.portionModalCancelText}>Annuler</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.customPortionConfirm}
-                  onPress={handleAddScannedProduct}
-                >
-                  <Text style={styles.customPortionConfirmText}>
-                    Ajouter
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
     </ScrollView>
   );
 }
@@ -4986,18 +5114,40 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 12,
   },
-  portionModal: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  portionModalOverlay: {
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    ...(Platform.OS === 'web' && {
+      position: 'fixed' as any,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 9999,
+    }),
+  },
+  portionModal: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    ...(Platform.OS === 'web' && {
+      position: 'relative' as any,
+      margin: 'auto',
+      zIndex: 10000,
+    }),
   },
   portionModalContent: {
+    ...(Platform.OS === 'web' && {
+      maxHeight: '90vh',
+      overflowY: 'auto' as any,
+    }),
     backgroundColor: '#1f2937',
     borderRadius: 16,
     padding: 20,

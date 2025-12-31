@@ -18,7 +18,7 @@ import {
 
 import { getAppVersion, getFormattedAppVersion } from '../lib/app-version';
 import { BUILD_DATE, BUILD_VERSION } from '../lib/build-version';
-import { bustWebCache, getCacheStatus } from '../lib/web-cache-buster';
+import { bustWebCache, getCacheStatus, forceUpdate } from '../lib/web-cache-buster';
 import { useTheme } from '../lib/theme-context';
 import { useAuth } from '../lib/auth-context';
 import { fullRepair, syncMissingCustomFoods, repairPoints } from '../lib/sync-repair';
@@ -40,7 +40,7 @@ export default function VersionScreen() {
     success: boolean;
     points?: { oldBalance: number; newBalance: number; totalSpent: number };
     customFoods?: { localToFirestore: number; firestoreToLocal: number };
-    meals?: { entriesFixed: number; itemsRemoved: number };
+    meals?: { entriesFixed: number; itemsRemoved: number; itemsAdded?: number; mealsWithItemsAdded?: number; syncedFromFirestore?: number; syncedToFirestore?: number };
     errors: string[];
   } | null>(null);
 
@@ -126,11 +126,19 @@ export default function VersionScreen() {
               setRepairResult(result);
               
               if (result.success) {
+                const mealsInfo = [
+                  result.meals.syncedFromFirestore && result.meals.syncedFromFirestore > 0 && `${result.meals.syncedFromFirestore} reçus depuis Firestore`,
+                  result.meals.syncedToFirestore && result.meals.syncedToFirestore > 0 && `${result.meals.syncedToFirestore} envoyés vers Firestore`,
+                  result.meals.itemsAdded && result.meals.itemsAdded > 0 && `${result.meals.itemsAdded} items ajoutés`,
+                  result.meals.entriesFixed > 0 && `${result.meals.entriesFixed} corrigés`,
+                  result.meals.itemsRemoved > 0 && `${result.meals.itemsRemoved} items retirés`,
+                ].filter(Boolean).join(', ') || 'Aucun changement';
+                
                 Alert.alert(
                   '✅ Réparation terminée',
                   `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
                   `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
-                  `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`,
+                  `Repas: ${mealsInfo}`,
                   [{ text: 'OK' }]
                 );
               } else {
@@ -240,6 +248,9 @@ export default function VersionScreen() {
       padding: 16,
       alignItems: 'center',
       marginBottom: 12,
+    },
+    buttonWarning: {
+      backgroundColor: isDark ? '#dc2626' : '#ef4444',
     },
     buttonDisabled: {
       opacity: 0.5,
@@ -447,7 +458,13 @@ export default function VersionScreen() {
                 )}
                 {repairResult.meals && (
                   <Text style={styles.repairResultText}>
-                    Repas: {repairResult.meals.entriesFixed} corrigés, {repairResult.meals.itemsRemoved} items retirés
+                    Repas: {[
+                      repairResult.meals.syncedFromFirestore && repairResult.meals.syncedFromFirestore > 0 && `${repairResult.meals.syncedFromFirestore} reçus`,
+                      repairResult.meals.syncedToFirestore && repairResult.meals.syncedToFirestore > 0 && `${repairResult.meals.syncedToFirestore} envoyés`,
+                      repairResult.meals.itemsAdded && repairResult.meals.itemsAdded > 0 && `${repairResult.meals.itemsAdded} items ajoutés`,
+                      repairResult.meals.entriesFixed > 0 && `${repairResult.meals.entriesFixed} corrigés`,
+                      repairResult.meals.itemsRemoved > 0 && `${repairResult.meals.itemsRemoved} items retirés`,
+                    ].filter(Boolean).join(', ') || 'Aucun changement'}
                   </Text>
                 )}
                 {repairResult.errors.length > 0 && (
@@ -487,6 +504,18 @@ export default function VersionScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.buttonText}>🧹 Nettoyer le cache web</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, styles.buttonWarning, isCleaning && styles.buttonDisabled]}
+              onPress={handleForceUpdate}
+              disabled={isCleaning}
+            >
+              {isCleaning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>🔄 Forcer la mise à jour</Text>
               )}
             </TouchableOpacity>
 

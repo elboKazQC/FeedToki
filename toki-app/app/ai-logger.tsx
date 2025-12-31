@@ -13,9 +13,7 @@ import {
   Alert,
   Platform,
   Modal,
-  Image,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
 import { findBestMatch, createFoodItemRef, findMultipleMatches } from '../lib/food-matcher';
@@ -37,7 +35,6 @@ import { Button } from '../components/ui/Button';
 import { spacing } from '../constants/design-tokens';
 import { searchAndMapBestProduct } from '../lib/open-food-facts';
 import { logger } from '../lib/logger';
-import { parseMealPhotoWithOpenAI } from '../lib/openai-parser';
 
 type ItemSource = 'db' | 'off' | 'estimated';
 
@@ -135,18 +132,11 @@ type DetectedItem = {
 };
 
 export default function AILoggerScreen() {
-  const params = useLocalSearchParams<{ initialText?: string; mode?: string; reason?: string }>();
-  const [inputMode, setInputMode] = useState<'text' | 'photo'>(params.mode === 'photo' ? 'photo' : 'text');
+  const params = useLocalSearchParams<{ initialText?: string }>();
   const [description, setDescription] = useState(params.initialText || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [error, setError] = useState<string>('');
-  
-  // États pour le mode Photo
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [showCamera, setShowCamera] = useState(false);
-  const [capturedPhoto, setCapturedPhoto] = useState<{ uri: string; base64: string } | null>(null);
-  const cameraRef = useRef<any>(null);
   
   // États pour la modification de quantité
   const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
@@ -375,232 +365,6 @@ export default function AILoggerScreen() {
   const isEmailVerified = user?.emailVerified ?? false;
   const canUseAI = !currentUserId || currentUserId === 'guest' || isEmailVerified;
 
-  const handleOpenCamera = async () => {
-    if (!cameraPermission?.granted) {
-      const result = await requestCameraPermission();
-      if (!result.granted) {
-        Alert.alert(
-          'Accès caméra requis',
-          'Pour analyser une photo, FeedToki a besoin d\'accéder à ta caméra. Autorise la permission dans ton navigateur/app.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-    }
-
-    setCapturedPhoto(null);
-    setShowCamera(true);
-    setInputMode('photo');
-  };
-
-  const handleTakePhoto = async () => {
-    try {
-      if (!cameraRef.current?.takePictureAsync) {
-        Alert.alert('Erreur', 'Caméra non prête. Réessaie dans un instant.');
-        return;
-      }
-
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.7,
-      });
-
-      if (!photo?.base64 || !photo?.uri) {
-        Alert.alert('Erreur', 'Impossible de récupérer la photo. Réessaie.');
-        return;
-      }
-
-      setCapturedPhoto({ uri: photo.uri, base64: photo.base64 });
-    } catch (e: any) {
-      console.error('[AI Logger] Erreur capture photo:', e);
-      Alert.alert('Erreur', e?.message || 'Impossible de prendre la photo.');
-    }
-  };
-
-  const handleAnalyzePhoto = async () => {
-    if (!capturedPhoto?.base64) {
-      Alert.alert('Erreur', 'Aucune photo à analyser.');
-      return;
-    }
-
-    // Vérifier email si nécessaire
-    if (currentUserId && currentUserId !== 'guest' && !isEmailVerified) {
-      setError('Veuillez vérifier votre adresse email avant d\'utiliser l\'analyse IA. Consultez vos emails pour le lien de vérification.');
-      return;
-    }
-
-    setIsProcessing(true);
-    setError('');
-    setDetectedItems([]);
-
-    try {
-      const parseResult = await parseMealPhotoWithOpenAI(capturedPhoto.base64, currentUserId, isEmailVerified);
-
-      if (!parseResult || parseResult.error || parseResult.items.length === 0) {
-        setError(parseResult?.error || 'Aucun aliment détecté sur la photo. Essaie une photo plus claire.');
-        return;
-      }
-
-      // Réutiliser exactement le même pipeline de résolution (OFF -> DB -> estimé)
-      const items: DetectedItem[] = [];
-      for (const parsedItem of parseResult.items) {
-        try {
-          let foodItem: FoodItem;
-          let portion = getDefaultPortion([]);
-          let source: ItemSource = 'estimated';
-          let match: FoodItem | null = null;
-          let offItem: FoodItem | null = null;
-
-          // Étape 1: Open Food Facts
-          try {
-            logger.info('[AI Logger] (Photo) Recherche OFF pour:', parsedItem.name);
-            offItem = await searchAndMapBestProduct(parsedItem.name);
-            if (offItem) {
-              logger.info('[AI Logger] (Photo) Produit OFF trouvé:', offItem.name, {
-                calories: offItem.calories_kcal,
-                protein: offItem.protein_g,
-                carbs: offItem.carbs_g,
-                fat: offItem.fat_g,
-              });
-              
-              // Vérifier si le produit OFF a des valeurs nutritionnelles valides
-              const hasValidNutrition = 
-                (offItem.calories_kcal && offItem.calories_kcal > 0) ||
-                ((offItem.protein_g || 0) + (offItem.carbs_g || 0) + (offItem.fat_g || 0) > 0);
-              
-              // Si le produit OFF a des valeurs à 0 ou manquantes, fusionner avec les valeurs de l'IA
-              if (!hasValidNutrition && (
-                parsedItem.calories_kcal !== undefined ||
-                parsedItem.protein_g !== undefined ||
-                parsedItem.carbs_g !== undefined ||
-                parsedItem.fat_g !== undefined
-              )) {
-                logger.info('[AI Logger] (Photo) Fusion des valeurs: OFF a des valeurs à 0, utilisation des valeurs IA');
-                // Créer un nouvel item avec les valeurs de l'IA mais garder les autres propriétés OFF (tags, points, etc.)
-                foodItem = {
-                  ...offItem,
-                  calories_kcal: parsedItem.calories_kcal !== undefined 
-                    ? Math.round(parsedItem.calories_kcal) 
-                    : offItem.calories_kcal || 0,
-                  protein_g: parsedItem.protein_g !== undefined 
-                    ? Math.round(parsedItem.protein_g * 10) / 10 
-                    : offItem.protein_g || 0,
-                  carbs_g: parsedItem.carbs_g !== undefined 
-                    ? Math.round(parsedItem.carbs_g * 10) / 10 
-                    : offItem.carbs_g || 0,
-                  fat_g: parsedItem.fat_g !== undefined 
-                    ? Math.round(parsedItem.fat_g * 10) / 10 
-                    : offItem.fat_g || 0,
-                };
-                source = 'off'; // Garder la source OFF car c'est un produit réel
-              } else {
-                // Le produit OFF a des valeurs valides, l'utiliser tel quel
-                foodItem = offItem;
-                source = 'off';
-              }
-              
-              portion = getDefaultPortion(offItem.tags);
-            }
-          } catch (offError) {
-            logger.warn('[AI Logger] (Photo) Erreur recherche OFF:', offError);
-          }
-
-          // Étape 2: DB locale
-          if (!offItem) {
-            if (parsedItem.isComposite === false) {
-              const strictMatch = findBestMatch(parsedItem.name, 0.85);
-              if (strictMatch) {
-                const matchWords = strictMatch.name.toLowerCase().split(/\s+/).length;
-                const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
-                if (matchWords <= searchWords + 1) {
-                  match = strictMatch;
-                }
-              }
-            } else {
-              match = findBestMatch(parsedItem.name, 0.7);
-            }
-
-            if (match) {
-              foodItem = match;
-              portion = getDefaultPortion(match.tags);
-              source = 'db';
-            }
-          }
-
-          // Étape 3: estimation
-          if (!offItem && !match) {
-            foodItem = createEstimatedFoodItem(
-              parsedItem.name,
-              'photo',
-              parsedItem.category,
-              parsedItem.calories_kcal !== undefined || parsedItem.protein_g !== undefined
-                ? {
-                    calories_kcal: parsedItem.calories_kcal,
-                    protein_g: parsedItem.protein_g,
-                    carbs_g: parsedItem.carbs_g,
-                    fat_g: parsedItem.fat_g,
-                  }
-                : undefined
-            );
-            portion = getDefaultPortion(foodItem.tags);
-            source = 'estimated';
-          }
-
-          // Calculer le multiplier depuis la quantité prédite par l'IA
-          let finalPortion = portion;
-          if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
-            const calculatedMultiplier = convertQuantityToMultiplier(
-              parsedItem.quantityNumber,
-              parsedItem.quantity,
-              foodItem!,
-              portion
-            );
-            
-            // Créer une portion personnalisée avec le multiplier calculé
-            finalPortion = {
-              ...portion,
-              size: 'custom' as const,
-              label: 'Personnalisée',
-              multiplier: calculatedMultiplier,
-              grams: portion.grams * calculatedMultiplier,
-              visualRef: parsedItem.quantity,
-            };
-          }
-
-          // Créer le FoodItemRef avec la portion ajustée
-          const itemRef = createFoodItemRef(foodItem!, finalPortion);
-          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(finalPortion.multiplier);
-
-          items.push({
-            originalName: parsedItem.name || 'Aliment inconnu',
-            matchedItem: match || null,
-            estimatedItem: (!offItem && !match) ? foodItem : undefined,
-            offItem: offItem || undefined,
-            portion: finalPortion,
-            itemRef,
-            pointsCost: Math.round(pointsCost),
-            source,
-            quantity: parsedItem.quantity,
-            quantityNumber: parsedItem.quantityNumber,
-          });
-        } catch (itemError: any) {
-          console.error('Erreur traitement item photo:', itemError);
-        }
-      }
-
-      if (items.length === 0) {
-        setError('Impossible d\'analyser les aliments. Essaie une autre photo.');
-      } else {
-        setDetectedItems(items);
-      }
-    } catch (e: any) {
-      console.error('[AI Logger] Erreur analyse photo:', e);
-      setError(e?.message || 'Erreur lors de l\'analyse photo. Réessaie.');
-    } finally {
-      setIsProcessing(false);
-      setShowCamera(false);
-    }
-  };
 
   const handleConfirm = async () => {
     if (detectedItems.length === 0) {
@@ -1124,13 +888,6 @@ export default function AILoggerScreen() {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.scanButton, (isProcessing || !canUseAI) && styles.scanButtonDisabled]}
-          onPress={handleOpenCamera}
-          disabled={isProcessing || !canUseAI}
-        >
-          <Text style={styles.scanButtonText}>📷 Log avec une photo</Text>
-        </TouchableOpacity>
       </View>
 
       {detectedItems.length > 0 && (
@@ -1232,63 +989,10 @@ export default function AILoggerScreen() {
         </View>
       )}
 
-      {/* Modal pour modifier la quantité */}
-      <Modal
-        visible={editingQuantityIndex !== null}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setEditingQuantityIndex(null);
-          setQuantityInput('');
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Modifier la quantité</Text>
-            {editingQuantityIndex !== null && detectedItems[editingQuantityIndex] && (
-              <>
-                <Text style={styles.modalSubtitle}>
-                  {detectedItems[editingQuantityIndex].originalName}
-                </Text>
-                <TextInput
-                  style={styles.quantityInput}
-                  placeholder="Ex: 200g, 2 portions, 1 tasse"
-                  value={quantityInput}
-                  onChangeText={setQuantityInput}
-                  autoFocus
-                />
-                <Text style={styles.modalHint}>
-                  Exemples: 200g, 1.5 portions, 2 toasts, 250ml
-                </Text>
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonCancel]}
-                    onPress={() => {
-                      setEditingQuantityIndex(null);
-                      setQuantityInput('');
-                    }}
-                  >
-                    <Text style={styles.modalButtonTextCancel}>Annuler</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonSave]}
-                    onPress={() => editingQuantityIndex !== null && handleSaveQuantity(editingQuantityIndex)}
-                  >
-                    <Text style={styles.modalButtonTextSave}>Enregistrer</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-
       <View style={styles.hintBox}>
         <Text style={styles.hintTitle}>💡 Astuce</Text>
         <Text style={styles.hintText}>
           Sois aussi précis que possible. Mentionne les quantités si tu les connais (ex: &quot;200g de poulet&quot;).
-          Tu peux aussi prendre une photo de ton repas pour aider l'IA à détecter les aliments.
-          {Platform.OS === 'web' && ' (Sur web: autorise l\'accès caméra dans ton navigateur)'}
         </Text>
       </View>
 
@@ -1343,64 +1047,6 @@ export default function AILoggerScreen() {
         </View>
       </Modal>
 
-      {/* Modal caméra (photo) */}
-      <Modal
-        visible={showCamera}
-        animationType="slide"
-        onRequestClose={() => setShowCamera(false)}
-      >
-        <View style={styles.cameraContainer}>
-          {!cameraPermission?.granted ? (
-            <View style={styles.cameraPermissionBox}>
-              <Text style={styles.cameraPermissionText}>
-                Autorise l'accès caméra pour prendre une photo.
-              </Text>
-              <TouchableOpacity style={styles.cameraPermissionButton} onPress={requestCameraPermission}>
-                <Text style={styles.cameraPermissionButtonText}>Autoriser la caméra</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cameraCloseButton} onPress={() => setShowCamera(false)}>
-                <Text style={styles.cameraCloseText}>Fermer</Text>
-              </TouchableOpacity>
-            </View>
-          ) : capturedPhoto ? (
-            <View style={styles.cameraPreviewBox}>
-              <Image source={{ uri: capturedPhoto.uri }} style={styles.cameraPreviewImage} />
-              <View style={styles.cameraActionsRow}>
-                <TouchableOpacity
-                  style={styles.cameraSecondaryButton}
-                  onPress={() => setCapturedPhoto(null)}
-                  disabled={isProcessing}
-                >
-                  <Text style={styles.cameraSecondaryButtonText}>Reprendre</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.cameraPrimaryButton}
-                  onPress={handleAnalyzePhoto}
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.cameraPrimaryButtonText}>Analyser la photo</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.cameraBox}>
-              <CameraView ref={cameraRef} style={styles.cameraView} facing="back" />
-              <View style={styles.cameraActionsRow}>
-                <TouchableOpacity style={styles.cameraSecondaryButton} onPress={() => setShowCamera(false)}>
-                  <Text style={styles.cameraSecondaryButtonText}>Fermer</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cameraPrimaryButton} onPress={handleTakePhoto}>
-                  <Text style={styles.cameraPrimaryButtonText}>Prendre la photo</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -1686,6 +1332,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    ...(Platform.OS === 'web' && {
+      position: 'fixed' as any,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 9999,
+    }),
   },
   modalContent: {
     backgroundColor: '#1f2937',
@@ -1695,6 +1349,11 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     borderWidth: 1,
     borderColor: '#374151',
+    ...(Platform.OS === 'web' && {
+      position: 'relative' as any,
+      margin: 'auto',
+      zIndex: 10000,
+    }),
   },
   modalTitle: {
     fontSize: 20,

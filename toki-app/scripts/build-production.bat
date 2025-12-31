@@ -49,15 +49,27 @@ if exist "web-build" (
 )
 
 echo.
-echo [4/5] Build de l'application pour web...
-call npx expo export --platform web --output-dir web-build
+echo [4/6] Build de l'application pour web...
+call npx expo export --platform web --clear --output-dir web-build
 if errorlevel 1 (
     echo Erreur lors du build
     exit /b 1
 )
 
 echo.
-echo [5/5] Déploiement sur Firebase Hosting...
+echo [5/6] Vérification de la version dans le bundle...
+call npx ts-node scripts\verify-build-version.ts web-build
+if errorlevel 1 (
+    echo.
+    echo ERREUR: La vérification de version a échoué!
+    echo Le déploiement est annulé pour éviter de déployer une mauvaise version.
+    echo.
+    echo Veuillez corriger le problème et relancer le script.
+    exit /b 1
+)
+
+echo.
+echo [6/6] Déploiement sur Firebase Hosting...
 call firebase deploy --only hosting
 if errorlevel 1 (
     echo Erreur lors du déploiement

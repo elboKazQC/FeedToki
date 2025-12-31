@@ -118,8 +118,20 @@ Réponds UNIQUEMENT avec les chiffres ou "AUCUN", rien d'autre.`;
       return null;
     }
 
-    logger.info('[OpenAI Parser] ✅ Code-barres extrait avec succès:', cleanedBarcode);
-    return cleanedBarcode;
+    // Normaliser le code-barres (enlever zéros de tête si nécessaire)
+    let normalized = cleanedBarcode;
+    if (normalized.length === 14 && normalized.startsWith('0')) {
+      normalized = normalized.substring(1);
+    }
+    if (normalized.length === 13 && normalized.startsWith('0')) {
+      normalized = normalized.substring(1);
+    }
+    
+    logger.info('[OpenAI Parser] ✅ Code-barres extrait avec succès:', { 
+      original: cleanedBarcode, 
+      normalized 
+    });
+    return normalized;
   } catch (error: any) {
     logger.error('[OpenAI Parser] Erreur extraction code-barres:', error?.message || String(error));
     return null;

@@ -54,6 +54,12 @@ export const MIN_CALORIES_FOR_COMPLETE_DAY = 800; // Minimum de calories pour co
 
 // Normalize any ISO date to YYYY-MM-DD (using local date to avoid timezone issues)
 export function normalizeDate(dateIso: string): string {
+  // Si la date est déjà au format YYYY-MM-DD, la retourner telle quelle
+  // Cela évite les problèmes de timezone avec new Date()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) {
+    return dateIso;
+  }
+  
   const d = new Date(dateIso);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -182,13 +188,26 @@ export function computeStreakWithCalories(
   dayCaloriesMap: Record<string, number>, // Map de date -> calories totales
   minCalories: number = MIN_CALORIES_FOR_COMPLETE_DAY
 ): StreakStats {
+  // Logs de diagnostic
+  console.log('[Streak] 🔍 Début calcul streak avec calories');
+  console.log('[Streak] Jours avec repas (dayFeeds):', Object.keys(dayFeeds).sort());
+  console.log('[Streak] Calories par jour:', Object.entries(dayCaloriesMap).map(([date, cal]) => `${date}: ${cal} cal`));
+  console.log('[Streak] Seuil minimum calories:', minCalories);
+  
   // Filtrer les jours qui ont assez de calories
   const completeDays = Object.keys(dayFeeds).filter(date => {
     const calories = dayCaloriesMap[date] || 0;
-    return calories >= minCalories;
+    const isComplete = calories >= minCalories;
+    if (!isComplete) {
+      console.log(`[Streak] ⚠️ Jour ${date} exclu: ${calories} cal < ${minCalories} cal`);
+    }
+    return isComplete;
   }).sort();
 
+  console.log('[Streak] Jours complets (>= calories):', completeDays);
+
   if (completeDays.length === 0) {
+    console.log('[Streak] ❌ Aucun jour complet, streak = 0');
     return {
       currentStreakDays: 0,
       longestStreakDays: 0,
@@ -202,6 +221,7 @@ export function computeStreakWithCalories(
 
   const today = normalizeDate(new Date().toISOString());
   const completeDaysSet = new Set(completeDays);
+  console.log('[Streak] Date aujourd\'hui (normalisée):', today);
 
   let current = 0;
   
@@ -214,20 +234,34 @@ export function computeStreakWithCalories(
   if (todayCalories >= minCalories) {
     // Aujourd'hui est complet, commencer depuis aujourd'hui
     cursor = today;
+    console.log(`[Streak] ✅ Aujourd'hui est complet (${todayCalories} cal), démarrage depuis aujourd'hui`);
   } else {
     // Aujourd'hui n'est pas encore complet, commencer depuis hier
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    cursor = normalizeDate(yesterday.toISOString());
+    // Utiliser la même méthode que computeStreak pour la cohérence (setUTCDate)
+    const yesterdayDate = new Date(today + 'T00:00:00');
+    yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+    cursor = normalizeDate(yesterdayDate.toISOString());
+    console.log(`[Streak] ⚠️ Aujourd'hui incomplet (${todayCalories} cal), démarrage depuis hier: ${cursor}`);
   }
   
   // Compter les jours consécutifs depuis le cursor
+  console.log('[Streak] 🔄 Début comptage depuis:', cursor);
+  let iteration = 0;
   while (completeDaysSet.has(cursor)) {
     current += 1;
-    const prevDay = new Date(cursor);
-    prevDay.setDate(prevDay.getDate() - 1);
+    const calories = dayCaloriesMap[cursor] || 0;
+    console.log(`[Streak]   Jour ${current}: ${cursor} (${calories} cal)`);
+    // Utiliser setUTCDate pour la cohérence avec computeStreak
+    const prevDay = new Date(cursor + 'T00:00:00');
+    prevDay.setUTCDate(prevDay.getUTCDate() - 1);
     cursor = normalizeDate(prevDay.toISOString());
+    iteration++;
+    if (iteration > 100) {
+      console.error('[Streak] ❌ Boucle infinie détectée, arrêt forcé');
+      break;
+    }
   }
+  console.log(`[Streak] ✅ Streak actuelle calculée: ${current} jours`);
 
   // Longest streak scan
   let longest = 1;

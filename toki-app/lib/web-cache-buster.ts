@@ -143,12 +143,30 @@ export async function bustWebCache(currentVersion: string): Promise<void> {
   // Mettre à jour la version en cache
   setCachedVersion(currentVersion);
 
-  // Hard reload
+  // Hard reload agressif
   console.warn('[Cache Buster] 🔄 Forcing hard reload...');
-  setTimeout(() => {
-    // @ts-ignore - location.reload(true) force un hard reload sans cache
-    window.location.reload(true);
-  }, 500);
+  
+  try {
+    // Vider le cache du navigateur si possible
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      for (const cacheName of cacheNames) {
+        await caches.delete(cacheName);
+      }
+    }
+    
+    // Forcer un hard reload avec query string
+    setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('_force_reload', Date.now().toString());
+      window.location.replace(url.toString());
+    }, 100);
+  } catch (error) {
+    console.error('[Cache Buster] Error during hard reload:', error);
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
+  }
 }
 
 /**
@@ -161,8 +179,22 @@ export async function autoCleanupWebCache(currentVersion: string): Promise<void>
     return;
   }
 
+  // Extraire le hash du bundle depuis le script chargé (si disponible)
+  let bundleHash = 'unknown';
+  if (typeof document !== 'undefined') {
+    const scripts = document.querySelectorAll('script[src*="entry-"]');
+    if (scripts.length > 0) {
+      const src = (scripts[0] as HTMLScriptElement).src;
+      const hashMatch = src.match(/entry-([a-f0-9]+)\.js/);
+      if (hashMatch) {
+        bundleHash = hashMatch[1];
+      }
+    }
+  }
+
   console.log(`[Cache Buster] === AUTO CLEANUP START ===`);
   console.log(`[Cache Buster] Current BUILD_VERSION: ${currentVersion}`);
+  console.log(`[Cache Buster] Bundle hash: ${bundleHash}`);
 
   const cachedVersion = getCachedVersion();
   console.log(`[Cache Buster] Cached version: ${cachedVersion || 'none'}`);
@@ -172,6 +204,15 @@ export async function autoCleanupWebCache(currentVersion: string): Promise<void>
     console.log('[Cache Buster] ✅ Versions match, no action needed');
     resetReloadCount(); // Reset le compteur si on a la bonne version
     return;
+  }
+  
+  // Warning si la version détectée ne correspond pas à celle attendue
+  if (currentVersion && cachedVersion && cachedVersion !== currentVersion) {
+    console.warn(`[Cache Buster] ⚠️  Version mismatch détectée!`);
+    console.warn(`[Cache Buster]    Version attendue: ${currentVersion}`);
+    console.warn(`[Cache Buster]    Version en cache: ${cachedVersion}`);
+    console.warn(`[Cache Buster]    Bundle hash: ${bundleHash}`);
+    console.warn(`[Cache Buster]    💡 Si tu vois toujours une ancienne version, utilise le bouton "Forcer la mise à jour" dans Paramètres → Version`);
   }
 
   // Nouvelle version détectée!
@@ -203,10 +244,46 @@ export async function autoCleanupWebCache(currentVersion: string): Promise<void>
 
   // Hard reload pour récupérer le nouveau bundle
   console.warn('[Cache Buster] 🔄 Forcing hard reload...');
-  setTimeout(() => {
-    // @ts-ignore - location.reload(true) force un hard reload sans cache
-    window.location.reload(true);
-  }, 500);
+  
+  // Méthode agressive : vider le cache et forcer un rechargement avec query string
+  try {
+    // Vider le cache du navigateur si possible
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      for (const cacheName of cacheNames) {
+        await caches.delete(cacheName);
+      }
+    }
+    
+    // Vider localStorage sauf la version (pour éviter les boucles)
+    const versionToKeep = currentVersion;
+    const keysToKeep = [CACHE_BUST_VERSION_KEY, CACHE_BUST_RELOAD_COUNT_KEY];
+    if (typeof localStorage !== 'undefined') {
+      const allKeys = Object.keys(localStorage);
+      for (const key of allKeys) {
+        if (!keysToKeep.includes(key)) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+    
+    // Forcer un hard reload avec plusieurs méthodes
+    setTimeout(() => {
+      // Méthode 1: Ajouter un query string pour forcer le rechargement
+      const url = new URL(window.location.href);
+      url.searchParams.set('_v', currentVersion);
+      url.searchParams.set('_t', Date.now().toString());
+      
+      // Méthode 2: Utiliser location.replace pour éviter l'historique
+      window.location.replace(url.toString());
+    }, 100);
+  } catch (error) {
+    console.error('[Cache Buster] Error during hard reload:', error);
+    // Fallback: méthode simple
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
+  }
 }
 
 /**
@@ -261,4 +338,76 @@ export async function getCacheStatus(): Promise<{
   console.log(`[Cache Status] Cached version: ${status.lastBustedVersion}, Reload count: ${status.reloadCount}`);
 
   return status;
+}
+
+/**
+ * Forcer une mise à jour complète (vide tout localStorage sauf données utilisateur)
+ * Plus agressif que bustWebCache - à utiliser si le cache busting normal ne fonctionne pas
+ */
+export async function forceUpdate(currentVersion: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    console.log('[Force Update] Skipping: not web platform');
+    return;
+  }
+
+  console.log('[Force Update] === FORCE UPDATE START ===');
+  console.log(`[Force Update] Current version: ${currentVersion}`);
+
+  try {
+    // 1. Nettoyer tous les service workers
+    await unregisterServiceWorkers();
+    
+    // 2. Nettoyer tous les caches
+    await clearCacheStorage();
+    
+    // 3. Vider localStorage (sauf données utilisateur importantes)
+    if (typeof localStorage !== 'undefined') {
+      const keysToKeep = [
+        // Données utilisateur importantes
+        'toki_user_profile_v1',
+        'toki_user_v1',
+        // Clés de cache busting (on les reset)
+      ];
+      
+      const allKeys = Object.keys(localStorage);
+      let deletedCount = 0;
+      
+      for (const key of allKeys) {
+        // Garder seulement les données utilisateur
+        if (!keysToKeep.some(keepKey => key.startsWith(keepKey))) {
+          localStorage.removeItem(key);
+          deletedCount++;
+        }
+      }
+      
+      console.log(`[Force Update] Deleted ${deletedCount} localStorage entries`);
+      
+      // Reset les clés de cache busting
+      localStorage.removeItem(CACHE_BUST_VERSION_KEY);
+      localStorage.removeItem(CACHE_BUST_RELOAD_COUNT_KEY);
+    }
+    
+    // 4. Forcer un hard reload avec query string unique
+    console.warn('[Force Update] 🔄 Forcing hard reload with cache bypass...');
+    
+    setTimeout(() => {
+      const url = new URL(window.location.href);
+      // Enlever les anciens paramètres
+      url.searchParams.delete('_v');
+      url.searchParams.delete('_t');
+      url.searchParams.delete('_force_reload');
+      // Ajouter un nouveau paramètre unique
+      url.searchParams.set('_force_update', currentVersion);
+      url.searchParams.set('_timestamp', Date.now().toString());
+      
+      // Utiliser replace pour éviter l'historique
+      window.location.replace(url.toString());
+    }, 200);
+  } catch (error) {
+    console.error('[Force Update] Error:', error);
+    // Fallback: simple reload
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
+  }
 }

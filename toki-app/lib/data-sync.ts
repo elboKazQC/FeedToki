@@ -322,8 +322,26 @@ export async function syncFromFirestore(userId: string): Promise<{
     const localEntries: MealEntry[] = localEntriesRaw ? JSON.parse(localEntriesRaw) : [];
     console.log('[Sync] Repas locaux:', localEntries.length);
     
+    // Log détaillé des repas locaux (pour diagnostic)
+    if (__DEV__ && localEntries.length > 0) {
+      console.log('[Sync] 📋 Détail repas locaux:');
+      localEntries.slice(0, 5).forEach(entry => {
+        console.log(`  - ${entry.label || entry.id}: ${entry.items?.length || 0} items`, 
+          entry.items?.map(i => i.foodId).join(', ') || 'aucun');
+      });
+    }
+    
     const firestoreMeals = await loadMealsFromFirestore(userId);
     console.log('[Sync] Repas Firestore:', firestoreMeals.length);
+    
+    // Log détaillé des repas Firestore (pour diagnostic)
+    if (__DEV__ && firestoreMeals.length > 0) {
+      console.log('[Sync] 📋 Détail repas Firestore:');
+      firestoreMeals.slice(0, 5).forEach(meal => {
+        console.log(`  - ${meal.label || meal.id}: ${meal.items?.length || 0} items`, 
+          meal.items?.map(i => i.foodId).join(', ') || 'aucun');
+      });
+    }
     
     // Fusionner: créer un Map par ID, Firestore prend priorité (plus récent)
     const mealsMap = new Map<string, MealEntry>();
@@ -334,7 +352,21 @@ export async function syncFromFirestore(userId: string): Promise<{
     }
     
     // Ensuite ajouter/remplacer par Firestore (priorité)
+    let replacedCount = 0;
+    let addedCount = 0;
     for (const meal of firestoreMeals) {
+      const existing = mealsMap.get(meal.id);
+      if (existing) {
+        replacedCount++;
+        if (__DEV__) {
+          console.log(`[Sync] 🔄 Remplacement repas "${meal.label || meal.id}": local=${existing.items?.length || 0} items, firestore=${meal.items?.length || 0} items`);
+        }
+      } else {
+        addedCount++;
+        if (__DEV__) {
+          console.log(`[Sync] ➕ Ajout repas depuis Firestore: "${meal.label || meal.id}" avec ${meal.items?.length || 0} items`);
+        }
+      }
       mealsMap.set(meal.id, meal);
     }
     
@@ -345,7 +377,7 @@ export async function syncFromFirestore(userId: string): Promise<{
     if (mergedMeals.length > 0) {
       await AsyncStorage.setItem(entriesKey, JSON.stringify(mergedMeals));
       result.mealsMerged = mergedMeals.length;
-      console.log('[Sync] ✅ Repas fusionnés:', mergedMeals.length, '(local:', localEntries.length, ', firestore:', firestoreMeals.length, ')');
+      console.log('[Sync] ✅ Repas fusionnés:', mergedMeals.length, '(local:', localEntries.length, ', firestore:', firestoreMeals.length, `, ajoutés: ${addedCount}, remplacés: ${replacedCount})`);
     } else {
       console.log('[Sync] ℹ️ Aucun repas à fusionner');
     }

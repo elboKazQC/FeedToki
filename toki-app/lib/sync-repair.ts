@@ -329,6 +329,336 @@ export async function repairMealEntries(userId: string): Promise<{
 }
 
 /**
+ * Normaliser un nom d'aliment pour la comparaison (enlever accents, minuscules, trim)
+ */
+function normalizeFoodName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[àáâãäå]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ç]/g, 'c')
+    .replace(/[^a-z0-9\s]/g, ''); // Enlever caractères spéciaux
+}
+
+/**
+ * Score de similarité entre deux chaînes (simplifié pour la détection dans les titres)
+ */
+function similarityScore(str1: string, str2: string): number {
+  const s1 = normalizeFoodName(str1);
+  const s2 = normalizeFoodName(str2);
+  
+  // Match exact
+  if (s1 === s2) return 1.0;
+  
+  // Contient l'un ou l'autre (mais seulement si significatif)
+  if (s1.length >= 3 && s2.length >= 3) {
+    if (s1.includes(s2) || s2.includes(s1)) {
+      // Vérifier que la différence de longueur n'est pas trop grande
+      const lengthRatio = Math.min(s1.length, s2.length) / Math.max(s1.length, s2.length);
+      if (lengthRatio >= 0.7) {
+        return 0.8;
+      }
+    }
+  }
+  
+  // Mots communs - amélioration pour les noms composés
+  const words1 = s1.split(/\s+/).filter(w => w.length > 2);
+  const words2 = s2.split(/\s+/).filter(w => w.length > 2);
+  const commonWords = words1.filter(w => words2.includes(w));
+  
+  // Si tous les mots sont communs, c'est un très bon match
+  if (commonWords.length === words1.length && commonWords.length === words2.length && words1.length > 0) {
+    return 0.9; // Match presque parfait
+  }
+  
+  if (commonWords.length >= 2) {
+    return 0.7;
+  } else if (commonWords.length === 1) {
+    // Pour les noms composés (2 mots), un seul mot commun peut suffire si c'est un mot significatif
+    // Ex: "sauce blanche" vs "sauce blanche" -> "sauce" et "blanche" sont communs -> score 0.9
+    // Mais si on compare "sauce blanche" avec "sauce tomate", on a "sauce" en commun
+    if (words1.length === 2 && words2.length === 2) {
+      // Deux mots dans les deux : si un mot commun, c'est déjà un bon indice
+      return 0.55; // Légèrement au-dessus du seuil de 0.5
+    } else if (words1.length <= 2 && words2.length <= 2) {
+      return 0.55;
+    }
+  }
+  
+  return 0;
+}
+
+/**
+ * Réparer les repas en ajoutant les items manquants mentionnés dans le titre
+ * @param userId ID de l'utilisateur
+ * @returns Résultat de la réparation
+ */
+export async function repairMissingItemsInMeals(userId: string): Promise<{
+  success: boolean;
+  mealsFixed: number;
+  itemsAdded: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let mealsFixed = 0;
+  let itemsAdded = 0;
+
+  try {
+    console.log('[Sync Repair] 🔧 Réparation des items manquants dans les repas...');
+
+    // 1. Charger les repas
+    const entriesKey = `feedtoki_entries_${userId}_v1`;
+    const entriesRaw = await AsyncStorage.getItem(entriesKey);
+    if (!entriesRaw) {
+      errors.push('Aucun repas trouvé');
+      return { success: false, mealsFixed: 0, itemsAdded: 0, errors };
+    }
+
+    const entries: MealEntry[] = JSON.parse(entriesRaw);
+    console.log(`[Sync Repair] 📥 ${entries.length} repas à analyser`);
+    
+    if (entries.length === 0) {
+      console.log('[Sync Repair] ℹ️ Aucun repas à analyser');
+      return { success: true, mealsFixed: 0, itemsAdded: 0, errors };
+    }
+
+    // 2. Charger les custom foods
+    const customFoods = await loadCustomFoods(userId);
+    const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+    console.log(`[Sync Repair] 📥 ${allFoods.length} aliments disponibles (DB: ${FOOD_DB.length}, custom: ${customFoods.length})`);
+
+    // 3. Pour chaque repas, détecter les items manquants
+    const fixedEntries: MealEntry[] = [];
+    let hasChanges = false;
+
+    for (const entry of entries) {
+      if (!entry.label || entry.label.trim().length === 0) {
+        fixedEntries.push(entry);
+        continue;
+      }
+
+      const currentItems = entry.items || [];
+      const currentFoodIds = new Set(currentItems.map(item => item.foodId));
+      
+      // Extraire les mots du titre (séparés par virgules, espaces)
+      const titleWords = entry.label
+        .split(/[,;]/) // Séparer par virgules ou points-virgules
+        .map(w => w.trim())
+        .filter(w => w.length > 0);
+      
+      // Toujours logger pour le diagnostic (même en production)
+      if (titleWords.length > 0) {
+        console.log(`[Sync Repair] 📋 Analyse du repas "${entry.label}":`, {
+          titleWords,
+          currentItemsCount: currentItems.length,
+          currentFoodIds: Array.from(currentFoodIds),
+        });
+      }
+
+      let entryModified = false;
+      const newItems = [...currentItems];
+
+      // Pour chaque mot/phrase du titre, chercher un aliment correspondant
+      for (const titleWord of titleWords) {
+        if (titleWord.length < 3) continue; // Ignorer les mots trop courts
+
+        // Chercher dans tous les aliments
+        let bestMatch: FoodItem | null = null;
+        let bestScore = 0.5; // Seuil minimum pour accepter un match (abaissé pour mieux détecter)
+
+        // Toujours logger pour le diagnostic (même en production)
+        console.log(`[Sync Repair] 🔍 Recherche correspondance pour "${titleWord}" dans le repas "${entry.label}"`);
+
+        for (const food of allFoods) {
+          const score = similarityScore(titleWord, food.name);
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = food;
+            console.log(`[Sync Repair]   ✓ Match trouvé: "${food.name}" (score: ${score.toFixed(2)})`);
+          }
+        }
+
+        if (!bestMatch) {
+          console.log(`[Sync Repair]   ✗ Aucun match trouvé pour "${titleWord}" (seuil: 0.5)`);
+        }
+
+        // Si on a trouvé un match et qu'il n'est pas déjà dans les items
+        if (bestMatch && !currentFoodIds.has(bestMatch.id)) {
+          console.log(`[Sync Repair] ➕ Ajout "${bestMatch.name}" (${bestMatch.id}) au repas "${entry.label}" (score: ${bestScore.toFixed(2)})`);
+          
+          // Ajouter l'item avec portion par défaut (1.0)
+          newItems.push({
+            foodId: bestMatch.id,
+            multiplier: 1.0,
+          });
+          
+          currentFoodIds.add(bestMatch.id); // Éviter les doublons dans le même repas
+          itemsAdded++;
+          entryModified = true;
+        } else if (bestMatch && currentFoodIds.has(bestMatch.id)) {
+          console.log(`[Sync Repair]   ℹ️ "${bestMatch.name}" déjà présent dans les items, ignoré`);
+        }
+      }
+
+      if (entryModified) {
+        fixedEntries.push({
+          ...entry,
+          items: newItems,
+        });
+        mealsFixed++;
+        hasChanges = true;
+        console.log(`[Sync Repair] ✅ Repas "${entry.label}" réparé: ${newItems.length - currentItems.length} item(s) ajouté(s)`);
+      } else {
+        fixedEntries.push(entry);
+      }
+    }
+
+    // 4. Sauvegarder les repas modifiés
+    if (hasChanges) {
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(fixedEntries));
+      console.log(`[Sync Repair] ✅ ${mealsFixed} repas modifiés, ${itemsAdded} items ajoutés`);
+
+      // 5. Synchroniser vers Firestore
+      if (FIREBASE_ENABLED && db) {
+        try {
+          const { syncMealsToFirestore } = await import('./data-sync');
+          await syncMealsToFirestore(userId, fixedEntries);
+          console.log('[Sync Repair] ✅ Repas réparés synchronisés vers Firestore');
+        } catch (syncError) {
+          errors.push(`Erreur sync Firestore: ${syncError}`);
+        }
+      }
+    } else {
+      console.log('[Sync Repair] ✅ Aucun item manquant détecté dans les repas');
+    }
+
+    return { success: errors.length === 0, mealsFixed, itemsAdded, errors };
+  } catch (error: any) {
+    errors.push(`Erreur réparation items manquants: ${error?.message || error}`);
+    console.error('[Sync Repair] ❌ Erreur:', error);
+    return { success: false, mealsFixed, itemsAdded, errors };
+  }
+}
+
+/**
+ * Synchroniser les repas manquants entre local et Firestore
+ * @param userId ID de l'utilisateur
+ * @returns Résultat de la synchronisation
+ */
+export async function syncMissingMeals(userId: string): Promise<{
+  success: boolean;
+  localToFirestore: number;
+  firestoreToLocal: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let localToFirestore = 0;
+  let firestoreToLocal = 0;
+
+  try {
+    console.log('[Sync Repair] 🔄 Synchronisation des repas manquants...');
+
+    if (!FIREBASE_ENABLED || !db) {
+      errors.push('Firebase non disponible');
+      return { success: false, localToFirestore: 0, firestoreToLocal: 0, errors };
+    }
+
+    // 1. Charger les repas locaux
+    const entriesKey = `feedtoki_entries_${userId}_v1`;
+    const localRaw = await AsyncStorage.getItem(entriesKey);
+    const localMeals: MealEntry[] = localRaw ? JSON.parse(localRaw) : [];
+    console.log(`[Sync Repair] 📥 Repas locaux: ${localMeals.length}`);
+
+    // 2. Charger les repas depuis Firestore
+    const { loadMealsFromFirestore } = await import('./data-sync');
+    const firestoreMeals = await loadMealsFromFirestore(userId);
+    console.log(`[Sync Repair] 📥 Repas Firestore: ${firestoreMeals.length}`);
+
+    // 3. Créer des Maps pour comparaison rapide
+    const localMap = new Map<string, MealEntry>();
+    const firestoreMap = new Map<string, MealEntry>();
+
+    for (const meal of localMeals) {
+      localMap.set(meal.id, meal);
+    }
+
+    for (const meal of firestoreMeals) {
+      firestoreMap.set(meal.id, meal);
+    }
+
+    // 4. Trouver les repas locaux qui ne sont pas dans Firestore
+    const missingInFirestore: MealEntry[] = [];
+    for (const meal of localMeals) {
+      if (!firestoreMap.has(meal.id)) {
+        missingInFirestore.push(meal);
+      }
+    }
+
+    // 5. Trouver les repas Firestore qui ne sont pas locaux OU qui ont plus d'items
+    const missingInLocal: MealEntry[] = [];
+    for (const meal of firestoreMeals) {
+      const localMeal = localMap.get(meal.id);
+      if (!localMeal) {
+        // Repas manquant localement
+        missingInLocal.push(meal);
+        console.log(`[Sync Repair] 🔍 Repas manquant localement: "${meal.label || meal.id}" avec ${meal.items?.length || 0} items`);
+      } else if (meal.items && localMeal.items) {
+        // Vérifier si le repas Firestore a plus d'items
+        if (meal.items.length > localMeal.items.length) {
+          console.log(`[Sync Repair] 🔄 Repas "${meal.label || meal.id}" a plus d'items dans Firestore (${meal.items.length} vs ${localMeal.items.length})`);
+          missingInLocal.push(meal); // Forcer le remplacement
+        }
+      } else if (meal.items && (!localMeal.items || localMeal.items.length === 0)) {
+        // Repas Firestore a des items mais local n'en a pas
+        console.log(`[Sync Repair] 🔄 Repas "${meal.label || meal.id}" a des items dans Firestore mais pas localement`);
+        missingInLocal.push(meal);
+      }
+    }
+
+    console.log(`[Sync Repair] 🔍 Manquants dans Firestore: ${missingInFirestore.length}`);
+    console.log(`[Sync Repair] 🔍 Manquants localement: ${missingInLocal.length}`);
+
+    // 6. Envoyer les repas locaux vers Firestore
+    if (missingInFirestore.length > 0) {
+      const { syncMealsToFirestore } = await import('./data-sync');
+      await syncMealsToFirestore(userId, missingInFirestore);
+      localToFirestore = missingInFirestore.length;
+      console.log(`[Sync Repair] ✅ ${localToFirestore} repas envoyés vers Firestore`);
+    }
+
+    // 7. Ajouter les repas Firestore manquants au local
+    if (missingInLocal.length > 0) {
+      const updatedMeals = [...localMeals, ...missingInLocal];
+      // Trier par date décroissante
+      updatedMeals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      await AsyncStorage.setItem(entriesKey, JSON.stringify(updatedMeals));
+      firestoreToLocal = missingInLocal.length;
+      console.log(`[Sync Repair] ✅ ${firestoreToLocal} repas ajoutés localement`);
+    }
+
+    // 8. Si aucun changement, tout est synchronisé
+    if (localToFirestore === 0 && firestoreToLocal === 0) {
+      console.log('[Sync Repair] ✅ Tous les repas sont déjà synchronisés');
+    }
+
+    return {
+      success: errors.length === 0,
+      localToFirestore,
+      firestoreToLocal,
+      errors,
+    };
+  } catch (error: any) {
+    errors.push(`Erreur sync repas: ${error?.message || error}`);
+    console.error('[Sync Repair] ❌ Erreur:', error);
+    return { success: false, localToFirestore, firestoreToLocal, errors };
+  }
+}
+
+/**
  * Réparation complète : points, custom foods, et repas
  * @param userId ID de l'utilisateur
  * @param dailyPointsBudget Budget quotidien de points
@@ -343,7 +673,15 @@ export async function fullRepair(
   success: boolean;
   points: { success: boolean; oldBalance: number; newBalance: number; totalSpent: number };
   customFoods: { success: boolean; localToFirestore: number; firestoreToLocal: number };
-  meals: { success: boolean; entriesFixed: number; itemsRemoved: number };
+  meals: { 
+    success: boolean; 
+    entriesFixed: number; 
+    itemsRemoved: number;
+    itemsAdded?: number;
+    mealsWithItemsAdded?: number;
+    syncedFromFirestore?: number;
+    syncedToFirestore?: number;
+  };
   errors: string[];
 }> {
   console.log('[Sync Repair] 🔧 Démarrage réparation complète...');
@@ -362,7 +700,19 @@ export async function fullRepair(
     errors.push(...customFoodsResult.errors);
   }
 
-  // 3. Réparer les repas
+  // 3. Synchroniser les repas manquants
+  const syncMealsResult = await syncMissingMeals(userId);
+  if (!syncMealsResult.success) {
+    errors.push(...syncMealsResult.errors);
+  }
+
+  // 4. Réparer les items manquants dans les repas (ajouter les items mentionnés dans le titre)
+  const repairItemsResult = await repairMissingItemsInMeals(userId);
+  if (!repairItemsResult.success) {
+    errors.push(...repairItemsResult.errors);
+  }
+
+  // 5. Réparer les repas (validation et nettoyage)
   const mealsResult = await repairMealEntries(userId);
   if (!mealsResult.success) {
     errors.push(...mealsResult.errors);
@@ -392,9 +742,13 @@ export async function fullRepair(
       firestoreToLocal: customFoodsResult.firestoreToLocal,
     },
     meals: {
-      success: mealsResult.success,
+      success: mealsResult.success && syncMealsResult.success && repairItemsResult.success,
       entriesFixed: mealsResult.entriesFixed,
       itemsRemoved: mealsResult.itemsRemoved,
+      itemsAdded: repairItemsResult.itemsAdded,
+      mealsWithItemsAdded: repairItemsResult.mealsFixed,
+      syncedFromFirestore: syncMealsResult.firestoreToLocal,
+      syncedToFirestore: syncMealsResult.localToFirestore,
     },
     errors,
   };
