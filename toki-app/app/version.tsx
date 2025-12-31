@@ -20,9 +20,12 @@ import { getAppVersion, getFormattedAppVersion } from '../lib/app-version';
 import { BUILD_DATE, BUILD_VERSION } from '../lib/build-version';
 import { bustWebCache, getCacheStatus } from '../lib/web-cache-buster';
 import { useTheme } from '../lib/theme-context';
+import { useAuth } from '../lib/auth-context';
+import { fullRepair, syncMissingCustomFoods, repairPoints } from '../lib/sync-repair';
 
 export default function VersionScreen() {
   const { colors, isDark } = useTheme();
+  const { profile, user } = useAuth();
   const [cacheStatus, setCacheStatus] = useState<{
     hasServiceWorker: boolean;
     serviceWorkerCount: number;
@@ -32,6 +35,14 @@ export default function VersionScreen() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCleaning, setIsCleaning] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<{
+    success: boolean;
+    points?: { oldBalance: number; newBalance: number; totalSpent: number };
+    customFoods?: { localToFirestore: number; firestoreToLocal: number };
+    meals?: { entriesFixed: number; itemsRemoved: number };
+    errors: string[];
+  } | null>(null);
 
   // Charger le status des caches au montage
   useEffect(() => {
@@ -71,6 +82,69 @@ export default function VersionScreen() {
               console.error('[Version] Cache cleanup failed:', error);
               Alert.alert('Erreur', 'Impossible de nettoyer le cache. Essaie de vider le cache de ton navigateur manuellement.');
               setIsCleaning(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRepairSync = async () => {
+    if (!user || !profile) {
+      Alert.alert('Erreur', 'Tu dois être connecté pour utiliser la réparation de synchronisation.');
+      return;
+    }
+
+    const currentUserId = profile.userId || (user as any)?.uid || (user as any)?.id;
+    if (!currentUserId || currentUserId === 'guest') {
+      Alert.alert('Erreur', 'Utilisateur invalide.');
+      return;
+    }
+
+    Alert.alert(
+      '🔧 Réparation de Synchronisation',
+      'Cette action va :\n\n' +
+      '1. Recalculer les points à partir des repas\n' +
+      '2. Synchroniser les custom foods manquants\n' +
+      '3. Réparer les repas avec items invalides\n\n' +
+      'Cela peut prendre quelques secondes...',
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel',
+        },
+        {
+          text: 'Réparer',
+          onPress: async () => {
+            setIsRepairing(true);
+            setRepairResult(null);
+            try {
+              const dailyPointsBudget = profile.dailyPointsBudget || 6;
+              const maxPointsCap = profile.maxPointsCap || 12;
+              
+              const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
+              setRepairResult(result);
+              
+              if (result.success) {
+                Alert.alert(
+                  '✅ Réparation terminée',
+                  `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
+                  `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
+                  `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`,
+                  [{ text: 'OK' }]
+                );
+              } else {
+                Alert.alert(
+                  '⚠️ Réparation partielle',
+                  `Certaines erreurs sont survenues:\n\n${result.errors.slice(0, 3).join('\n')}${result.errors.length > 3 ? '\n...' : ''}`,
+                  [{ text: 'OK' }]
+                );
+              }
+            } catch (error: any) {
+              console.error('[Version] Repair failed:', error);
+              Alert.alert('Erreur', `Impossible de réparer: ${error?.message || error}`);
+            } finally {
+              setIsRepairing(false);
             }
           },
         },
@@ -197,6 +271,40 @@ export default function VersionScreen() {
     loader: {
       marginVertical: 20,
     },
+    repairResult: {
+      backgroundColor: isDark ? '#1e3a2e' : '#d1fae5',
+      borderRadius: 8,
+      padding: 12,
+      marginBottom: 12,
+    },
+    repairResultTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: isDark ? '#10b981' : '#065f46',
+      marginBottom: 8,
+    },
+    repairResultText: {
+      fontSize: 12,
+      color: isDark ? '#a7f3d0' : '#047857',
+      marginBottom: 4,
+    },
+    errorBox: {
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: isDark ? '#7f1d1d' : '#fee2e2',
+    },
+    errorTitle: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: isDark ? '#fca5a5' : '#991b1b',
+      marginBottom: 4,
+    },
+    errorText: {
+      fontSize: 11,
+      color: isDark ? '#fca5a5' : '#991b1b',
+      marginBottom: 2,
+    },
   });
 
   return (
@@ -309,6 +417,61 @@ export default function VersionScreen() {
               Des caches web persistants ont été détectés. Ils peuvent empêcher l'affichage
               de la dernière version de l'app. Utilise le bouton ci-dessous pour les nettoyer.
             </Text>
+          </View>
+        )}
+
+        {/* Sync Repair Section */}
+        {user && profile && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🔧 Réparation de Synchronisation</Text>
+            <Text style={styles.warningText}>
+              Si tu as des incohérences entre ton PC et ton téléphone (points différents, aliments manquants),
+              utilise ce bouton pour réparer automatiquement.
+            </Text>
+            
+            {repairResult && (
+              <View style={styles.repairResult}>
+                <Text style={styles.repairResultTitle}>
+                  {repairResult.success ? '✅ Réparation réussie' : '⚠️ Réparation partielle'}
+                </Text>
+                {repairResult.points && (
+                  <Text style={styles.repairResultText}>
+                    Points: {repairResult.points.oldBalance} → {repairResult.points.newBalance} pts
+                    {repairResult.points.totalSpent > 0 && ` (${repairResult.points.totalSpent} dépensés)`}
+                  </Text>
+                )}
+                {repairResult.customFoods && (
+                  <Text style={styles.repairResultText}>
+                    Custom foods: {repairResult.customFoods.localToFirestore} envoyés, {repairResult.customFoods.firestoreToLocal} reçus
+                  </Text>
+                )}
+                {repairResult.meals && (
+                  <Text style={styles.repairResultText}>
+                    Repas: {repairResult.meals.entriesFixed} corrigés, {repairResult.meals.itemsRemoved} items retirés
+                  </Text>
+                )}
+                {repairResult.errors.length > 0 && (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorTitle}>Erreurs:</Text>
+                    {repairResult.errors.slice(0, 5).map((error, idx) => (
+                      <Text key={idx} style={styles.errorText}>• {error}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, isRepairing && styles.buttonDisabled]}
+              onPress={handleRepairSync}
+              disabled={isRepairing}
+            >
+              {isRepairing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>🔧 Réparer la synchronisation</Text>
+              )}
+            </TouchableOpacity>
           </View>
         )}
 

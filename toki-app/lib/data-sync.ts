@@ -8,6 +8,8 @@ import { MealEntry } from './stats';
 import { UserProfile } from './types';
 import { WeightEntry } from './weight';
 import { NutritionTargets } from './nutrition';
+import { computeFoodPoints } from './points-utils';
+import { FoodItem } from './food-db';
 
 const SYNC_FLAG_KEY = 'toki_last_sync_timestamp';
 
@@ -348,7 +350,8 @@ export async function syncFromFirestore(userId: string): Promise<{
       console.log('[Sync] ℹ️ Aucun repas à fusionner');
     }
 
-    // 2. Synchroniser points - fusionner intelligemment (prendre la plus petite balance du même jour)
+    // 2. Synchroniser points - recalculer à partir des repas pour éviter les duplications
+    // Au lieu de simplement fusionner les balances, on recalcule les points à partir des repas synchronisés
     const pointsKey = `feedtoki_points_${userId}_v2`;
     const localPointsRaw = await AsyncStorage.getItem(pointsKey);
     const localPointsData = localPointsRaw ? JSON.parse(localPointsRaw) : null;
@@ -357,12 +360,18 @@ export async function syncFromFirestore(userId: string): Promise<{
     const pointsRef = doc(db, 'users', userId, 'points', 'current');
     const pointsSnap = await getDoc(pointsRef);
     
+    const today = new Date().toISOString().slice(0, 10);
+    
+    // IMPORTANT: Au lieu de fusionner les balances, on va recalculer les points
+    // à partir des repas synchronisés. Cela évite les duplications.
+    // Le recalcul complet sera fait dans index.tsx après la synchronisation.
+    // Ici, on fait juste une fusion basique pour éviter de perdre des données.
+    
     if (pointsSnap.exists()) {
       const firestorePointsData = pointsSnap.data();
       console.log('[Sync] Points Firestore:', firestorePointsData);
-      const today = new Date().toISOString().slice(0, 10);
       
-      // Déterminer quelle balance utiliser
+      // Déterminer quelle balance utiliser (fusion basique)
       let finalBalance: number;
       let finalLastClaimDate: string;
       
@@ -378,6 +387,7 @@ export async function syncFromFirestore(userId: string): Promise<{
         finalBalance = Math.max(localPointsData.balance || 0, firestorePointsData.balance || 0);
         finalLastClaimDate = today;
         console.log('[Sync] Points fusion (même jour): local=', localPointsData.balance, 'firestore=', firestorePointsData.balance, '-> final=', finalBalance);
+        console.log('[Sync] ⚠️ Note: Les points seront recalculés à partir des repas après la sync pour éviter les duplications');
       } else if (localPointsData.lastClaimDate === today) {
         // Local est plus récent (a réclamé les points aujourd'hui)
         finalBalance = localPointsData.balance;
@@ -407,7 +417,7 @@ export async function syncFromFirestore(userId: string): Promise<{
         balance: finalBalance,
         lastClaimDate: finalLastClaimDate,
       }));
-      console.log('[Sync] ✅ Points fusionnés et sauvegardés localement:', finalBalance);
+      console.log('[Sync] ✅ Points fusionnés et sauvegardés localement (sera recalculé après):', finalBalance);
 
       const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
       const totalPointsSnap = await getDoc(totalPointsRef);
@@ -484,6 +494,54 @@ export async function syncFromFirestore(userId: string): Promise<{
     console.error('[Sync] Erreur restore:', error);
     return result;
   }
+}
+
+/**
+ * Valider et corriger les entrées de repas pour s'assurer que tous les foodId existent
+ * @param entries Les entrées de repas à valider
+ * @param allFoods Tous les aliments disponibles (DB + custom foods)
+ * @returns Les entrées validées (avec les items invalides retirés)
+ */
+export function validateAndFixMealEntries(
+  entries: MealEntry[],
+  allFoods: { id: string; name: string }[]
+): MealEntry[] {
+  const foodIdsSet = new Set(allFoods.map(f => f.id));
+  let totalInvalidItems = 0;
+  let totalFixedEntries = 0;
+
+  const validatedEntries = entries.map(entry => {
+    if (!entry.items || entry.items.length === 0) {
+      return entry; // Pas d'items à valider
+    }
+
+    // Filtrer les items avec des foodId valides
+    const validItems = entry.items.filter(itemRef => {
+      const foodExists = foodIdsSet.has(itemRef.foodId);
+      if (!foodExists) {
+        totalInvalidItems++;
+        console.warn(`[Sync Validation] ⚠️ FoodId introuvable dans l'entrée "${entry.label || entry.id}": ${itemRef.foodId}`);
+      }
+      return foodExists;
+    });
+
+    // Si des items ont été retirés, c'est une entrée corrigée
+    if (validItems.length !== entry.items.length) {
+      totalFixedEntries++;
+      console.warn(`[Sync Validation] ⚠️ Entrée "${entry.label || entry.id}": ${entry.items.length - validItems.length} item(s) invalide(s) retiré(s)`);
+    }
+
+    return {
+      ...entry,
+      items: validItems,
+    };
+  });
+
+  if (totalInvalidItems > 0 || totalFixedEntries > 0) {
+    console.log(`[Sync Validation] ✅ Validation terminée: ${totalFixedEntries} entrée(s) corrigée(s), ${totalInvalidItems} item(s) invalide(s) retiré(s)`);
+  }
+
+  return validatedEntries;
 }
 
 

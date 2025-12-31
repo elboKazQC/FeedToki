@@ -250,37 +250,52 @@ export default function App() {
     
     const load = async () => {
       try {
-        // IMPORTANT: Synchroniser d'abord depuis Firestore (fusion) pour avoir les données les plus récentes
+        // IMPORTANT: Ordre de chargement optimisé pour la synchronisation
+        // 1. Synchroniser depuis Firestore (repas, points) ET charger les custom foods EN PARALLÈLE
+        // 2. Attendre que les deux soient complétés
+        // 3. Charger les entrées depuis AsyncStorage (qui contient maintenant les données fusionnées)
+        // 4. Valider que tous les foodId dans les items existent
+        
         console.log('[Index] 🔄 Démarrage synchronisation complète depuis Firestore...');
         console.log('[Index] UserId:', currentUserId);
         console.log('[Index] Auth user:', authUser);
         console.log('[Index] Auth profile:', authProfile);
         
+        // Étape 1: Synchroniser depuis Firestore ET charger les custom foods EN PARALLÈLE
+        // Cela améliore les performances en faisant les deux opérations simultanément
+        let syncResult;
         try {
           const { syncFromFirestore } = await import('../../lib/data-sync');
-          const syncResult = await syncFromFirestore(currentUserId);
+          
+          // Exécuter en parallèle pour améliorer les performances
+          const [syncResultValue, _] = await Promise.all([
+            syncFromFirestore(currentUserId),
+            loadCustomFoodsData(), // Charger les custom foods en parallèle
+          ]);
+          
+          syncResult = syncResultValue;
           console.log('[Index] ✅ Sync depuis Firestore terminée:', {
             mealsMerged: syncResult.mealsMerged,
             pointsRestored: syncResult.pointsRestored,
             targetsRestored: syncResult.targetsRestored,
             weightsMerged: syncResult.weightsMerged,
           });
-          
-          // FORCER le rechargement des entrées après la sync
-          if (syncResult.mealsMerged > 0) {
-            console.log('[Index] 🔄 Rechargement forcé des entrées après sync...');
-          }
-          
-          // FORCER le rechargement des custom foods après la sync pour avoir les nouveaux items partagés
-          console.log('[Index] 🔄 Rechargement des custom foods après sync...');
-          await loadCustomFoodsData();
-          console.log('[Index] ✅ Custom foods rechargés');
+          console.log('[Index] ✅ Custom foods chargés en parallèle, prêt pour validation des repas');
         } catch (syncError) {
           console.error('[Index] ❌ Erreur sync Firestore:', syncError);
           console.warn('[Index] ⚠️ Erreur sync Firestore, utilisation locale:', syncError);
+          syncResult = { mealsMerged: 0, pointsRestored: false, targetsRestored: false, weightsMerged: 0 };
+          
+          // En cas d'erreur, charger quand même les custom foods
+          try {
+            await loadCustomFoodsData();
+            console.log('[Index] ✅ Custom foods chargés (après erreur sync)');
+          } catch (customFoodsError) {
+            console.error('[Index] ❌ Erreur chargement custom foods:', customFoodsError);
+          }
         }
         
-        // Après synchronisation, charger depuis AsyncStorage (qui contient maintenant les données fusionnées)
+        // Étape 3: Charger les entrées depuis AsyncStorage (qui contient maintenant les données fusionnées)
         const key = getEntriesKey();
         console.log('[Index] 📥 Chargement des entrées depuis AsyncStorage (clé:', key, ')');
         const json = await AsyncStorage.getItem(key);
@@ -307,8 +322,106 @@ export default function App() {
                 };
                 return entry;
               });
-              setEntries(normalized);
-              console.log('[Index] ✅ Entrées normalisées et chargées dans le state:', normalized.length);
+              
+              // Étape 4: Valider que tous les foodId dans les items existent
+              // Charger les custom foods directement pour la validation (pas le state qui peut être asynchrone)
+              const currentCustomFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+              const allFoods = mergeFoodsWithCustom(FOOD_DB, currentCustomFoods);
+              
+              // Utiliser la fonction de validation dédiée
+              const { validateAndFixMealEntries } = await import('../../lib/data-sync');
+              const validatedEntries = validateAndFixMealEntries(normalized, allFoods);
+              
+              setEntries(validatedEntries);
+              console.log('[Index] ✅ Entrées normalisées, validées et chargées dans le state:', validatedEntries.length);
+              
+              // Étape 5: Recalculer les points après synchronisation pour éviter les duplications
+              // Attendre un peu pour s'assurer que le state est mis à jour
+              setTimeout(async () => {
+                if (userProfile && currentUserId !== 'guest') {
+                  console.log('[Index] 🔄 Recalcul des points après synchronisation...');
+                  try {
+                    const today = getTodayLocal();
+                    const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
+                    const maxCapFromProfile = userProfile.maxPointsCap || MAX_POINTS;
+                    
+                    // Charger les custom foods pour calculer les coûts
+                    const customFoodsForCalc = await loadCustomFoods(currentUserId);
+                    const allFoodsForCalc = mergeFoodsWithCustom(FOOD_DB, customFoodsForCalc);
+                    
+                    // Filtrer les entrées d'aujourd'hui
+                    const todayEntries = validatedEntries.filter(e => normalizeDate(e.createdAt) === today);
+                    let totalSpentToday = 0;
+                    
+                    for (const entry of todayEntries) {
+                      if (entry.items && entry.items.length > 0) {
+                        const entryCost = entry.items.reduce((sum, itemRef) => {
+                          const fi = allFoodsForCalc.find(f => f.id === itemRef.foodId);
+                          if (!fi) {
+                            console.warn('[Index] ⚠️ Aliment non trouvé pour recalcul points:', itemRef.foodId);
+                            return sum;
+                          }
+                          const multiplier = itemRef.multiplier || 1.0;
+                          const baseCost = computeFoodPoints(fi);
+                          const cost = Math.round(baseCost * Math.sqrt(multiplier));
+                          return sum + cost;
+                        }, 0);
+                        totalSpentToday += entryCost;
+                      }
+                    }
+                    
+                    // Charger les points actuels
+                    const pointsKey = getPointsKey();
+                    const pointsRaw = await AsyncStorage.getItem(pointsKey);
+                    if (pointsRaw) {
+                      const pointsData = JSON.parse(pointsRaw);
+                      const lastClaimDate = pointsData.lastClaimDate || '';
+                      
+                      // Ne recalculer que si c'est aujourd'hui
+                      if (lastClaimDate === today) {
+                        let startOfDayBalance = pointsData.startOfDayBalance;
+                        const currentBalance = pointsData.balance ?? 0;
+                        
+                        // Si startOfDayBalance n'existe pas, l'estimer
+                        if (startOfDayBalance === undefined) {
+                          startOfDayBalance = Math.min(maxCapFromProfile, currentBalance + totalSpentToday);
+                        }
+                        
+                        // Calculer le solde attendu
+                        const expectedBalance = Math.max(0, startOfDayBalance - totalSpentToday);
+                        
+                        if (expectedBalance !== currentBalance) {
+                          console.log('[Index] ✅ Correction des points après sync:', {
+                            startOfDayBalance,
+                            totalSpent: totalSpentToday,
+                            expectedBalance,
+                            currentBalance,
+                          });
+                          
+                          await AsyncStorage.setItem(pointsKey, JSON.stringify({
+                            ...pointsData,
+                            balance: expectedBalance,
+                            startOfDayBalance,
+                          }));
+                          setPoints(expectedBalance);
+                          
+                          // Synchroniser vers Firestore
+                          const totalPointsKey = getTotalPointsKey();
+                          const totalRaw = await AsyncStorage.getItem(totalPointsKey);
+                          const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
+                          const { syncPointsToFirestore } = await import('../../lib/data-sync');
+                          await syncPointsToFirestore(currentUserId, expectedBalance, today, totalPointsVal);
+                          console.log('[Index] ✅ Points recalculés et synchronisés');
+                        } else {
+                          console.log('[Index] ✅ Points déjà corrects après sync');
+                        }
+                      }
+                    }
+                  } catch (recalcError) {
+                    console.error('[Index] ❌ Erreur recalcul points après sync:', recalcError);
+                  }
+                }
+              }, 500); // Petit délai pour laisser le state se mettre à jour
             } else {
               console.warn('[Index] ⚠️ Données non-array, initialisation vide');
               setEntries([]);
@@ -707,6 +820,42 @@ export default function App() {
 
     runMigration();
   }, [currentUserId, isReady]); // Se déclenche une fois au démarrage quand userId est disponible
+
+  // Détection automatique et synchronisation des custom foods manquants au démarrage
+  useEffect(() => {
+    if (!currentUserId || currentUserId === 'guest' || !isReady) {
+      return;
+    }
+
+    const syncMissingFoods = async () => {
+      try {
+        console.log('[Index] 🔍 Vérification des custom foods manquants...');
+        const { syncMissingCustomFoods } = await import('../../lib/sync-repair');
+        const result = await syncMissingCustomFoods(currentUserId);
+        
+        if (result.localToFirestore > 0 || result.firestoreToLocal > 0) {
+          console.log(`[Index] ✅ Synchronisation custom foods: ${result.localToFirestore} envoyés, ${result.firestoreToLocal} reçus`);
+          // Recharger les custom foods après synchronisation
+          await loadCustomFoodsData();
+        } else {
+          console.log('[Index] ✅ Tous les custom foods sont synchronisés');
+        }
+        
+        if (result.errors.length > 0) {
+          console.warn(`[Index] ⚠️ Erreurs lors de la sync custom foods:`, result.errors);
+        }
+      } catch (error) {
+        console.error('[Index] ❌ Erreur sync custom foods:', error);
+      }
+    };
+
+    // Attendre un peu après le chargement initial pour ne pas surcharger
+    const timeout = setTimeout(() => {
+      syncMissingFoods();
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [currentUserId, isReady]);
 
   // Vérification et correction automatique des points au chargement initial seulement
   // (Désactivé pour éviter les race conditions - la déduction se fait directement dans handleAddEntry)
@@ -1586,13 +1735,113 @@ function HomeScreen({
             </TouchableOpacity>
 
             <TouchableOpacity 
-              style={[styles.settingsOption, styles.settingsOptionLast]}
+              style={styles.settingsOption}
               onPress={() => setShowSettingsModal(false)}
             >
               <Text style={styles.settingsOptionIcon}>ℹ️</Text>
               <View style={styles.settingsOptionContent}>
                 <Text style={styles.settingsOptionTitle}>À propos</Text>
                 <Text style={styles.settingsOptionDesc}>Version {getFormattedAppVersion()} - Toki</Text>
+              </View>
+            </TouchableOpacity>
+            
+            {/* Bouton Réparation Synchronisation */}
+            <TouchableOpacity
+              style={[styles.settingsOption, styles.settingsOptionLast]}
+              onPress={async () => {
+                setShowSettingsModal(false);
+                if (!userProfile || !currentUserId || currentUserId === 'guest') {
+                  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                    window.alert('Tu dois être connecté pour utiliser la réparation de synchronisation.');
+                  } else {
+                    Alert.alert('Erreur', 'Tu dois être connecté pour utiliser la réparation de synchronisation.');
+                  }
+                  return;
+                }
+                
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  const confirmed = window.confirm(
+                    '🔧 Réparation de Synchronisation\n\n' +
+                    'Cette action va :\n' +
+                    '1. Recalculer les points à partir des repas\n' +
+                    '2. Synchroniser les custom foods manquants\n' +
+                    '3. Réparer les repas avec items invalides\n\n' +
+                    'Cela peut prendre quelques secondes...'
+                  );
+                  if (!confirmed) return;
+                  
+                  // Pour web, exécuter directement
+                  try {
+                    const { fullRepair } = await import('../../lib/sync-repair');
+                    const dailyPointsBudget = userProfile.dailyPointsBudget || 6;
+                    const maxPointsCap = userProfile.maxPointsCap || 12;
+                    
+                    const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
+                    
+                    if (result.success) {
+                      window.alert(
+                        '✅ Réparation terminée\n\n' +
+                        `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
+                        `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
+                        `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`
+                      );
+                      // Recharger la page pour voir les changements
+                      window.location.reload();
+                    } else {
+                      window.alert(
+                        '⚠️ Réparation partielle\n\n' +
+                        `Certaines erreurs sont survenues:\n\n${result.errors.slice(0, 3).join('\n')}${result.errors.length > 3 ? '\n...' : ''}`
+                      );
+                    }
+                  } catch (error: any) {
+                    window.alert(`Erreur: Impossible de réparer: ${error?.message || error}`);
+                  }
+                } else {
+                  Alert.alert(
+                    '🔧 Réparation de Synchronisation',
+                    'Cette action va :\n\n' +
+                    '1. Recalculer les points à partir des repas\n' +
+                    '2. Synchroniser les custom foods manquants\n' +
+                    '3. Réparer les repas avec items invalides\n\n' +
+                    'Cela peut prendre quelques secondes...',
+                    [
+                      { text: 'Annuler', style: 'cancel' },
+                      { text: 'Réparer', onPress: async () => {
+                        try {
+                          const { fullRepair } = await import('../../lib/sync-repair');
+                          const dailyPointsBudget = userProfile.dailyPointsBudget || 6;
+                          const maxPointsCap = userProfile.maxPointsCap || 12;
+                          
+                          const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
+                          
+                          if (result.success) {
+                            Alert.alert(
+                              '✅ Réparation terminée',
+                              `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
+                              `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
+                              `Repas: ${result.meals.entriesFixed} corrigés, ${result.meals.itemsRemoved} items retirés`
+                            );
+                            // Recharger les données
+                            window.location?.reload();
+                          } else {
+                            Alert.alert(
+                              '⚠️ Réparation partielle',
+                              `Certaines erreurs sont survenues:\n\n${result.errors.slice(0, 3).join('\n')}${result.errors.length > 3 ? '\n...' : ''}`
+                            );
+                          }
+                        } catch (error: any) {
+                          Alert.alert('Erreur', `Impossible de réparer: ${error?.message || error}`);
+                        }
+                      }}
+                    ]
+                  );
+                }
+              }}
+            >
+              <Text style={styles.settingsOptionIcon}>🔧</Text>
+              <View style={styles.settingsOptionContent}>
+                <Text style={styles.settingsOptionTitle}>Réparer la synchronisation</Text>
+                <Text style={styles.settingsOptionDesc}>Corriger les incohérences entre appareils</Text>
               </View>
             </TouchableOpacity>
           </View>
