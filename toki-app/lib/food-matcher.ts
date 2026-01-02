@@ -29,6 +29,13 @@ function similarityScore(str1: string, str2: string): number {
   
   if (n1 === n2) return 0.95;
   
+  // Liste de mots-outils à ignorer complètement dans le matching
+  const stopWords = ['a', 'au', 'aux', 'de', 'du', 'des', 'la', 'le', 'les', 'un', 'une', 'et', 'ou', 'avec', 'pour', 'en'];
+  
+  // Extraire mots significatifs (> 2 lettres ET pas dans stopWords)
+  const extractWords = (s: string) => 
+    s.split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+  
   // Contient l'un ou l'autre (mais seulement si significatif)
   // IMPORTANT: Ne pas matcher si un terme est beaucoup plus court que l'autre
   // (ex: "beurre de peanut" ne doit PAS matcher avec "toast au beurre de peanut")
@@ -39,8 +46,8 @@ function similarityScore(str1: string, str2: string): number {
     
     if (n1.includes(n2) || n2.includes(n1)) {
       // Pénaliser si l'un contient l'autre mais avec des mots supplémentaires significatifs
-      const words1 = n1.split(/\s+/).filter(w => w.length > 2);
-      const words2 = n2.split(/\s+/).filter(w => w.length > 2);
+      const words1 = extractWords(n1);
+      const words2 = extractWords(n2);
       const diff = Math.abs(words1.length - words2.length);
       // Si différence de 2+ mots, réduire le score
       if (diff >= 2) return 0.6;
@@ -48,17 +55,32 @@ function similarityScore(str1: string, str2: string): number {
     }
   }
   
-  // Mots communs (mais au moins 2 mots doivent matcher pour éviter faux positifs)
-  const words1 = n1.split(/\s+/).filter(w => w.length > 2); // Ignorer mots courts
-  const words2 = n2.split(/\s+/).filter(w => w.length > 2);
+  // Mots significatifs communs (au moins 2 mots doivent matcher pour éviter faux positifs)
+  const words1 = extractWords(n1);
+  const words2 = extractWords(n2);
   const commonWords = words1.filter(w => words2.includes(w));
+  const missingWords = words1.filter(w => !words2.includes(w));
+  
+  // Si des mots importants manquent dans une requête courte, c'est probablement pas un match
+  // Ex: "viande fondu" a "fondu" qui manque dans "macaroni viande" → pas un match
+  if (missingWords.length > 0 && words1.length <= 3) {
+    // Requête courte avec mots manquants = probablement pas un match
+    // Exception: si tous les mots de la requête sont présents, accepter
+    if (commonWords.length < words1.length) {
+      return 0;
+    }
+  }
   
   if (commonWords.length >= 2) {
-    // Au moins 2 mots en commun, mais pénaliser si le nombre total de mots diffère beaucoup
+    // Au moins 2 mots en commun
+    const coverageScore = commonWords.length / words1.length; // % de couverture de la requête
     const totalWordsDiff = Math.abs(words1.length - words2.length);
-    let score = 0.6 + (commonWords.length / Math.max(words1.length, words2.length)) * 0.3;
-    // Réduire le score si différence de 2+ mots
+    
+    let score = 0.5 + coverageScore * 0.4;
+    
+    // Pénaliser si différence de taille importante
     if (totalWordsDiff >= 2) score *= 0.7;
+    
     return score;
   } else if (commonWords.length === 1 && words1.length <= 2 && words2.length <= 2) {
     // Un seul mot en commun mais les deux sont courts (ex: "poulet" vs "poulet grillé")

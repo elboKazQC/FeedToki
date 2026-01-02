@@ -272,18 +272,25 @@ ALIMENTS COMESTIBLES UNIQUEMENT - RÈGLE CRITIQUE:
 - Si l'utilisateur mélange aliments comestibles et objets non comestibles, retourne UNIQUEMENT les aliments comestibles (ex: "j'ai mangé 2 bières, un pneu, et une pizza" → retourne seulement bières et pizza)
 
 SYSTÈME DE POINTS (très important pour classification):
-- Protéines maigres (0 points): poulet, dinde, poisson, saumon, oeufs, tofu, boeuf, steak, viande rouge maigre, steak haché, hamburger (la viande seule), bâtonnets de viande
-- Légumes et fruits (0 points): tous les légumes, salade, brocoli, carottes, tomates, pommes, bananes, baies, etc.
+- Protéines maigres (0 points): 
+  * Volailles: poulet, dinde, canard maigre
+  * Poissons: poisson, saumon, thon, tilapia, truite
+  * Viandes rouges maigres: boeuf maigre, steak, filet mignon, viande rouge maigre, steak haché maigre, viande hachée maigre, boeuf haché maigre
+  * Viandes pour fondue: viande à fondue, viande fondu, viande pour fondue chinoise, boeuf en lanières, boeuf en cubes
+  * Autres: oeufs, tofu, tempeh, bâtonnets de viande
+  * NOTE: La viande seule (sans sauce ni friture) = TOUJOURS 0 points
+- Légumes et fruits (0 points): tous les légumes, salade, brocoli, carottes, tomates, pommes, bananes, baies, légumes congelés, etc.
 - Féculents simples (coûtent des points): riz, pâtes, patates, pain, quinoa (environ 1-2 points par portion)
-- Ultra-transformés (coûtent plus): pizza, frites, chips, saucisses industrielles, plats préparés
+- Ultra-transformés (coûtent plus): pizza, frites, chips, saucisses industrielles, plats préparés, macaroni préparé
 - Aliments frits ou gras (coûtent plus): frites, aliments panés/frits
 - Sucreries (coûtent plus): desserts, bonbons, gâteaux, boissons sucrées
 
 RÈGLES DE CLASSIFICATION:
-1. Le steak, boeuf, steak haché, viande hachée = PROTEINE_MAIGRE (0 points)
+1. Toute viande maigre sans sauce = PROTEINE_MAIGRE (0 points) - inclut steak, boeuf, viande hachée maigre, viande à fondue, boeuf en lanières
 2. Tous les légumes et fruits = LEGUME (0 points)
 3. Riz, pâtes, patates = FECULENT_SIMPLE (coûtent des points)
-4. Aliments transformés/frits = ULTRA_TRANSFORME ou GRAS_FRIT (coûtent plus)
+4. Plats préparés/transformés (ex: macaroni à la viande) = ULTRA_TRANSFORME (coûtent plus)
+5. Aliments frits = GRAS_FRIT (coûtent plus)
 
 Retourne UNIQUEMENT un JSON valide avec cette structure:
 {

@@ -339,6 +339,21 @@ export default function AILoggerScreen() {
                 const searchWords = parsedItem.name.toLowerCase().split(/\s+/).length;
                 if (matchWords <= searchWords + 1) {
                   match = strictMatch;
+                  
+                  // ✅ VALIDATION: Vérifier cohérence entre catégorie OpenAI et tags du match
+                  if (parsedItem.category === 'PROTEINE_MAIGRE' && match.tags.includes('ultra_transforme')) {
+                    console.warn(
+                      `[AI Logger] ⚠️ Incohérence détectée: OpenAI dit PROTEINE_MAIGRE mais match trouvé est ultra_transforme`,
+                      { 
+                        searched: parsedItem.name, 
+                        matched: match.name,
+                        matchTags: match.tags,
+                        aiCategory: parsedItem.category 
+                      }
+                    );
+                    // Rejeter ce match, créer une estimation à la place
+                    match = null;
+                  }
                 }
               }
             } else {
