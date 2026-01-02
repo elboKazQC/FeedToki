@@ -2,8 +2,8 @@ import { View, Text, ScrollView, Pressable, TextInput, StyleSheet } from 'react-
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WeightGoal, ActivityLevel } from '../lib/types';
-import { computeUserProfile, getGoalDescription, getDailyCalorieTarget } from '../lib/points-calculator';
+import { WeightGoal, ActivityLevel, Gender } from '../lib/types';
+import { computeUserProfile, getGoalDescription, getDailyCalorieTarget, convertFeetInchesToCm } from '../lib/points-calculator';
 import { getCurrentLocalUser, updateLocalUserProfile } from '../lib/local-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 
@@ -22,6 +22,10 @@ export default function OnboardingScreen() {
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>('moderate');
   const [userId, setUserId] = useState<string | null>(null);
   const [weightError, setWeightError] = useState<string>('');
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [heightFeet, setHeightFeet] = useState('');
+  const [heightInches, setHeightInches] = useState('');
+  const [heightError, setHeightError] = useState<string>('');
 
   useEffect(() => {
     const loadUser = async () => {
@@ -65,11 +69,53 @@ export default function OnboardingScreen() {
     }
     console.log('[Onboarding] weightInKg:', weightInKg);
     
+    // Validation de la taille si fournie
+    let heightInCm: number | undefined;
+    if (heightFeet || heightInches) {
+      const feet = parseInt(heightFeet, 10) || 0;
+      const inches = parseInt(heightInches, 10) || 0;
+      
+      // Validation: au moins un champ rempli et valeurs raisonnables
+      if (feet === 0 && inches === 0) {
+        // Les deux sont vides, c'est OK (optionnel)
+        heightInCm = undefined;
+      } else {
+        // Validation: pieds entre 3 et 8, pouces entre 0 et 11
+        if (feet < 3 || feet > 8) {
+          setHeightError('Les pieds doivent être entre 3 et 8');
+          return;
+        }
+        if (inches < 0 || inches > 11) {
+          setHeightError('Les pouces doivent être entre 0 et 11');
+          return;
+        }
+        
+        // Validation: taille totale raisonnable (minimum 4 pieds, maximum 7'6")
+        const totalInches = feet * 12 + inches;
+        if (totalInches < 48) { // 4 pieds
+          setHeightError('La taille totale doit être d\'au moins 4 pieds');
+          return;
+        }
+        if (totalInches > 90) { // 7'6"
+          setHeightError('La taille totale doit être d\'au plus 7 pieds 6 pouces');
+          return;
+        }
+        
+        // Convertir en cm
+        heightInCm = convertFeetInchesToCm(feet, inches);
+        setHeightError(''); // Clear error si validation OK
+      }
+    }
+    console.log('[Onboarding] heightInCm:', heightInCm);
+    console.log('[Onboarding] gender:', gender);
+    
     // Compute full profile
     const profile = computeUserProfile(
       goal,
       weightInKg,
-      activityLevel
+      activityLevel,
+      gender || undefined,
+      heightInCm
     );
     console.log('[Onboarding] computed profile:', JSON.stringify(profile, null, 2));
 
@@ -81,8 +127,18 @@ export default function OnboardingScreen() {
     const fullProfile = { 
       ...profile, 
       userId: firebaseUserId || userId || undefined, 
-      onboardingCompleted: true 
+      onboardingCompleted: true,
     };
+    
+    // Ajouter les valeurs de taille en pieds/pouces pour l'affichage futur
+    if (heightFeet || heightInches) {
+      const feet = parseInt(heightFeet, 10) || 0;
+      const inches = parseInt(heightInches, 10) || 0;
+      if (feet > 0 || inches > 0) {
+        fullProfile.heightFeet = feet;
+        fullProfile.heightInches = inches;
+      }
+    }
     
     await AsyncStorage.setItem(profileKey, JSON.stringify(fullProfile));
     
@@ -287,6 +343,76 @@ export default function OnboardingScreen() {
           </View>
 
           <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Genre</Text>
+            
+            <Pressable
+              style={[styles.activityOption, gender === 'male' && styles.optionSelected]}
+              onPress={() => setGender('male')}
+            >
+              <Text style={styles.activityText}>👨 Garçon</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.activityOption, gender === 'female' && styles.optionSelected]}
+              onPress={() => setGender('female')}
+            >
+              <Text style={styles.activityText}>👩 Fille</Text>
+            </Pressable>
+            
+            <Text style={styles.inputHint}>
+              Optionnel - Aide à calculer tes besoins caloriques plus précisément
+            </Text>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Taille</Text>
+            
+            <View style={styles.heightInputRow}>
+              <View style={styles.heightInputContainer}>
+                <TextInput
+                  style={[styles.heightInput, heightError && styles.inputError]}
+                  placeholder="Pieds"
+                  keyboardType="number-pad"
+                  value={heightFeet}
+                  onChangeText={(text) => {
+                    const num = parseInt(text, 10);
+                    if (text === '' || (!isNaN(num) && num >= 0 && num <= 8)) {
+                      setHeightFeet(text);
+                      setHeightError('');
+                    }
+                  }}
+                />
+                <Text style={styles.heightUnitLabel}>pieds</Text>
+              </View>
+              
+              <View style={styles.heightInputContainer}>
+                <TextInput
+                  style={[styles.heightInput, heightError && styles.inputError]}
+                  placeholder="Pouces"
+                  keyboardType="number-pad"
+                  value={heightInches}
+                  onChangeText={(text) => {
+                    const num = parseInt(text, 10);
+                    if (text === '' || (!isNaN(num) && num >= 0 && num <= 11)) {
+                      setHeightInches(text);
+                      setHeightError('');
+                    }
+                  }}
+                />
+                <Text style={styles.heightUnitLabel}>pouces</Text>
+              </View>
+            </View>
+            
+            {heightError ? (
+              <Text style={styles.errorText}>{heightError}</Text>
+            ) : (
+              <Text style={styles.inputHint}>
+                Optionnel - Ex: 5&apos;10&quot; (5 pieds, 10 pouces)
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Niveau d&apos;activité</Text>
             
             <Pressable
@@ -332,10 +458,22 @@ export default function OnboardingScreen() {
     previewWeightKg = weightUnit === 'lbs' ? weightValue * 0.453592 : weightValue;
   }
   
+  // Convertir la taille en cm pour le preview
+  let previewHeightCm: number | undefined;
+  if (heightFeet || heightInches) {
+    const feet = parseInt(heightFeet, 10) || 0;
+    const inches = parseInt(heightInches, 10) || 0;
+    if (feet > 0 || inches > 0) {
+      previewHeightCm = convertFeetInchesToCm(feet, inches);
+    }
+  }
+  
   const previewProfile = computeUserProfile(
     goal,
     previewWeightKg,
-    activityLevel
+    activityLevel,
+    gender || undefined,
+    previewHeightCm
   );
 
   return (
@@ -375,6 +513,19 @@ export default function OnboardingScreen() {
             <Text style={styles.summaryLabel}>Cap maximum:</Text>
             <Text style={styles.summaryValue}>{previewProfile.maxPointsCap} pts</Text>
           </View>
+        </View>
+
+        <View style={styles.formulaBox}>
+          <Text style={styles.formulaTitle}>🧮 Comment on calcule tes besoins?</Text>
+          <Text style={styles.formulaText}>
+            On utilise la <Text style={styles.bold}>formule de Mifflin-St Jeor</Text>, reconnue scientifiquement comme l'une des plus précises pour calculer ton métabolisme de base (BMR).
+          </Text>
+          <Text style={styles.formulaText}>
+            Cette formule prend en compte ton <Text style={styles.bold}>poids</Text>, ta <Text style={styles.bold}>taille</Text>, ton <Text style={styles.bold}>genre</Text> et ton <Text style={styles.bold}>niveau d'activité</Text> pour déterminer exactement combien de calories ton corps brûle chaque jour.
+          </Text>
+          <Text style={styles.formulaText}>
+            Ensuite, on ajuste selon ton objectif (perte de poids, maintenance) pour te donner un budget calorique personnalisé, puis on convertit ça en <Text style={styles.bold}>points</Text> pour que ce soit simple à suivre!
+          </Text>
         </View>
 
         <View style={styles.explainBox}>
@@ -428,6 +579,26 @@ const styles = StyleSheet.create({
   bold: {
     fontWeight: '700',
     color: '#111827',
+  },
+  formulaBox: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  formulaTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#166534',
+    marginBottom: 12,
+  },
+  formulaText: {
+    fontSize: 14,
+    color: '#15803d',
+    marginBottom: 8,
+    lineHeight: 20,
   },
   explainBox: {
     backgroundColor: '#eff6ff',
@@ -608,5 +779,28 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontSize: 16,
     fontWeight: '600',
+  },
+  heightInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 4,
+  },
+  heightInputContainer: {
+    flex: 1,
+  },
+  heightInput: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    textAlign: 'center',
+  },
+  heightUnitLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

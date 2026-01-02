@@ -2,7 +2,7 @@
   "expo": {
     "name": "feedtoki-app",
     "slug": "feedtoki-app",
-    "version": "1.0.30",
+    "version": "1.0.78",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "feedtokiapp",
@@ -39,7 +39,10 @@
       "display": "standalone",
       "orientation": "portrait",
       "startUrl": "/",
-      "bundler": "metro"
+      "bundler": "metro",
+      "build": {
+        "html": "./web/index.html"
+      }
     },
     "plugins": [
       "expo-router",

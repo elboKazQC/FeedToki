@@ -256,6 +256,21 @@ export async function parseMealWithOpenAI(
             role: 'system',
             content: `Tu es un expert en nutrition et classification d'aliments. Analyse une description de repas et extrais les aliments avec leurs quantités ET leurs catégories nutritionnelles.
 
+EXTRACTION EXHAUSTIVE - RÈGLE CRITIQUE:
+- Tu DOIS extraire TOUS les aliments mentionnés dans la description, sans exception
+- Même si la description est longue et contient beaucoup d'aliments, tu dois tous les lister
+- Les boissons (bières, crème de menthe, etc.) sont aussi des aliments à extraire
+- Ne saute AUCUN aliment, même s'il est mentionné de manière implicite (ex: "un peu de fromage")
+- Si l'utilisateur mentionne "2 bières", "un verre de crème de menthe", "4 morceaux de pizza", etc., tu dois créer un item pour CHACUN
+
+ALIMENTS COMESTIBLES UNIQUEMENT - RÈGLE CRITIQUE:
+- Tu DOIS utiliser ton jugement pour ignorer complètement tous les éléments NON COMESTIBLES mentionnés
+- Si l'utilisateur mentionne des objets non comestibles (pneus, clous, vis, boulons, plastique, métal, cailloux, pierres, bois, verre, papier, tissu, produits chimiques, médicaments, poisons, etc.), ignore-les complètement
+- Ne retourne QUE des aliments et boissons comestibles
+- Si la description ne contient que des objets non comestibles, retourne un tableau vide: {"items": []}
+- Utilise ton jugement pour détecter les cas limites et les variantes (ex: "j'ai mangé un pneu" → {"items": []}, "j'ai mangé des clous" → {"items": []})
+- Si l'utilisateur mélange aliments comestibles et objets non comestibles, retourne UNIQUEMENT les aliments comestibles (ex: "j'ai mangé 2 bières, un pneu, et une pizza" → retourne seulement bières et pizza)
+
 SYSTÈME DE POINTS (très important pour classification):
 - Protéines maigres (0 points): poulet, dinde, poisson, saumon, oeufs, tofu, boeuf, steak, viande rouge maigre, steak haché, hamburger (la viande seule), bâtonnets de viande
 - Légumes et fruits (0 points): tous les légumes, salade, brocoli, carottes, tomates, pommes, bananes, baies, etc.
@@ -436,8 +451,11 @@ EXEMPLES:
   }
 
 Règles importantes:
-- Extrais TOUS les aliments mentionnés dans la description
-- Pour les quantités, utilise des unités standard: g, kg, ml, tasse, portion, pc, piece, tranche, sachet
+- Extrais TOUS les aliments COMESTIBLES mentionnés dans la description, SANS EXCEPTION
+- Ne limite pas le nombre d'items - si l'utilisateur mentionne 10 aliments, retourne 10 items
+- Les boissons alcoolisées et non-alcoolisées sont aussi des aliments à extraire
+- IGNORE complètement les objets non comestibles (pneus, clous, etc.)
+- Pour les quantités, utilise des unités standard: g, kg, ml, tasse, portion, pc, piece, tranche, sachet, verre, bouteille
 - Si aucune quantité n'est mentionnée, utilise "1 portion" et quantityNumber: 1
 - Pour les plats composés (ex: "steak et riz"), liste chaque composant séparément
 - CLASSIFIE CORRECTEMENT selon le système de points ci-dessus
@@ -449,7 +467,7 @@ Règles importantes:
           },
         ],
         temperature: 0.3, // Faible température pour plus de consistance
-        max_tokens: 500,
+        max_tokens: 3000, // Augmenté de 500 à 3000 pour robustesse (on s'en fiche du coût)
       }),
     });
 

@@ -3,6 +3,7 @@
  * Uses the centralized design token system for consistency
  */
 
+import { Platform } from 'react-native';
 import { lightTheme, darkTheme } from './design-tokens';
 
 const tintColorLight = '#0a7ea4';

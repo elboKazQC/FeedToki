@@ -10,6 +10,7 @@ import { WeightEntry } from './weight';
 import { NutritionTargets } from './nutrition';
 import { computeFoodPoints } from './points-utils';
 import { FoodItem } from './food-db';
+import { syncCheatDaysFromFirestore, getCheatDays, setCheatDay } from './cheat-days';
 
 const SYNC_FLAG_KEY = 'toki_last_sync_timestamp';
 
@@ -284,6 +285,14 @@ export async function syncAllToFirestore(userId: string): Promise<void> {
       await syncWeightsToFirestore(userId, weights, baseline);
     }
 
+    // 5. Sync cheat days
+    const cheatDays = await getCheatDays(userId);
+    for (const [date, isCheat] of Object.entries(cheatDays)) {
+      if (isCheat) {
+        await setCheatDay(userId, date, true);
+      }
+    }
+
     // Marquer la dernière sync
     await AsyncStorage.setItem(SYNC_FLAG_KEY, Date.now().toString());
   } catch (error) {
@@ -483,7 +492,10 @@ export async function syncFromFirestore(userId: string): Promise<{
       }
     }
 
-    // 4. Synchroniser weights - fusionner les deux sources
+    // 4. Synchroniser cheat days depuis Firestore
+    await syncCheatDaysFromFirestore(userId);
+
+    // 5. Synchroniser weights - fusionner les deux sources
     const weightsKey = `feedtoki_weights_${userId}_v1`;
     const localWeightsRaw = await AsyncStorage.getItem(weightsKey);
     const localWeights: WeightEntry[] = localWeightsRaw ? JSON.parse(localWeightsRaw) : [];

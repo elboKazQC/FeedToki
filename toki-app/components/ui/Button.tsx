@@ -178,6 +178,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 44, // Minimum touch target size
+    minWidth: 44, // Minimum touch target size
   },
   fullWidth: {
     width: '100%',

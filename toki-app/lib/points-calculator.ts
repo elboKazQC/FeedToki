@@ -1,6 +1,6 @@
 // Dynamic points calculation based on user's calorie goals
 
-import { UserProfile, GOAL_WEEKLY_CALORIES, ACTIVITY_MULTIPLIERS, WeightGoal, ActivityLevel } from './types';
+import { UserProfile, GOAL_WEEKLY_CALORIES, ACTIVITY_MULTIPLIERS, WeightGoal, ActivityLevel, Gender } from './types';
 
 // What % of weekly calories can be "indulgences" (higher calorie/point cost items)
 const INDULGENCE_RATIO = 0.30; // 30%
@@ -13,11 +13,64 @@ const AVG_CALORIES_PER_POINT = 100; // Augmenté de 80 à 100 pour réduire les 
 // Maximum cap regardless of goal (to prevent overeating)
 const ABSOLUTE_MAX_CAP = 12;
 
+// Activity factors for Mifflin-St Jeor TDEE calculation
+const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
+  sedentary: 1.2,
+  moderate: 1.55,
+  active: 1.725,
+};
+
+/**
+ * Convert feet and inches to centimeters
+ */
+export function convertFeetInchesToCm(feet: number, inches: number): number {
+  const totalInches = feet * 12 + inches;
+  return Math.round(totalInches * 2.54);
+}
+
+/**
+ * Convert centimeters to feet and inches
+ */
+export function convertCmToFeetInches(cm: number): { feet: number; inches: number } {
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  return { feet, inches };
+}
+
+/**
+ * Calculate BMR (Basal Metabolic Rate) using Mifflin-St Jeor equation
+ * More accurate than simple weight-based formula
+ */
+function calculateBMR(weightKg: number, heightCm: number, age: number, gender: Gender): number {
+  // Mifflin-St Jeor equation:
+  // Men: BMR = 10 × weight(kg) + 6.25 × height(cm) - 5 × age + 5
+  // Women: BMR = 10 × weight(kg) + 6.25 × height(cm) - 5 × age - 161
+  const baseBMR = 10 * weightKg + 6.25 * heightCm - 5 * age;
+  return gender === 'male' ? baseBMR + 5 : baseBMR - 161;
+}
+
 /**
  * Estimate TDEE (Total Daily Energy Expenditure) in kcal/day
- * Simple formula: body weight (kg) × activity multiplier
+ * 
+ * Uses Mifflin-St Jeor equation if gender and height are provided (more accurate),
+ * otherwise falls back to simple weight-based formula for compatibility.
  */
-export function estimateTDEE(weightKg: number, activityLevel: ActivityLevel): number {
+export function estimateTDEE(
+  weightKg: number,
+  activityLevel: ActivityLevel,
+  gender?: Gender,
+  heightCm?: number,
+  age: number = 30 // Default age for compatibility
+): number {
+  // If we have gender and height, use Mifflin-St Jeor (more accurate)
+  if (gender && heightCm) {
+    const bmr = calculateBMR(weightKg, heightCm, age, gender);
+    const activityFactor = ACTIVITY_FACTORS[activityLevel];
+    return Math.round(bmr * activityFactor);
+  }
+  
+  // Fallback to simple formula for compatibility with existing users
   const multiplier = ACTIVITY_MULTIPLIERS[activityLevel];
   return Math.round(weightKg * multiplier);
 }
@@ -68,13 +121,15 @@ export function calculateMaxCap(dailyPoints: number): number {
 export function computeUserProfile(
   weightGoal: WeightGoal,
   currentWeight?: number,
-  activityLevel: ActivityLevel = 'moderate'
+  activityLevel: ActivityLevel = 'moderate',
+  gender?: Gender,
+  heightCm?: number
 ): UserProfile {
   // If no weight provided, use average adult weight (75kg)
   const weight = currentWeight || 75;
   
-  // Calculate TDEE
-  const tdeeEstimate = estimateTDEE(weight, activityLevel);
+  // Calculate TDEE (uses Mifflin-St Jeor if gender and height provided)
+  const tdeeEstimate = estimateTDEE(weight, activityLevel, gender, heightCm);
   
   // Calculate weekly calorie target based on goal
   const weeklyCalorieTarget = calculateWeeklyTarget(weightGoal, tdeeEstimate);
@@ -85,7 +140,7 @@ export function computeUserProfile(
   // Calculate max cap
   const maxPointsCap = calculateMaxCap(dailyPointsBudget);
   
-  return {
+  const profile: UserProfile = {
     weightGoal,
     currentWeight: weight,
     activityLevel,
@@ -96,6 +151,16 @@ export function computeUserProfile(
     onboardingCompleted: true,
     createdAt: new Date().toISOString(),
   };
+  
+  // Add gender and height if provided
+  if (gender) {
+    profile.gender = gender;
+  }
+  if (heightCm) {
+    profile.heightCm = heightCm;
+  }
+  
+  return profile;
 }
 
 /**

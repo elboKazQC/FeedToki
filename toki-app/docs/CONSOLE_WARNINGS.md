@@ -16,9 +16,10 @@ Ce document analyse les warnings et erreurs qui apparaissent dans la console du 
 ```
 Animated: `useNativeDriver` is not supported because the native animated module is missing.
 ```
-**Statut**: Normal  
-**Explication**: Sur web, le module d'animation native n'est pas disponible, donc Expo utilise automatiquement les animations JavaScript.  
-**Action**: Aucune action requise.
+**Statut**: ✅ **CORRIGÉ**  
+**Explication**: Sur web, le module d'animation native n'est pas disponible.  
+**Correction appliquée**: Toutes les animations dans `lib/animations.ts` utilisent maintenant `useNativeDriver: Platform.OS !== 'web'` pour désactiver automatiquement le native driver sur web.  
+**Action**: Aucune action requise - le warning ne devrait plus apparaître.
 
 ### 3. Fonts MaterialIcons
 ```
@@ -72,17 +73,22 @@ OTS parsing error: invalid sfntVersion: 1008813135
 ```
 Uncaught (in promise) NetworkError: A network error occurred.
 ```
-**Statut**: ⚠️ **À surveiller**  
+**Statut**: ✅ **CORRIGÉ**  
 **Explication**: Une erreur réseau s'est produite, probablement lors d'un appel API.  
 **Cause possible**:
 - Problème de connexion internet
 - Timeout d'une requête
 - Erreur Firebase/Firestore
 
-**Actions à prendre**:
-1. Ajouter une gestion d'erreur plus robuste avec retry
-2. Logger plus de détails sur l'erreur (URL, méthode, etc.)
-3. Afficher un message utilisateur si l'erreur est critique
+**Correction appliquée**: 
+- Gestion d'erreur globale ajoutée dans `app/_layout.tsx` pour capturer les NetworkError non gérés
+- Les erreurs sont maintenant loggées avec plus de contexte (message, stack, URL)
+- Les erreurs sont envoyées à Sentry en production si configuré
+- Le comportement par défaut n'est pas empêché, mais les erreurs sont maintenant tracées
+
+**Actions futures** (optionnel):
+1. Ajouter un retry automatique pour les erreurs réseau temporaires
+2. Afficher un message utilisateur pour les erreurs critiques
 
 ## Warnings Open Food Facts (Normaux après nos corrections)
 
@@ -95,14 +101,33 @@ Uncaught (in promise) NetworkError: A network error occurred.
 **Explication**: Notre validation des produits OFF rejette maintenant les produits non pertinents ou avec des valeurs à 0. C'est le comportement attendu.  
 **Action**: Aucune action requise - c'est le comportement souhaité.
 
+## Corrections Appliquées
+
+### ✅ Animated useNativeDriver (Corrigé)
+- **Fichier**: `toki-app/lib/animations.ts`
+- **Modification**: Toutes les animations utilisent maintenant `useNativeDriver: Platform.OS !== 'web'`
+- **Résultat**: Le warning ne devrait plus apparaître sur web
+
+### ✅ NetworkError (Corrigé)
+- **Fichier**: `toki-app/app/_layout.tsx`
+- **Modification**: Ajout d'un gestionnaire d'erreur global pour capturer les NetworkError non gérés
+- **Résultat**: Les erreurs réseau sont maintenant loggées et tracées
+
+### ✅ Parsing des titres avec nombres (Corrigé)
+- **Fichier**: `toki-app/lib/sync-repair.ts`
+- **Modification**: Amélioration de l'extraction des mots pour ignorer les nombres au début (ex: "5 dates" -> "dates")
+- **Résultat**: Les repas avec nombres dans le titre peuvent maintenant être réparés correctement
+
 ## Recommandations
 
 1. **Firebase Permissions**: Ajouter une vérification d'authentification avant les appels rate limiting
-2. **NetworkError**: Améliorer la gestion d'erreur avec retry et messages utilisateur
+2. **NetworkError**: Considérer l'ajout d'un retry automatique pour les erreurs réseau temporaires (amélioration future)
 3. **Logs**: Réduire le niveau de log pour les warnings normaux (passer de `warn` à `debug`)
 
 ## Priorité des Corrections
 
 1. 🔴 **Haute**: Firebase Permissions (affecte le rate limiting)
-2. 🟡 **Moyenne**: NetworkError (améliorer gestion d'erreur)
-3. 🟢 **Basse**: Réduire verbosité des logs normaux
+2. ✅ **Corrigé**: NetworkError (gestion d'erreur globale ajoutée)
+3. ✅ **Corrigé**: Animated useNativeDriver (désactivé sur web)
+4. ✅ **Corrigé**: Parsing des titres avec nombres (amélioration du matching)
+5. 🟢 **Basse**: Réduire verbosité des logs normaux

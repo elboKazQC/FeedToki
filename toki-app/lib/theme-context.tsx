@@ -17,14 +17,24 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 const THEME_STORAGE_KEY = 'toki_theme_preference';
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  // État pour éviter les erreurs d'hydratation React #418 sur web
+  const [isClient, setIsClient] = useState(false);
   const systemColorScheme = useSystemColorScheme();
   const [theme, setThemeState] = useState<Theme>('system');
   
+  // Initialiser isClient après le premier rendu (web uniquement)
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+  
   // Déterminer le thème actif basé sur la préférence et le système
+  // IMPORTANT: Utiliser 'light' par défaut si pas encore côté client pour éviter erreur #418
   const activeTheme: ActiveTheme = 
-    theme === 'system' 
-      ? (systemColorScheme || 'light') 
-      : theme;
+    !isClient
+      ? 'light' // Valeur stable pour le premier rendu (serveur et client doivent être identiques)
+      : (theme === 'system' 
+          ? (systemColorScheme || 'light') 
+          : theme);
 
   // Charger la préférence au démarrage
   useEffect(() => {

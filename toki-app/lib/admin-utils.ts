@@ -25,3 +25,30 @@ export function checkIsAdmin(user: any, profile: any): boolean {
   return isAdminUser(email);
 }
 
+/**
+ * Définir le flag isAdmin dans le profil Firestore de l'utilisateur
+ * Permet à un admin (vérifié par email) de s'auto-définir comme admin
+ */
+export async function setAdminFlag(userId: string): Promise<void> {
+  if (!userId) {
+    throw new Error('userId est requis');
+  }
+
+  try {
+    const { db } = await import('./firebase-config');
+    const { doc, setDoc } = await import('firebase/firestore');
+    
+    if (!db) {
+      throw new Error('Firestore non initialisé');
+    }
+
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, { isAdmin: true }, { merge: true });
+    
+    console.log('[Admin Utils] ✅ Flag isAdmin défini pour', userId);
+  } catch (error) {
+    console.error('[Admin Utils] ❌ Erreur lors de la définition du flag isAdmin:', error);
+    throw error;
+  }
+}
+

@@ -1,7 +1,7 @@
 // Écran de logging alimentaire via IA
 // Permet de décrire un repas en texte ou voix, et l'IA extrait les aliments
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Alert,
   Platform,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { parseMealDescription } from '../lib/ai-meal-parser';
@@ -35,6 +36,7 @@ import { Button } from '../components/ui/Button';
 import { spacing } from '../constants/design-tokens';
 import { searchAndMapBestProduct } from '../lib/open-food-facts';
 import { logger } from '../lib/logger';
+import { PaywallModal } from '../components/paywall-modal';
 
 type ItemSource = 'db' | 'off' | 'estimated';
 
@@ -133,6 +135,7 @@ type DetectedItem = {
 
 export default function AILoggerScreen() {
   const params = useLocalSearchParams<{ initialText?: string }>();
+  const { profile, user } = useAuth();
   const [description, setDescription] = useState(params.initialText || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
@@ -141,6 +144,69 @@ export default function AILoggerScreen() {
   // États pour la modification de quantité
   const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
   const [quantityInput, setQuantityInput] = useState<string>('');
+  
+  // États pour vérification subscription
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+  const [showPaywall, setShowPaywall] = useState(false);
+  
+  // Référence pour stocker le temps de début du parsing
+  const parsingStartTimeRef = useRef<number | null>(null);
+  
+  // Vérifier l'accès à l'IA (après tous les hooks)
+  useEffect(() => {
+    const checkAccess = async () => {
+      const currentUserId = (user as any)?.uid;
+      if (!currentUserId || currentUserId === 'guest') {
+        setHasAccess(false);
+        setShowPaywall(true);
+        return;
+      }
+      
+      try {
+        const { hasActiveSubscription } = await import('../lib/subscription-utils');
+        const access = await hasActiveSubscription(currentUserId);
+        setHasAccess(access);
+        if (!access) {
+          setShowPaywall(true);
+        }
+      } catch (error) {
+        console.error('[AI Logger] Erreur vérification subscription:', error);
+        setHasAccess(false);
+        setShowPaywall(true);
+      }
+    };
+    
+    checkAccess();
+  }, [user]);
+  
+  // Si pas d'accès, afficher le paywall
+  const shouldShowPaywall = (hasAccess === false || showPaywall) && hasAccess !== null;
+  
+  // Afficher un loader pendant la vérification
+  if (hasAccess === null) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" />
+        <Text style={{ marginTop: 16, color: '#000' }}>Vérification de l'abonnement...</Text>
+      </View>
+    );
+  }
+
+  // Si pas d'accès, afficher le paywall comme overlay
+  if (shouldShowPaywall) {
+    return (
+      <PaywallModal
+        visible={true}
+        onSubscribe={() => {
+          // Utiliser replace pour navigation immédiate (ferme le modal)
+          router.replace('/subscription');
+        }}
+        onClose={() => {
+          router.back();
+        }}
+      />
+    );
+  }
 
   const handleParse = async () => {
     // Validation de la description
@@ -150,6 +216,9 @@ export default function AILoggerScreen() {
       return;
     }
 
+    // Démarrer le timer de parsing
+    parsingStartTimeRef.current = Date.now();
+    
     setIsProcessing(true);
     setError('');
     setDetectedItems([]);
@@ -360,7 +429,6 @@ export default function AILoggerScreen() {
     }
   };
 
-  const { profile, user } = useAuth();
   const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
   const isEmailVerified = user?.emailVerified ?? false;
   const canUseAI = !currentUserId || currentUserId === 'guest' || isEmailVerified;
@@ -434,6 +502,11 @@ export default function AILoggerScreen() {
         .map(item => item.matchedItem?.name || item.estimatedItem?.name || item.originalName)
         .join(', ');
 
+      // Calculer le temps de parsing (depuis handleParse jusqu'à maintenant)
+      const parsingTimeMs = parsingStartTimeRef.current 
+        ? Date.now() - parsingStartTimeRef.current 
+        : undefined;
+
       const newEntry: MealEntry = {
         id: Date.now().toString(),
         createdAt: new Date().toISOString(),
@@ -441,6 +514,7 @@ export default function AILoggerScreen() {
         category: classification.category,
         score: classification.score,
         items,
+        parsingTimeMs, // Stocker le temps de parsing
       };
 
       // 3. Sauvegarder dans AsyncStorage
@@ -832,13 +906,18 @@ export default function AILoggerScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Retour</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Log avec IA 🧠</Text>
-      </View>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.push('/(tabs)')} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← Retour</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Log avec IA 🧠</Text>
+        </View>
 
       <Text style={styles.subtitle}>
         Décris ce que tu as mangé et l&apos;IA va extraire les aliments automatiquement.
@@ -1047,7 +1126,8 @@ export default function AILoggerScreen() {
         </View>
       </Modal>
 
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

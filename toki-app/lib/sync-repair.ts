@@ -445,9 +445,16 @@ export async function repairMissingItemsInMeals(userId: string): Promise<{
       const currentFoodIds = new Set(currentItems.map(item => item.foodId));
       
       // Extraire les mots du titre (séparés par virgules, espaces)
+      // Amélioration : ignorer les nombres au début des mots (ex: "5 dates" -> "dates")
       const titleWords = entry.label
         .split(/[,;]/) // Séparer par virgules ou points-virgules
         .map(w => w.trim())
+        .map(w => {
+          // Enlever les nombres au début du mot (ex: "5 dates" -> "dates", "2 toast" -> "toast")
+          // Mais garder les nombres dans le mot (ex: "vitamine B12" reste "vitamine B12")
+          const withoutLeadingNumbers = w.replace(/^\d+\s+/, '').trim();
+          return withoutLeadingNumbers.length > 0 ? withoutLeadingNumbers : w;
+        })
         .filter(w => w.length > 0);
       
       // Toujours logger pour le diagnostic (même en production)

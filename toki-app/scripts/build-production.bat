@@ -57,6 +57,14 @@ if errorlevel 1 (
 )
 
 echo.
+echo [4.5/6] Injection du script de diagnostic dans le HTML...
+call node scripts\inject-debug-script.js
+if errorlevel 1 (
+    echo Erreur lors de l'injection du script
+    exit /b 1
+)
+
+echo.
 echo [5/6] Vérification de la version dans le bundle...
 call npx ts-node scripts\verify-build-version.ts web-build
 if errorlevel 1 (

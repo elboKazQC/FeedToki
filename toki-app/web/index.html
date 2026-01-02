@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  
+  <!-- Script de debug activable avec ?debug=1 -->
+  <script>
+    (function() {
+      const enabled = /[?&]debug=1/.test(location.search);
+      if (!enabled) return;
+
+      function send(payload) {
+        try {
+          fetch('/__client-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).catch(() => {});
+        } catch(e) {}
+      }
+
+      function showOverlay(text) {
+        const existing = document.getElementById('__debug_overlay');
+        if (existing) existing.remove();
+        const d = document.createElement('div');
+        d.id = '__debug_overlay';
+        d.style.position = 'fixed';
+        d.style.zIndex = '99999';
+        d.style.left = '0';
+        d.style.top = '0';
+        d.style.right = '0';
+        d.style.background = 'rgba(0,0,0,0.85)';
+        d.style.color = 'white';
+        d.style.padding = '12px';
+        d.style.fontSize = '12px';
+        d.style.maxHeight = '40vh';
+        d.style.overflow = 'auto';
+        d.innerText = text;
+        d.onclick = () => d.remove();
+        document.body.appendChild(d);
+      }
+
+      window.addEventListener('error', (ev) => {
+        const txt = `${ev.message}\n${ev.filename}:${ev.lineno}:${ev.colno}\n${ev.error?.stack || ''}`;
+        showOverlay(txt);
+        send({ type: 'error', url: location.href, ua: navigator.userAgent, text: txt });
+      });
+
+      window.addEventListener('unhandledrejection', (ev) => {
+        const reason = ev.reason && (ev.reason.stack || ev.reason.message || String(ev.reason));
+        const txt = `UnhandledRejection: ${reason}`;
+        showOverlay(txt);
+        send({ type: 'rejection', url: location.href, ua: navigator.userAgent, text: txt });
+      });
+
+      // optionnel: afficher simple trace de navigation
+      send({ type: 'debug-open', url: location.href, ua: navigator.userAgent, ts: Date.now() });
+    })();
+  </script>
+  
+  <title>Toki - Nutrition Gamifiée</title>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

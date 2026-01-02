@@ -3,6 +3,32 @@
  * Centralise les valeurs de design (couleurs, espacements, typographie, etc.)
  */
 
+import { Dimensions, PixelRatio } from 'react-native';
+
+// Helper pour obtenir la largeur de l'écran
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Helper pour calculer la taille de police responsive
+// S'adapte selon la largeur d'écran et les préférences système
+export function getResponsiveFontSize(baseSize: number): number {
+  // Utiliser le font scale du système si disponible
+  const fontScale = PixelRatio.getFontScale();
+  
+  // Facteur d'échelle basé sur la largeur d'écran (référence: iPhone SE = 375px)
+  const scaleFactor = SCREEN_WIDTH / 375;
+  
+  // Appliquer les deux facteurs avec une limite raisonnable
+  const scaledSize = baseSize * Math.min(scaleFactor, 1.2) * Math.max(fontScale, 0.85);
+  
+  // Arrondir pour éviter les décimales
+  return Math.round(scaledSize);
+}
+
+// Helper pour obtenir une taille de police responsive depuis les tokens
+export function responsiveFontSize(size: keyof typeof typography.fontSize): number {
+  return getResponsiveFontSize(typography.fontSize[size]);
+}
+
 export const spacing = {
   xs: 4,
   sm: 8,

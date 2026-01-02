@@ -13,35 +13,70 @@ service cloud.firestore {
     }
     
     // Helper function: vérifier si l'utilisateur est admin
+    // Vérifie par email dans le token OU par champ isAdmin dans le profil
     function isAdmin() {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      return isAuthenticated() && (
+        // Vérification par email (depuis le token d'authentification)
+        (request.auth.token.email != null && (
+          request.auth.token.email == 'vcasaubon@noovelia.com' ||
+          request.auth.token.email == 'casaubonvincent@gmail.com'
+        )) ||
+        // Vérification par champ isAdmin dans le profil (fallback)
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true)
+      );
     }
     
     // Collection users: chaque utilisateur peut lire/écrire son propre profil
+    // Les admins peuvent lire tous les profils pour le dashboard KPI
+    // Les admins peuvent mettre à jour leur propre champ isAdmin
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || (
+        // Permettre aux admins (vérifiés par email) de mettre à jour leur propre champ isAdmin
+        isAdmin() && 
+        request.auth.uid == userId && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isAdmin'])
+      );
+      // Subscription peut être lue/écrite par owner
       
       // Sous-collection: meals (repas)
+      // Les admins peuvent lire tous les repas pour les statistiques
       match /meals/{mealId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
       }
       
       // Sous-collection: points (points quotidiens)
+      // Les admins peuvent lire tous les points pour les statistiques
       match /points/{document=**} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
       }
       
       // Sous-collection: targets (objectifs nutritionnels)
       match /targets/{document=**} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
       }
       
       // Sous-collection: weights (poids historiques)
       match /weights/{document=**} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+      
+      // Sous-collection: cheatDays (journées cheat)
+      match /cheatDays/{date} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+      
+      // Sous-collection: customFoods (aliments personnalisés)
+      // Les admins peuvent lire tous les custom foods pour les statistiques
+      match /customFoods/{foodId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
       }
     }
     

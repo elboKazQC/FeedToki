@@ -67,7 +67,7 @@ export default function VerifyEmailFirebaseScreen() {
     try {
       await resendEmailVerification(user as any);
       
-      const message = `Un nouvel email de vérification a été envoyé à ${email}.\n\nVeuillez vérifier votre boîte mail (et vos spams).`;
+      const message = `Un nouvel email de vérification a été envoyé à ${email}.\n\n⏰ L'email peut prendre 5-10 minutes à arriver.\n\nVeuillez vérifier votre boîte mail (et vos spams).`;
       
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert('Email renvoyé ! ✅\n\n' + message);

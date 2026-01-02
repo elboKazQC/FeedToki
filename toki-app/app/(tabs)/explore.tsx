@@ -3,12 +3,13 @@ import { router } from 'expo-router';
 import { useAuth } from '../../lib/auth-context';
 import { useTheme } from '../../lib/theme-context';
 import { Colors } from '../../constants/theme';
-import { localSignOut } from '../../lib/local-auth';
+import { checkIsAdmin, setAdminFlag } from '../../lib/admin-utils';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 export default function TabTwoScreen() {
-  const { user, profile } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const { activeTheme, setTheme } = useTheme();
   const [isDarkMode, setIsDarkMode] = useState(activeTheme === 'dark');
   const colors = Colors[activeTheme];
@@ -47,6 +48,7 @@ export default function TabTwoScreen() {
   // Récupérer email et nom depuis user OU profile
   const displayEmail = (user as any)?.email || profile?.email || 'Non connecté';
   const displayName = (user as any)?.displayName || profile?.displayName || 'Utilisateur';
+  const isAdmin = checkIsAdmin(user, profile);
 
   const handleEditProfile = async () => {
     Alert.alert(
@@ -65,20 +67,53 @@ export default function TabTwoScreen() {
   };
 
   const handleSignOut = async () => {
-    // Efface l'ID user courant
-    await localSignOut();
-    // Efface le profil local associé
-    const userId = (user as any)?.userId || profile?.userId;
-    if (userId) {
-      await AsyncStorage.removeItem(`toki_user_profile_${userId}`);
+    try {
+      // Utiliser la fonction signOut du contexte qui gère tout (Firebase + local)
+      await signOut();
+      
+      // Redirection sécurisée pour Safari mobile
+      // Utiliser setTimeout pour s'assurer que le state est mis à jour avant la redirection
+      setTimeout(() => {
+        if (Platform.OS === 'web') {
+          // Sur web, utiliser router.replace avec un fallback
+          try {
+            router.replace('/auth');
+          } catch (error) {
+            // Fallback: redirection via window.location si router échoue
+            console.warn('[Explore] Router.replace failed, using window.location:', error);
+            if (typeof window !== 'undefined') {
+              window.location.href = '/auth';
+            }
+          }
+        } else {
+          // Sur mobile natif
+          router.replace('/auth');
+        }
+      }, 100);
+    } catch (error: any) {
+      console.error('[Explore] Erreur lors de la déconnexion:', error);
+      Alert.alert('Erreur', error.message || 'Erreur lors de la déconnexion');
     }
-    // Redirige vers l'écran de login
-    router.replace('/auth');
   };
 
   const handleThemeToggle = async (value: boolean) => {
     setIsDarkMode(value);
     await setTheme(value ? 'dark' : 'light');
+  };
+
+  const handleSetAdminFlag = async () => {
+    const userId = (user as any)?.uid || profile?.userId;
+    if (!userId) {
+      Alert.alert('Erreur', 'Impossible de déterminer l\'ID utilisateur');
+      return;
+    }
+
+    try {
+      await setAdminFlag(userId);
+      Alert.alert('✅ Succès', 'Le flag isAdmin a été défini dans votre profil Firestore.');
+    } catch (error: any) {
+      Alert.alert('❌ Erreur', error.message || 'Impossible de définir le flag isAdmin');
+    }
   };
 
   return (
@@ -155,13 +190,25 @@ export default function TabTwoScreen() {
           <Text style={styles.buttonText}>✏️ Modifier mes objectifs</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.button} onPress={() => router.push('/food-request')}>
-          <Text style={styles.buttonText}>🍽️ Demander un aliment</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-requests')}>
-          <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
-        </TouchableOpacity>
+        {isAdmin && (
+          <>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-requests')}>
+              <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-custom-foods')}>
+              <Text style={styles.buttonText}>🍽️ Aliments personnalisés (Admin)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-kpi')}>
+              <Text style={styles.buttonText}>📊 Dashboard KPI (Admin)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-beta-users')}>
+              <Text style={styles.buttonText}>🔓 Débloquer Beta Users (Admin)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.button, { backgroundColor: '#8b5cf6' }]} onPress={handleSetAdminFlag}>
+              <Text style={styles.buttonText}>🔧 Définir flag isAdmin (Admin)</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <TouchableOpacity style={[styles.button, styles.buttonDanger]} onPress={handleSignOut}>
           <Text style={styles.buttonText}>🚪 Déconnexion</Text>

@@ -8,6 +8,7 @@ type StreakCalendarDuolingoProps = {
   dayCaloriesMap: Record<string, number>;
   minCalories?: number;
   daysToShow?: number;
+  cheatDays?: Record<string, boolean>; // Dates des jours cheat
 };
 
 export function StreakCalendarDuolingo({
@@ -16,6 +17,7 @@ export function StreakCalendarDuolingo({
   dayCaloriesMap,
   minCalories = 800,
   daysToShow = 10,
+  cheatDays = {},
 }: StreakCalendarDuolingoProps) {
   // Calculer les jours une seule fois avec useMemo pour éviter l'erreur d'hydratation
   const { today, days } = useMemo(() => {
@@ -89,6 +91,7 @@ export function StreakCalendarDuolingo({
         {days.map((day, index) => {
           const isInStreak = streakDays.has(day.date);
           const showLine = index < days.length - 1 && isInStreak && streakDays.has(days[index + 1].date);
+          const isCheatDay = cheatDays[day.date] === true;
           
           return (
             <View key={day.date} style={styles.dayContainer}>
@@ -97,12 +100,14 @@ export function StreakCalendarDuolingo({
                 <View
                   style={[
                     styles.dayPoint,
-                    day.isComplete && styles.dayPointComplete,
-                    isInStreak && styles.dayPointInStreak,
-                    day.isToday && styles.dayPointToday,
+                    day.isComplete && !isCheatDay && styles.dayPointComplete,
+                    isInStreak && !isCheatDay && styles.dayPointInStreak,
+                    day.isToday && !isCheatDay && styles.dayPointToday,
+                    isCheatDay && styles.dayPointCheat,
                   ]}
                 >
-                  {day.isComplete && <View style={styles.dayPointInner} />}
+                  {day.isComplete && !isCheatDay && <View style={styles.dayPointInner} />}
+                  {isCheatDay && <Text style={styles.cheatDayIcon}>🎉</Text>}
                 </View>
                 
                 {/* Ligne de connexion vers le jour suivant */}
@@ -110,13 +115,20 @@ export function StreakCalendarDuolingo({
               </View>
               
               {/* Label du jour */}
-              <Text style={[styles.dayLabel, day.isToday && styles.dayLabelToday]}>
+              <Text style={[
+                styles.dayLabel, 
+                day.isToday && styles.dayLabelToday,
+                isCheatDay && styles.dayLabelCheat,
+              ]}>
                 {formatDayLabel(day)}
               </Text>
               
               {/* Indicateur de complétion */}
-              {day.isComplete && (
+              {day.isComplete && !isCheatDay && (
                 <Text style={styles.dayComplete}>✓</Text>
+              )}
+              {isCheatDay && (
+                <Text style={styles.cheatDayLabel}>Cheat</Text>
               )}
             </View>
           );
@@ -225,6 +237,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#22c55e',
     marginTop: 2,
+  },
+  dayPointCheat: {
+    backgroundColor: '#ef4444',
+    borderColor: '#dc2626',
+    borderWidth: 3,
+  },
+  cheatDayIcon: {
+    fontSize: 12,
+  },
+  dayLabelCheat: {
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  cheatDayLabel: {
+    fontSize: 10,
+    color: '#ef4444',
+    marginTop: 2,
+    fontWeight: '600',
   },
   streakMessage: {
     fontSize: 14,

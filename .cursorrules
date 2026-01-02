@@ -1,39 +1,80 @@
 # FeedToki - Règles de Développement Cursor
 
-## 📋 Vue d'ensemble
-Application React Native (Expo SDK 54) de suivi nutritionnel gamifié avec système de points, Firebase, et IA (OpenAI).
+## ⚠️ RÈGLES CRITIQUES - PRIORITÉ ABSOLUE
 
-## 🎯 Principes Généraux
+Ces règles doivent TOUJOURS être respectées, sans exception.
 
-### Langue
-- **UI/UX**: Toujours en français (messages utilisateur, labels, alertes)
-- **Code**: Commentaires en français
-- **Variables/Fonctions**: camelCase en anglais (convention React Native)
+### 1. Utilisateurs Existants - RÈGLE CRITIQUE
 
-### Architecture
-- **Frontend**: React Native avec Expo Router (file-based routing)
-- **State**: React hooks (useState, useEffect, useMemo, useCallback) + AsyncStorage + Firestore
-- **Auth**: Firebase Authentication (email/password)
-- **Database**: Firestore (avec synchronisation bidirectionnelle AsyncStorage ↔ Firestore)
-- **AI**: OpenAI GPT-4o-mini pour parsing de repas
+⚠️ **IL Y A DES UTILISATEURS QUI EXISTENT DÉJÀ DANS LA BASE DE DONNÉES**
 
-## 🔧 Conventions de Code
+**Actions requises :**
+- TOUJOURS prendre en compte les utilisateurs existants lors de toute modification
+- TOUJOURS mettre à jour les utilisateurs existants aussi, pas seulement les nouveaux
+- TOUJOURS vérifier la compatibilité avec les données existantes avant de modifier la structure
+- TOUJOURS utiliser `set()` avec `merge: true` ou vérifier l'existence avant `update()` pour éviter les erreurs
+- TOUJOURS créer des migrations si nécessaire pour mettre à jour les utilisateurs existants
+- TOUJOURS tester les migrations sur un utilisateur de test avant de les appliquer à tous
+- TOUJOURS s'assurer que les nouveaux champs ont des valeurs par défaut pour les utilisateurs existants
+- TOUJOURS documenter les migrations dans `toki-app/MIGRATION_GUIDE.md`
 
-### Naming
-- **Variables/Fonctions**: `camelCase` (ex: `handleDeleteEntry`, `currentUserId`)
-- **Composants**: `PascalCase` (ex: `HomeScreen`, `DragonDisplay`)
-- **Fichiers**: `kebab-case.tsx` ou `camelCase.tsx` (ex: `best-days.tsx`, `data-sync.ts`)
-- **Types/Interfaces**: `PascalCase` (ex: `MealEntry`, `UserProfile`)
-- **Constantes**: `UPPER_SNAKE_CASE` (ex: `MAX_POINTS`, `DAILY_POINTS`)
+**Pattern à utiliser pour Firestore :**
+```typescript
+// ✅ CORRECT - Vérifier existence avant update
+const userRef = admin.firestore().doc(`users/${userId}`);
+const userDoc = await userRef.get();
+if (!userDoc.exists) {
+  // Créer le document avec les champs de base
+  await userRef.set({
+    userId: userId,
+    email: userEmail,
+    createdAt: new Date().toISOString(),
+    ...newData,
+  });
+} else {
+  // Mettre à jour le document existant
+  await userRef.update(newData);
+}
 
-### React Hooks - RÈGLE CRITIQUE
+// ✅ ALTERNATIVE - Utiliser set avec merge
+await userRef.set({
+  ...existingData,
+  ...newData,
+}, { merge: true });
+```
+
+**Exemple de migration :**
+Si vous modifiez la structure d'un document Firestore, créer un script de migration dans `toki-app/scripts/` pour mettre à jour tous les documents existants.
+
+### 2. Fonctionner du Premier Coup - RÈGLE CRITIQUE
+
+⚠️ **QUAND L'UTILISATEUR DEMANDE QUELQUE CHOSE, ÇA DOIT FONCTIONNER DU PREMIER COUP LE PLUS POSSIBLE**
+
+**Actions requises :**
+- TOUJOURS tester mes modifications avant de les présenter
+- TOUJOURS vérifier que le code compile sans erreurs
+- TOUJOURS vérifier les linters et corriger les erreurs
+- TOUJOURS penser aux cas limites et aux utilisateurs existants
+- TOUJOURS vérifier la compatibilité avec les données existantes
+- SI JE DOIS FAIRE PLUS DE TESTS, JE DOIS LES FAIRE
+- Ne pas hésiter à exécuter des commandes pour vérifier
+- Ne pas hésiter à lire des fichiers pour comprendre le contexte
+- Ne pas hésiter à chercher dans le codebase pour trouver des exemples
+- Si je ne suis pas sûr, je dois tester ou chercher dans le codebase avant de répondre
+- Si quelque chose ne fonctionne pas, je dois investiguer et corriger immédiatement
+
+### 3. React Hooks - RÈGLE CRITIQUE
+
 ⚠️ **TOUJOURS déclarer TOUS les hooks AVANT tout `return` conditionnel**
+
 ```typescript
 // ✅ CORRECT
 export default function Component() {
   const [state, setState] = useState(false);
-  const memoized = useMemo(() => ..., []);
-  useEffect(() => {}, []);
+  const memoized = useMemo(() => computeValue(), []);
+  useEffect(() => {
+    // Side effects
+  }, []);
   
   if (!isClient) return <Loading />; // Après tous les hooks
   
@@ -48,95 +89,39 @@ export default function Component() {
 }
 ```
 
-### Gestion d'État
-- **Local state**: `useState` pour données temporaires/composant
-- **AsyncStorage**: Pour données persistantes locales (backup/cache)
-- **Firestore**: Source de vérité pour données cloud (multi-appareils)
-- **Synchronisation**: Toujours via `lib/data-sync.ts` (fusion intelligente)
-
-### Logging
-- Utiliser `lib/logger.ts` pour logs structurés
-- En production: `logger.debug()` et `logger.info()` sont mutés
-- Toujours utiliser `logger.warn()` et `logger.error()` pour problèmes importants
-- Pour logs temporaires: `console.log` avec `if (__DEV__)`
-
-## 🔐 Sécurité & Firebase
-
-### Authentification
-- Vérification email requise pour utilisation IA (sauf admins)
-- Admins: Liste centralisée dans `lib/admin-utils.ts`
-- Guest mode: Permis mais fonctionnalités limitées
-
-### Firestore Security Rules
-- Toujours vérifier `request.auth.uid` pour isolation des données
-- Users peuvent lire/écrire uniquement leurs propres données
-- Admins: Accès spécial via `isAdmin()` helper
-
-### Rate Limiting
-- OpenAI API: 50 appels/jour par utilisateur (Firestore-based)
-- Client-side: 10 req/min avec délai minimum 2s entre appels
-
-## 📊 Synchronisation de Données
-
-### Principe de Fusion
-- **Points**: Prendre la valeur la plus HAUTE (pour préserver remboursements/corrections)
-- **Meals**: Fusion par ID (Firestore prioritaire si conflit)
-- **Targets/Weights**: Firestore prioritaire si local vide
-
-### Fonctions de Sync
-- `syncFromFirestore()`: Charger depuis Firestore et fusionner avec local
-- `syncToFirestore()`: Envoyer vers Firestore
-- Toujours appeler après modifications critiques (ajout/suppression repas, points)
-
-### Points - Règles Spéciales
-- **Remboursement**: Lors de suppression d'entrée, restaurer points ET synchroniser Firestore
-- **Fusion**: `Math.max(local, firestore)` pour éviter perte de remboursements
-- **Écriture**: Ne jamais écraser une valeur Firestore plus haute
-
-## 🎨 UI/UX
-
-### Thème
-- Support dark/light mode via `lib/theme-context.tsx`
-- Utiliser `useTheme()` hook pour accéder aux couleurs
-- Tokens de design dans `constants/design-tokens.ts`
-
-### Composants
-- Utiliser composants UI réutilisables: `Button`, `Card`, `ProgressBar`, `Badge`
-- Modals: Utiliser React Native `Modal` (pas de View absolute) pour centrage correct
-
-### Messages Utilisateur
-- Toujours en français
-- Messages d'erreur clairs et actionnables
-- Pour emails Firebase (spam): Mentionner explicitement dossier SPAM/COURRIER INDÉSIRABLE
-
-## 🐛 Patterns de Debugging
-
-### Erreurs Hydratation React (#418/#310)
-- Cause: Rendu conditionnel avant hooks OU mismatch SSR/client
-- Solution: État `isClient` avec `useState(false)` + `useEffect(() => setIsClient(true), [])`
+**Solution pour erreurs d'hydratation :**
+- Utiliser un état `isClient` avec `useState(false)` + `useEffect(() => setIsClient(true), [])`
 - Retourner "Chargement..." si `!isClient`, après TOUS les hooks
 
-### Data Isolation
-- Toujours utiliser `currentUserId` correctement:
-  ```typescript
-  const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
-  ```
-- Reset state local lors changement d'utilisateur (useEffect avec dépendance `currentUserId`)
+### 4. Modals sur Web - RÈGLE CRITIQUE
 
-### Réparation Automatique des Items Manquants
-- **Fonction**: `repairMissingItemsInMeals()` dans `lib/sync-repair.ts`
-- **Rôle**: Détecte les aliments mentionnés dans le titre d'un repas mais absents de l'array `items` et les ajoute automatiquement
-- **Exécution**: Automatique au chargement des repas dans `app/(tabs)/index.tsx`
-- **Logs**: Toujours afficher les logs de diagnostic (pas de `__DEV__`) pour tracer l'exécution
-- **Exemple**: Si un repas a le titre "Pâtes, Poulet, Brocoli, sauce blanche" mais que "sauce blanche" n'est pas dans `items`, la fonction l'ajoute automatiquement avec un score de similarité ≥ 0.5
+⚠️ **Sur le web, les Modals avec View overlay transparent peuvent bloquer les événements touch**
 
-### Console Logs
-- En production: Utiliser `logger.debug()` / `logger.info()` (mutés)
-- Logs critiques: Toujours `logger.warn()` / `logger.error()`
-- Logs temporaires: `if (__DEV__) console.log(...)`
+**Problème :** Les boutons/TouchableOpacity dans un Modal ne répondent pas aux clics sur le web, même si les handlers sont appelés.
 
-### ⚠️ Logs de Diagnostic - RÈGLE CRITIQUE
-**NE JAMAIS conditionner les logs de diagnostic par `__DEV__` si ils sont nécessaires pour le debugging en production**
+**Solution :**
+1. Ajouter `pointerEvents="box-none"` au View overlay (celui avec backgroundColor transparent)
+2. Ajouter un View wrapper avec `pointerEvents="auto"` autour du contenu du modal (Card)
+3. Pour navigation après action : Utiliser `router.replace()` au lieu de `router.push()` pour navigation immédiate qui ferme le modal automatiquement
+
+```tsx
+// ✅ CORRECT
+<Modal visible={visible} transparent animationType="fade">
+  <View style={overlayStyle} pointerEvents="box-none">
+    <View pointerEvents="auto">
+      <Card style={modalStyle}>
+        {/* Contenu du modal - boutons, etc. */}
+      </Card>
+    </View>
+  </View>
+</Modal>
+```
+
+**Référence :** `toki-app/components/paywall-modal.tsx` utilise cette structure
+
+### 5. Logs de Diagnostic - RÈGLE CRITIQUE
+
+⚠️ **NE JAMAIS conditionner les logs de diagnostic par `__DEV__` si ils sont nécessaires pour le debugging en production**
 
 ```typescript
 // ❌ INCORRECT - Logs invisibles en production
@@ -148,11 +133,48 @@ if (__DEV__) {
 console.log('[Sync Repair] 🔧 Réparation des items manquants...');
 ```
 
-**Raison**: Les logs de diagnostic sont essentiels pour comprendre pourquoi une fonction ne s'exécute pas ou échoue silencieusement. Si un log est important pour le debugging (même en production), il doit être toujours affiché, pas seulement en développement.
+**Raison :** Les logs de diagnostic sont essentiels pour comprendre pourquoi une fonction ne s'exécute pas ou échoue silencieusement. Si un log est important pour le debugging (même en production), il doit être toujours affiché.
 
-**Exception**: Seuls les logs de développement temporaires (ex: valeurs de variables pour tests) peuvent être conditionnés par `__DEV__`.
+**Exception :** Seuls les logs de développement temporaires (ex: valeurs de variables pour tests) peuvent être conditionnés par `__DEV__`.
 
-## 📁 Structure de Fichiers
+### 6. Accès Complet et Autonomie
+
+- L'utilisateur me donne accès à TOUT sur son ordinateur
+- Je peux exécuter des commandes, lire/écrire des fichiers, installer des packages, etc.
+- Je dois être **autonome** et **proactif** dans mes actions
+- Si j'ai besoin de quelque chose, je dois le faire moi-même plutôt que de demander
+
+---
+
+## 📋 Vue d'ensemble du Projet
+
+Application React Native (Expo SDK 54) de suivi nutritionnel gamifié avec système de points, Firebase, et IA (OpenAI).
+
+**Stack technique :**
+- **Frontend :** React Native avec Expo Router (file-based routing)
+- **State :** React hooks (useState, useEffect, useMemo, useCallback) + AsyncStorage + Firestore
+- **Auth :** Firebase Authentication (email/password)
+- **Database :** Firestore (avec synchronisation bidirectionnelle AsyncStorage ↔ Firestore)
+- **AI :** OpenAI GPT-4o-mini pour parsing de repas
+
+**Langue :**
+- **UI/UX :** Toujours en français (messages utilisateur, labels, alertes)
+- **Code :** Commentaires en français
+- **Variables/Fonctions :** camelCase en anglais (convention React Native)
+
+---
+
+## 🔧 Conventions de Code
+
+### Naming
+
+- **Variables/Fonctions :** `camelCase` (ex: `handleDeleteEntry`, `currentUserId`)
+- **Composants :** `PascalCase` (ex: `HomeScreen`, `DragonDisplay`)
+- **Fichiers :** `kebab-case.tsx` ou `camelCase.tsx` (ex: `best-days.tsx`, `data-sync.ts`)
+- **Types/Interfaces :** `PascalCase` (ex: `MealEntry`, `UserProfile`)
+- **Constantes :** `UPPER_SNAKE_CASE` (ex: `MAX_POINTS`, `DAILY_POINTS`)
+
+### Structure de Fichiers
 
 ```
 toki-app/
@@ -174,11 +196,113 @@ toki-app/
 └── scripts/              # Scripts utilitaires
 ```
 
+### Gestion d'État
+
+- **Local state :** `useState` pour données temporaires/composant
+- **AsyncStorage :** Pour données persistantes locales (backup/cache)
+- **Firestore :** Source de vérité pour données cloud (multi-appareils)
+- **Synchronisation :** Toujours via `toki-app/lib/data-sync.ts` (fusion intelligente)
+
+### Logging
+
+- Utiliser `toki-app/lib/logger.ts` pour logs structurés
+- En production : `logger.debug()` et `logger.info()` sont mutés
+- Toujours utiliser `logger.warn()` et `logger.error()` pour problèmes importants
+- Pour logs temporaires : `console.log` avec `if (__DEV__)`
+
+---
+
+## 📊 Patterns et Architecture
+
+### Synchronisation de Données
+
+**Principe de Fusion :**
+- **Points :** Prendre la valeur la plus HAUTE (pour préserver remboursements/corrections)
+- **Meals :** Fusion par ID (Firestore prioritaire si conflit)
+- **Targets/Weights :** Firestore prioritaire si local vide
+
+**Fonctions de Sync :**
+- `syncFromFirestore()` : Charger depuis Firestore et fusionner avec local
+- `syncToFirestore()` : Envoyer vers Firestore
+- Toujours appeler après modifications critiques (ajout/suppression repas, points)
+
+**Référence :** `toki-app/lib/data-sync.ts`
+
+### Points - Règles Spéciales
+
+- **Remboursement :** Lors de suppression d'entrée, restaurer points ET synchroniser Firestore
+- **Fusion :** `Math.max(local, firestore)` pour éviter perte de remboursements
+- **Écriture :** Ne jamais écraser une valeur Firestore plus haute
+
+### Réparation Automatique des Items Manquants
+
+- **Fonction :** `repairMissingItemsInMeals()` dans `toki-app/lib/sync-repair.ts`
+- **Rôle :** Détecte les aliments mentionnés dans le titre d'un repas mais absents de l'array `items` et les ajoute automatiquement
+- **Exécution :** Automatique au chargement des repas dans `toki-app/app/(tabs)/index.tsx`
+- **Logs :** Toujours afficher les logs de diagnostic (pas de `__DEV__`) pour tracer l'exécution
+- **Exemple :** Si un repas a le titre "Pâtes, Poulet, Brocoli, sauce blanche" mais que "sauce blanche" n'est pas dans `items`, la fonction l'ajoute automatiquement avec un score de similarité ≥ 0.5
+
+### Data Isolation
+
+Toujours utiliser `currentUserId` correctement :
+
+```typescript
+const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
+```
+
+Reset state local lors changement d'utilisateur (useEffect avec dépendance `currentUserId`)
+
+---
+
+## 🎨 UI/UX
+
+### Thème
+
+- Support dark/light mode via `toki-app/lib/theme-context.tsx`
+- Utiliser `useTheme()` hook pour accéder aux couleurs
+- Tokens de design dans `toki-app/constants/design-tokens.ts`
+
+### Composants
+
+- Utiliser composants UI réutilisables : `Button`, `Card`, `ProgressBar`, `Badge`
+- Modals : Utiliser React Native `Modal` (pas de View absolute) pour centrage correct
+
+### Messages Utilisateur
+
+- Toujours en français
+- Messages d'erreur clairs et actionnables
+- Pour emails Firebase (spam) : Mentionner explicitement dossier SPAM/COURRIER INDÉSIRABLE
+
+---
+
+## 🔐 Sécurité & Firebase
+
+### Authentification
+
+- Vérification email requise pour utilisation IA (sauf admins)
+- Admins : Liste centralisée dans `toki-app/lib/admin-utils.ts`
+- Guest mode : Permis mais fonctionnalités limitées
+
+### Firestore Security Rules
+
+- Toujours vérifier `request.auth.uid` pour isolation des données
+- Users peuvent lire/écrire uniquement leurs propres données
+- Admins : Accès spécial via `isAdmin()` helper
+
+### Rate Limiting
+
+- OpenAI API : 50 appels/jour par utilisateur (Firestore-based)
+- Client-side : 10 req/min avec délai minimum 2s entre appels
+
+---
+
 ## 🚀 Déploiement
 
-### ⚠️ MISE À JOUR DE VERSION - RÈGLE CRITIQUE
+### Mise à Jour de Version - RÈGLE CRITIQUE
 
-**TOUJOURS mettre à jour la version AVANT de déployer :**
+⚠️ **TOUJOURS mettre à jour la version AVANT de déployer**
+
+**Étapes :**
 
 1. **Mettre à jour la version dans 3 fichiers :**
    - `toki-app/package.json` : `"version": "1.0.XX"`
@@ -189,7 +313,7 @@ toki-app/
 
 3. **Mettre à jour BUILD_DATE** avec la date/heure actuelle en UTC pour forcer le cache busting
 
-4. **Puis build et déployer :**
+4. **Build et déployer :**
    ```bash
    cd toki-app
    npx expo export --platform web --clear --output-dir web-build
@@ -197,7 +321,7 @@ toki-app/
    firebase deploy --only hosting
    ```
    
-   **OU utiliser le script automatique :**
+   **OU utiliser le script automatique (recommandé) :**
    ```bash
    cd toki-app
    scripts\build-production.bat
@@ -205,58 +329,63 @@ toki-app/
 
 **Pourquoi ?** Le cache busting utilise BUILD_VERSION et BUILD_DATE. Si la version n'est pas mise à jour, les utilisateurs verront l'ancienne version en cache.
 
-### ✅ VÉRIFICATION AVANT DÉPLOIEMENT - RÈGLE CRITIQUE
+### Vérification Avant Déploiement - RÈGLE CRITIQUE
 
-**TOUJOURS vérifier avant de déployer :**
+⚠️ **TOUJOURS vérifier avant de déployer**
 
-1. **Checklist de vérification :**
-   - [ ] Version mise à jour dans `package.json`, `app.json`, `build-version.ts`
-   - [ ] `BUILD_DATE` mis à jour avec date/heure actuelle en UTC
-   - [ ] Build exécuté avec `--clear` pour vider le cache Metro Bundler
-   - [ ] Vérification que le bundle contient la bonne version (script `verify-build-version.ts`)
-   - [ ] Hash du bundle a changé (indique un nouveau build)
+**Checklist :**
+- [ ] Version mise à jour dans `package.json`, `app.json`, `build-version.ts`
+- [ ] `BUILD_DATE` mis à jour avec date/heure actuelle en UTC
+- [ ] Build exécuté avec `--clear` pour vider le cache Metro Bundler
+- [ ] Vérification que le bundle contient la bonne version (script `verify-build-version.ts`)
+- [ ] Hash du bundle a changé (indique un nouveau build)
 
-2. **Utiliser le script de vérification :**
-   ```bash
-   cd toki-app
-   npx ts-node scripts/verify-build-version.ts web-build
-   ```
-   
-   Le script doit afficher `✅ SUCCÈS: Les versions correspondent!` avant de déployer.
-
-3. **Si la vérification échoue :**
-   - Vérifier que `build-version.ts` contient la bonne version
-   - Rebuild avec `--clear` pour vider le cache Metro
-   - Utiliser le script `build-production.bat` qui régénère automatiquement `build-version.ts`
-
-4. **Importance de `--clear` :**
-   - Le cache Metro Bundler peut contenir d'anciennes versions de `build-version.ts`
-   - Toujours utiliser `--clear` lors du build pour garantir un build propre
-   - Le script `build-production.bat` inclut automatiquement `--clear`
-
-### Build Production Web
+**Script de vérification :**
 ```bash
 cd toki-app
-npx expo export --platform web --clear --output-dir web-build
 npx ts-node scripts/verify-build-version.ts web-build
-firebase deploy --only hosting
 ```
 
-**OU utiliser le script automatique (recommandé) :**
-```bash
-cd toki-app
-scripts\build-production.bat
-```
+Le script doit afficher `✅ SUCCÈS: Les versions correspondent!` avant de déployer.
 
-Le script `build-production.bat` :
+**Si la vérification échoue :**
+- Vérifier que `build-version.ts` contient la bonne version
+- Rebuild avec `--clear` pour vider le cache Metro
+- Utiliser le script `build-production.bat` qui régénère automatiquement `build-version.ts`
+
+**Importance de `--clear` :**
+- Le cache Metro Bundler peut contenir d'anciennes versions de `build-version.ts`
+- Toujours utiliser `--clear` lors du build pour garantir un build propre
+- Le script `build-production.bat` inclut automatiquement `--clear`
+
+**Script `build-production.bat` :**
 - Régénère automatiquement `build-version.ts` avec la version de `package.json`
 - Vide le cache Metro avec `--clear`
 - Vérifie que le bundle contient la bonne version
 - Déploie sur Firebase Hosting
 
 ### Variables d'Environnement
-- `.env.production`: Clés API (NE JAMAIS commiter)
-- Variables Expo: Préfixe `EXPO_PUBLIC_` pour exposition client
+
+- `.env.production` : Clés API (NE JAMAIS commiter)
+- Variables Expo : Préfixe `EXPO_PUBLIC_` pour exposition client
+
+---
+
+## 🐛 Debugging et Troubleshooting
+
+### Erreurs Hydratation React (#418/#310)
+
+**Cause :** Rendu conditionnel avant hooks OU mismatch SSR/client
+
+**Solution :** État `isClient` avec `useState(false)` + `useEffect(() => setIsClient(true), [])`. Retourner "Chargement..." si `!isClient`, après TOUS les hooks.
+
+### Console Logs
+
+- En production : Utiliser `logger.debug()` / `logger.info()` (mutés)
+- Logs critiques : Toujours `logger.warn()` / `logger.error()`
+- Logs temporaires : `if (__DEV__) console.log(...)`
+
+---
 
 ## ✅ Checklist Avant Commit
 
@@ -268,45 +397,55 @@ Le script `build-production.bat` :
 - [ ] Pas de clés API/secrètes dans le code
 - [ ] Types TypeScript corrects (pas de `any` sauf Firebase user)
 - [ ] Gestion d'erreurs avec try/catch pour opérations async
+- [ ] Utilisateurs existants pris en compte
+- [ ] Code testé et fonctionnel
+
+---
 
 ## 🎓 Bonnes Pratiques
 
 ### Performance
+
 - Utiliser `useMemo` pour calculs coûteux (streaks, stats)
 - Utiliser `useCallback` pour callbacks passés en props (éviter re-renders)
-- Limiter re-renders: State local minimal, props stables
+- Limiter re-renders : State local minimal, props stables
 
 ### Maintenabilité
+
 - Commenter le "pourquoi", pas le "quoi" (code auto-documenté)
-- Exporter types depuis `lib/types.ts` (pas inline)
+- Exporter types depuis `toki-app/lib/types.ts` (pas inline)
 - Fonctions pures quand possible (facilitent tests)
-- Helpers réutilisables dans `lib/`
+- Helpers réutilisables dans `toki-app/lib/`
 
 ### Tests
-- Tests unitaires pour logique métier (`lib/stats.ts`, `lib/points-*.ts`)
+
+- Tests unitaires pour logique métier (`toki-app/lib/stats.ts`, `toki-app/lib/points-*.ts`)
 - Tests d'intégration pour flows critiques (login, sync)
 - Mocker Firebase/AsyncStorage dans tests
 
-## 🔄 Migration & Backward Compatibility
+### Error Handling
+
+- Opérations async : Toujours try/catch
+- Sync Firestore : Ne pas bloquer UI si échec (logger warning, continuer local)
+- Messages d'erreur : Actionnables pour utilisateur (pas de stack traces)
 
 ### Versioning
-- AsyncStorage keys: Inclure version (ex: `feedtoki_entries_${userId}_v1`)
-- Changements breaking: Nouvelle version de key + migration script
-- Firestore: Structure documentée, migrations via scripts
 
-### Error Handling
-- Opérations async: Toujours try/catch
-- Sync Firestore: Ne pas bloquer UI si échec (logger warning, continuer local)
-- Messages d'erreur: Actionnables pour utilisateur (pas de stack traces)
-
-## 📝 Documentation
-
-- README.md: Vue d'ensemble, setup, scripts
-- GUIDE_DEPLOIEMENT.md: Instructions déploiement
-- CHANGELOG.md: Historique des changements
-- POINTS_SYSTEM_EXPLANATION.md: Explication système de points
+- AsyncStorage keys : Inclure version (ex: `feedtoki_entries_${userId}_v1`)
+- Changements breaking : Nouvelle version de key + migration script
+- Firestore : Structure documentée, migrations via scripts
 
 ---
 
-**Dernière mise à jour**: Janvier 2025
-**Version app**: 1.0.21
+## 📝 Documentation
+
+- `toki-app/README.md` : Vue d'ensemble, setup, scripts
+- `toki-app/GUIDE_DEPLOIEMENT.md` : Instructions déploiement
+- `toki-app/CHANGELOG.md` : Historique des changements
+- `toki-app/POINTS_SYSTEM_EXPLANATION.md` : Explication système de points
+- `toki-app/MIGRATION_GUIDE.md` : Guide des migrations
+
+---
+
+**Dernière mise à jour :** Janvier 2025  
+**Version app :** 1.0.41

@@ -6,8 +6,23 @@ import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
-import { FoodRequest } from './food-request';
 import { checkIsAdmin } from '../lib/admin-utils';
+
+export type FoodRequest = {
+  id: string;
+  userId: string;
+  userEmail: string;
+  foodName: string;
+  brand?: string;
+  portion?: string;
+  calories?: string;
+  protein?: string;
+  carbs?: string;
+  fat?: string;
+  notes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+};
 
 const REQUESTS_KEY = 'feedtoki_food_requests_v1';
 

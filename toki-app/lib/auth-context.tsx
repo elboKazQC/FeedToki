@@ -1,5 +1,6 @@
 // Context Provider pour l'authentification
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthChange, getCurrentUser, getUserProfile, updateUserProfile, AuthUser } from './firebase-auth';
 import { UserProfile } from './types';
@@ -66,43 +67,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    console.log('[AuthContext] ⚡ initAuth démarré');
     const initAuth = async () => {
-      // Migration automatique des profils avec poids incorrects
-      await migrateIncorrectWeights();
+      try {
+        console.log('[AuthContext] 🔄 Migration démarrée');
+        // Migration automatique des profils avec poids incorrects
+        await migrateIncorrectWeights();
+        console.log('[AuthContext] ✅ Migration terminée');
+      } catch (error) {
+        console.error('[AuthContext] ❌ Erreur migration poids (non-bloquant):', error);
+        // Continuer même si la migration échoue
+      }
 
       if (FIREBASE_ENABLED) {
+        console.log('[AuthContext] 🔥 Mode Firebase - Configuration onAuthChange');
         // Mode Firebase
         const unsubscribe = onAuthChange(async (authUser) => {
+          try {
+          console.log('[AuthContext] 🔔 onAuthChange appelé', authUser?.uid || 'null');
           setUser(authUser);
           
           // Mettre à jour l'ID utilisateur pour analytics
           if (authUser) {
+            console.log('[AuthContext] 👤 User défini:', authUser.uid);
             setAnalyticsUserId(authUser.uid);
             setUserProps({
               email: authUser.email || null,
             });
           } else {
+            console.log('[AuthContext] 👤 User = null');
             setAnalyticsUserId(null);
           }
           
           if (authUser) {
+            console.log('[AuthContext] 🔄 Début migration auto vers Firestore');
             // Migration automatique des données locales vers Firestore
             await autoMigrateIfNeeded(authUser.uid);
+            console.log('[AuthContext] ✅ Migration auto terminée');
             
             // Synchroniser les données depuis Firestore (fusion intelligente)
             try {
+              console.log('[AuthContext] 📥 Début sync depuis Firestore');
               const { syncFromFirestore } = await import('./data-sync');
               const syncResult = await syncFromFirestore(authUser.uid);
               if (syncResult.mealsMerged > 0 || syncResult.pointsRestored || syncResult.targetsRestored || syncResult.weightsMerged > 0) {
-                if (__DEV__) console.log('[AuthContext] Données synchronisées depuis Firestore:', syncResult);
+                console.log('[AuthContext] ✅ Données synchronisées depuis Firestore:', syncResult);
                 // Les composants se rechargeront via leurs useEffect qui dépendent de currentUserId
+              } else {
+                console.log('[AuthContext] ℹ️ Sync Firestore: aucune donnée à fusionner');
               }
             } catch (error) {
-              console.error('[AuthContext] Erreur synchronisation Firestore:', error);
+              console.error('[AuthContext] ❌ Erreur synchronisation Firestore:', error);
               // Continue même si la synchronisation échoue
             }
             
+            console.log('[AuthContext] 📋 Chargement profil utilisateur...');
             let userProfile = await getUserProfile(authUser.uid);
+            console.log('[AuthContext] ✅ Profil chargé:', userProfile?.onboardingCompleted ? 'onboarding complété' : 'onboarding non complété');
             
             // Mettre à jour les objectifs nutritionnels si le profil a un poids mais pas d'objectifs personnalisés
             if (userProfile && userProfile.currentWeight) {
@@ -147,12 +168,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               console.log('[AuthContext] Profil corrigé:', correctedPoints, 'pts/jour');
             }
             
+            console.log('[AuthContext] 💾 Définition du profil dans le state');
             setProfile(userProfile);
             
             // Vérifier si le profil local a onboardingCompleted = true mais pas Firestore
             // Si c'est le cas, mettre à jour Firestore (AVANT la vérification de routage)
             if (userProfile && !userProfile.onboardingCompleted) {
               try {
+                console.log('[AuthContext] 🔍 Vérification profil local pour onboardingCompleted...');
                 // Vérifier dans AsyncStorage avec plusieurs clés possibles
                 const localProfileKey1 = `toki_user_profile_${authUser.uid}`;
                 const localProfileKey2 = 'toki_user_profile_v1';
@@ -165,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   const localProfile = JSON.parse(localProfileRaw);
                   if (localProfile.onboardingCompleted) {
                     // Le profil local est complété mais pas Firestore, mettre à jour Firestore
-                    console.log('[AuthContext] Profil local complété mais pas Firestore, mise à jour...');
+                    console.log('[AuthContext] 🔄 Profil local complété mais pas Firestore, mise à jour...');
                     const cleanProfile = { ...userProfile, onboardingCompleted: true };
                     // Filtrer undefined
                     const firestoreProfile: any = {};
@@ -178,11 +201,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     await updateUserProfile(authUser.uid, firestoreProfile);
                     userProfile.onboardingCompleted = true;
                     setProfile(userProfile);
-                    console.log('[AuthContext] Profil Firestore mis à jour avec onboardingCompleted: true');
+                    console.log('[AuthContext] ✅ Profil Firestore mis à jour avec onboardingCompleted: true');
                   }
                 }
               } catch (e) {
-                console.error('[AuthContext] Erreur vérification profil local:', e);
+                console.error('[AuthContext] ❌ Erreur vérification profil local:', e);
               }
             }
             
@@ -190,15 +213,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             
             // Ne rediriger que lors de l'initialisation initiale ET seulement si nécessaire
             if (!initialRoutingDone) {
+              console.log('[AuthContext] 🧭 Routing initial marqué comme fait');
               setInitialRoutingDone(true);
               
               // La navigation sera gérée par NavigationHandler dans _layout.tsx
               // On marque juste que le routing initial est fait pour éviter les redirections multiples
-              if (__DEV__) console.log('[AuthContext] Profil chargé, routing initial marqué comme fait');
             }
             
+            console.log('[AuthContext] ✅ setLoading(false) - Auth initialisée avec succès');
             setLoading(false);
           } else {
+            console.log('[AuthContext] 👤 Pas d\'utilisateur, profil = null');
             setProfile(null);
             // La navigation sera gérée par NavigationHandler dans _layout.tsx
             if (!initialRoutingDone) {
@@ -206,15 +231,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
           
+          console.log('[AuthContext] ✅ setLoading(false) - Fin onAuthChange');
           setLoading(false);
+          } catch (error) {
+            // Gestion d'erreur globale pour onAuthChange (Safari mobile)
+            console.error('[AuthContext] ❌ Erreur dans onAuthChange:', error);
+            // S'assurer que loading est toujours false pour permettre le rendu
+            console.log('[AuthContext] ⚠️ setLoading(false) après erreur');
+            setLoading(false);
+            // Si on a une erreur critique, on peut essayer de continuer avec un état minimal
+            if (!profile) {
+              setProfile(null);
+            }
+          }
         });
         
+        console.log('[AuthContext] ✅ onAuthChange configuré, retour unsubscribe');
         return unsubscribe;
       } else {
         // Mode local
-        console.log('[AuthContext] initAuth - Mode local');
+        console.log('[AuthContext] 💾 Mode local - Début initAuth');
         const currentUser = await getCurrentLocalUser();
-        console.log('[AuthContext] initAuth - currentUser:', JSON.stringify(currentUser, null, 2));
+        console.log('[AuthContext] 👤 currentUser:', currentUser ? `ID: ${currentUser.id}` : 'null');
         setUser(currentUser);
         
         if (currentUser) {
@@ -250,15 +288,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    initAuth();
+    // Wrapper de sécurité pour Safari mobile - s'assurer que l'initialisation ne bloque jamais
+    initAuth().catch((error) => {
+      console.error('[AuthContext] Erreur critique lors de l\'initialisation:', error);
+      // Même en cas d'erreur, on doit permettre à l'app de continuer
+      setLoading(false);
+      setProfile(null);
+      setUser(null);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSignOut = async () => {
-    setUser(null);
-    setProfile(null);
-    await localSignOut();
-    // La redirection sera gérée par app/index.tsx quand profile devient null
+    try {
+      console.log('[AuthContext] Déconnexion en cours...');
+      
+      // Déconnexion Firebase si activé
+      if (FIREBASE_ENABLED) {
+        try {
+          const { signOut: firebaseSignOut } = await import('./firebase-auth');
+          await firebaseSignOut();
+          console.log('[AuthContext] Déconnexion Firebase réussie');
+        } catch (error) {
+          console.warn('[AuthContext] Erreur déconnexion Firebase (non-bloquant):', error);
+          // Continuer même si Firebase échoue
+        }
+      }
+      
+      // Déconnexion locale
+      await localSignOut();
+      console.log('[AuthContext] Déconnexion locale réussie');
+      
+      // Nettoyer le profil local associé
+      const userId = (user as any)?.uid || (user as any)?.userId || profile?.userId;
+      if (userId) {
+        try {
+          await AsyncStorage.removeItem(`toki_user_profile_${userId}`);
+          console.log('[AuthContext] Profil local nettoyé');
+        } catch (error) {
+          console.warn('[AuthContext] Erreur nettoyage profil local (non-bloquant):', error);
+        }
+      }
+      
+      // Mettre à jour le state (cela déclenchera la redirection via app/index.tsx)
+      setUser(null);
+      setProfile(null);
+      console.log('[AuthContext] State mis à jour, redirection en cours...');
+    } catch (error) {
+      console.error('[AuthContext] Erreur lors de la déconnexion:', error);
+      // Mettre à jour le state quand même pour éviter un état bloqué
+      setUser(null);
+      setProfile(null);
+      throw error;
+    }
   };
 
   return (

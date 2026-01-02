@@ -1,25 +1,33 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { MealEntry, normalizeDate } from '../lib/stats';
-import { computeDailyTotals } from '../lib/nutrition';
+import { computeDailyTotals, computeDayScore, NutritionTargets } from '../lib/nutrition';
 import { FoodItem } from '../lib/food-db';
 
-type BestDaysProps = {
-  entries: MealEntry[];
-  customFoods?: FoodItem[];
-  daysToShow?: number;
-  excludedDays?: string[]; // Jours exclus du classement (mais données conservées)
-  onExcludeDay?: (date: string) => void; // Callback pour exclure un jour du classement
-};
-
-type DaySummary = {
+export type DaySummary = {
   date: string;
   score: number;
   meals: MealEntry[];
   totals: ReturnType<typeof computeDailyTotals>;
 };
 
-export function BestDays({ entries, customFoods = [], daysToShow = 3, excludedDays = [], onExcludeDay }: BestDaysProps) {
+type ScoreGroup = {
+  score: number;
+  days: DaySummary[];
+};
+
+type BestDaysProps = {
+  entries: MealEntry[];
+  customFoods?: FoodItem[];
+  targets?: NutritionTargets; // Objectifs nutritionnels pour calculer le score
+  expectedMealsPerDay?: number; // Nombre de repas attendus par jour (défaut: 3)
+  daysToShow?: number;
+  excludedDays?: string[]; // Jours exclus du classement (mais données conservées)
+  onExcludeDay?: (date: string) => void; // Callback pour exclure un jour du classement
+  onDayPress?: (day: DaySummary) => void; // Callback pour cliquer sur une journée
+};
+
+export function BestDays({ entries, customFoods = [], targets, expectedMealsPerDay = 3, daysToShow = 3, excludedDays = [], onExcludeDay, onDayPress }: BestDaysProps) {
   // Calculer les dates de référence une seule fois (évite l'erreur d'hydratation)
   const dateRefs = useMemo(() => {
     const now = new Date();
@@ -31,7 +39,7 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3, excludedDa
   }, []);
   
   // Grouper les entrées par jour et calculer le score pour chaque jour
-  const dailySummaries = useMemo(() => {
+  const scoreGroups = useMemo(() => {
     const dayMap = new Map<string, MealEntry[]>();
     
     // Grouper les entrées par date
@@ -52,27 +60,54 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3, excludedDa
         return;
       }
       
-      // Calculer le score moyen des repas de ce jour
-      const scores = dayEntries.map(e => e.score);
-      const avgScore = scores.length > 0 
-        ? scores.reduce((sum, s) => sum + s, 0) / scores.length 
-        : 0;
+      // Utiliser computeDayScore si targets disponibles, sinon moyenne simple (rétrocompatibilité)
+      let dayScore: number;
+      if (targets) {
+        dayScore = computeDayScore(dayEntries, targets, customFoods || [], expectedMealsPerDay);
+      } else {
+        // Fallback: moyenne simple des scores des repas
+        const scores = dayEntries.map(e => e.score);
+        dayScore = scores.length > 0 
+          ? scores.reduce((sum, s) => sum + s, 0) / scores.length 
+          : 0;
+      }
       
       const totals = computeDailyTotals(dayEntries, dayEntries[0]?.createdAt || new Date().toISOString(), customFoods || []);
       
       summaries.push({
         date,
-        score: Math.round(avgScore),
+        score: Math.round(dayScore),
         meals: dayEntries.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
         totals,
       });
     });
     
-    // Trier par score décroissant et prendre les meilleurs
-    return summaries
-      .sort((a, b) => b.score - a.score)
-      .slice(0, daysToShow);
-  }, [entries, customFoods, daysToShow, excludedDays]);
+    // Grouper par score (arrondi)
+    const groupsMap = new Map<number, DaySummary[]>();
+    summaries.forEach(summary => {
+      const scoreKey = summary.score;
+      if (!groupsMap.has(scoreKey)) {
+        groupsMap.set(scoreKey, []);
+      }
+      groupsMap.get(scoreKey)!.push(summary);
+    });
+    
+    // Convertir en array et trier par score décroissant
+    const groups: ScoreGroup[] = Array.from(groupsMap.entries())
+      .map(([score, days]) => ({
+        score,
+        days: days.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), // Plus récentes en premier
+      }))
+      .sort((a, b) => b.score - a.score);
+    
+    // Limiter à 6 journées par groupe et aux top 5 groupes
+    return groups
+      .slice(0, 5)
+      .map(group => ({
+        ...group,
+        days: group.days.slice(0, 6), // Maximum 6 journées par groupe
+      }));
+  }, [entries, customFoods, targets, expectedMealsPerDay, excludedDays]);
   
   // Fonctions helper utilisant les références de date stables
   const formatDate = (dateStr: string) => {
@@ -89,92 +124,125 @@ export function BestDays({ entries, customFoods = [], daysToShow = 3, excludedDa
   };
   
   const getScoreColor = (score: number) => {
-    if (score >= 70) return '#22c55e'; // Vert
-    if (score >= 40) return '#f59e0b'; // Orange
+    if (score >= 80) return '#22c55e'; // Vert
+    if (score >= 60) return '#f59e0b'; // Orange
     return '#ef4444'; // Rouge
   };
   
   const getScoreLabel = (score: number) => {
-    if (score >= 70) return 'Excellent';
-    if (score >= 40) return 'Bon';
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Bon';
     return 'À améliorer';
   };
   
-  if (dailySummaries.length === 0) {
+  if (scoreGroups.length === 0) {
     return null;
   }
   
+  // Calculer l'index global pour toutes les journées (pour la numérotation)
+  let globalDayIndex = 0;
+  
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🏆 Tes {dailySummaries.length} meilleur{dailySummaries.length > 1 ? 's' : ''} jour{dailySummaries.length > 1 ? 's' : ''}</Text>
-      <Text style={styles.subtitle}>Pour t&apos;aider à répliquer tes succès</Text>
+      <Text style={styles.title}>🏆 Tes meilleurs jours par score</Text>
+      <Text style={styles.subtitle}>Plusieurs exemples pour chaque score</Text>
       
-      <ScrollView style={styles.scrollView} horizontal showsHorizontalScrollIndicator={false}>
-        {dailySummaries.map((day, index) => (
-          <View key={day.date} style={styles.dayCard}>
-            <View style={styles.dayHeader}>
-              <Text style={styles.dayRank}>#{index + 1}</Text>
-              <View style={styles.dayInfo}>
-                <Text style={styles.dayDate}>{formatDate(day.date)}</Text>
-                <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(day.score) }]}>
-                  <Text style={styles.scoreText}>{day.score}%</Text>
-                </View>
+      <ScrollView 
+        style={styles.horizontalScrollView} 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+      >
+        {scoreGroups.map((group, groupIndex) => {
+          return (
+            <View key={group.score} style={styles.scoreGroupHorizontal}>
+              {/* Titre du groupe */}
+              <View style={styles.groupHeaderHorizontal}>
+                <Text style={styles.groupTitleHorizontal}>
+                  Score {group.score}
+                </Text>
+                <Text style={styles.groupSubtitleHorizontal}>
+                  ({group.days.length} jour{group.days.length > 1 ? 's' : ''})
+                </Text>
               </View>
-              {onExcludeDay && (
-                <TouchableOpacity
-                  style={styles.excludeButton}
-                  onPress={() => {
-                    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.confirm) {
-                      const confirmed = window.confirm(`Exclure le ${formatDate(day.date)} du classement ?\n\n(Les données ne seront pas supprimées, juste masquées du top)`);
-                      if (confirmed) {
-                        onExcludeDay(day.date);
-                      }
-                    } else {
-                      Alert.alert(
-                        'Exclure ce jour du classement',
-                        `Exclure le ${formatDate(day.date)} du top des meilleurs jours ?\n\nLes données ne seront pas supprimées, juste masquées.`,
-                        [
-                          { text: 'Annuler', style: 'cancel' },
-                          {
-                            text: 'Exclure',
-                            onPress: () => onExcludeDay(day.date),
-                          },
-                        ]
-                      );
-                    }
-                  }}
-                >
-                  <Text style={styles.excludeButtonText}>✕</Text>
-                </TouchableOpacity>
-              )}
+              
+              {/* Cartes du groupe */}
+              {group.days.map((day) => {
+                const currentIndex = globalDayIndex++;
+                return (
+                  <TouchableOpacity
+                    key={day.date}
+                    style={styles.dayCard}
+                    onPress={() => onDayPress?.(day)}
+                    activeOpacity={0.7}
+                    disabled={!onDayPress}
+                  >
+                    <View style={styles.dayHeader}>
+                      <Text style={styles.dayRank}>#{currentIndex + 1}</Text>
+                      <View style={styles.dayInfo}>
+                        <Text style={styles.dayDate}>{formatDate(day.date)}</Text>
+                        <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(day.score) }]}>
+                          <Text style={styles.scoreText}>{day.score}%</Text>
+                        </View>
+                      </View>
+                      {onExcludeDay && (
+                        <TouchableOpacity
+                          style={styles.excludeButton}
+                          onPress={() => {
+                            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.confirm) {
+                              const confirmed = window.confirm(`Exclure le ${formatDate(day.date)} du classement ?\n\n(Les données ne seront pas supprimées, juste masquées du top)`);
+                              if (confirmed) {
+                                onExcludeDay(day.date);
+                              }
+                            } else {
+                              Alert.alert(
+                                'Exclure ce jour du classement',
+                                `Exclure le ${formatDate(day.date)} du top des meilleurs jours ?\n\nLes données ne seront pas supprimées, juste masquées.`,
+                                [
+                                  { text: 'Annuler', style: 'cancel' },
+                                  {
+                                    text: 'Exclure',
+                                    onPress: () => onExcludeDay(day.date),
+                                  },
+                                ]
+                              );
+                            }
+                          }}
+                        >
+                          <Text style={styles.excludeButtonText}>✕</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    
+                    <Text style={styles.scoreLabel}>{getScoreLabel(day.score)}</Text>
+                    
+                    {/* Totaux nutritionnels */}
+                    <View style={styles.nutritionSummary}>
+                      <View style={styles.nutritionItem}>
+                        <Text style={styles.nutritionLabel}>🔥 Calories</Text>
+                        <Text style={styles.nutritionValue}>{Math.round(day.totals.calories_kcal)}</Text>
+                      </View>
+                      <View style={styles.nutritionItem}>
+                        <Text style={styles.nutritionLabel}>💪 Protéines</Text>
+                        <Text style={styles.nutritionValue}>{Math.round(day.totals.protein_g)}g</Text>
+                      </View>
+                    </View>
+                    
+                    {/* Liste des repas */}
+                    <View style={styles.mealsList}>
+                      <Text style={styles.mealsTitle}>Repas ({day.meals.length})</Text>
+                      {day.meals.map((meal, mealIndex) => (
+                        <View key={meal.id} style={styles.mealItem}>
+                          <Text style={styles.mealCategory}>[{meal.category}]</Text>
+                          <Text style={styles.mealLabel} numberOfLines={2}>{meal.label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            
-            <Text style={styles.scoreLabel}>{getScoreLabel(day.score)}</Text>
-            
-            {/* Totaux nutritionnels */}
-            <View style={styles.nutritionSummary}>
-              <View style={styles.nutritionItem}>
-                <Text style={styles.nutritionLabel}>🔥 Calories</Text>
-                <Text style={styles.nutritionValue}>{Math.round(day.totals.calories_kcal)}</Text>
-              </View>
-              <View style={styles.nutritionItem}>
-                <Text style={styles.nutritionLabel}>💪 Protéines</Text>
-                <Text style={styles.nutritionValue}>{Math.round(day.totals.protein_g)}g</Text>
-              </View>
-            </View>
-            
-            {/* Liste des repas */}
-            <View style={styles.mealsList}>
-              <Text style={styles.mealsTitle}>Repas ({day.meals.length})</Text>
-              {day.meals.map((meal, mealIndex) => (
-                <View key={meal.id} style={styles.mealItem}>
-                  <Text style={styles.mealCategory}>[{meal.category}]</Text>
-                  <Text style={styles.mealLabel} numberOfLines={2}>{meal.label}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -196,8 +264,25 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginBottom: 12,
   },
-  scrollView: {
+  horizontalScrollView: {
     flexDirection: 'row',
+  },
+  scoreGroupHorizontal: {
+    marginRight: 16,
+  },
+  groupHeaderHorizontal: {
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  groupTitleHorizontal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#e5e7eb',
+  },
+  groupSubtitleHorizontal: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
   },
   dayCard: {
     width: 280,

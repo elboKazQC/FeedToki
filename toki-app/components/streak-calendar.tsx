@@ -10,9 +10,10 @@ type DayData = {
 type StreakCalendarProps = {
   entries: { createdAt: string }[];
   weeksToShow?: number;
+  cheatDays?: Record<string, boolean>; // Dates des jours cheat
 };
 
-export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProps) {
+export function StreakCalendar({ entries, weeksToShow = 12, cheatDays = {} }: StreakCalendarProps) {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [calendarData, setCalendarData] = useState<DayData[]>([]);
 
@@ -50,7 +51,11 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
 
 
 
-  const getIntensityColor = (hasMeal: boolean) => {
+  const getIntensityColor = (hasMeal: boolean, date: string) => {
+    // Vérifier si c'est un cheat day
+    if (cheatDays[date] === true) {
+      return '#f59e0b'; // Orange pour les cheat days
+    }
     if (!hasMeal) return '#1f2937'; // Gris foncé
     return '#22c55e'; // Vert
   };
@@ -90,7 +95,7 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
                 key={dayIdx}
                 style={[
                   styles.day,
-                  { backgroundColor: getIntensityColor(day.hasMeal) },
+                  { backgroundColor: getIntensityColor(day.hasMeal, day.date) },
                   selectedDay === day.date && styles.daySelected,
                 ]}
                 onPress={() => setSelectedDay(day.date)}
@@ -101,16 +106,22 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
       </View>
 
       {/* Info du jour sélectionné */}
-      {selectedDay && (
-        <View style={styles.selectedInfo}>
-          <Text style={styles.selectedDate}>{formatDate(selectedDay)}</Text>
-          <Text style={styles.selectedStatus}>
-            {calendarData.find(d => d.date === selectedDay)?.hasMeal 
-              ? '✅ Dragon nourri' 
-              : '⭕ Pas d\'activité'}
-          </Text>
-        </View>
-      )}
+      {selectedDay && (() => {
+        const dayData = calendarData.find(d => d.date === selectedDay);
+        const isCheatDay = cheatDays[selectedDay] === true;
+        return (
+          <View style={styles.selectedInfo}>
+            <Text style={styles.selectedDate}>{formatDate(selectedDay)}</Text>
+            <Text style={styles.selectedStatus}>
+              {isCheatDay 
+                ? '🎉 Journée cheat' 
+                : dayData?.hasMeal 
+                  ? '✅ Dragon nourri' 
+                  : '⭕ Pas d\'activité'}
+            </Text>
+          </View>
+        );
+      })()}
 
       {/* Légende */}
       <View style={styles.legend}>
@@ -118,8 +129,10 @@ export function StreakCalendar({ entries, weeksToShow = 12 }: StreakCalendarProp
         <View style={styles.legendSquares}>
           <View style={[styles.legendSquare, { backgroundColor: '#1f2937' }]} />
           <View style={[styles.legendSquare, { backgroundColor: '#22c55e' }]} />
+          <View style={[styles.legendSquare, { backgroundColor: '#f59e0b' }]} />
         </View>
         <Text style={styles.legendText}>Plus</Text>
+        <Text style={[styles.legendText, { marginLeft: 8 }]}>🎉 Cheat</Text>
       </View>
     </View>
   );

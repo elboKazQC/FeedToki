@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Image, Animated, Easing } from 'react-native';
 import { getDragonLevel, getDragonProgress, getPointsToNextLevel, getLevelUpMessage } from '../lib/dragon-levels';
 import { DragonStatus } from '../lib/stats';
+import { trackDragonEvolved } from '../lib/analytics';
 
 type DragonDisplayProps = {
   streakDays: number;  // Jours consécutifs de streak

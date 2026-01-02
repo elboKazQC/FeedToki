@@ -46,3 +46,34 @@ app-example
 
 # OneDrive artifacts
 _ul
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/safari-logs.jsonl
+
+# Fichiers avec clés Stripe (garder en local uniquement)
+docs/STRIPE_PRODUCTION_SETUP.md
+docs/CONFIGURATION_PRODUCTION_COMPLETE.md
+docs/RESUME_PASSAGE_PRODUCTION.md
+docs/RESUME_CREATION_ABONNEMENT.md
+scripts/setup-stripe-secrets-production.bat
+scripts/setup-stripe-secrets-production.sh
+scripts/configure-stripe-production.sh
+scripts/create-subscription-manually.ts
+scripts/test-subscription-direct-admin.ts
+scripts/test-subscription-firebase-cli.ts
+
+# Fichiers avec clés Stripe de test
+docs/STRIPE_SETUP.md
+scripts/create-subscription-firestore-rest.ts
+scripts/setup-stripe-secrets.bat
+scripts/test-subscription-simple.ts
+
+# Fichiers avec clés Stripe (tous modes)
+docs/CREER_ABONNEMENT_MANUEL.md
+docs/STRIPE_MODE_ACTUEL.md
+scripts/create-subscription-final.ts
+scripts/setup-stripe-secrets.sh
+scripts/test-subscription-via-function.ts
+scripts/test-subscription-complete.ts

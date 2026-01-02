@@ -1,0 +1,9 @@
+{
+  "tier": "paid",
+  "status": "active",
+  "subscriptionStartDate": "2026-01-01T14:49:54.000Z",
+  "subscriptionEndDate": "2026-02-01T14:49:54.000Z",
+  "stripeCustomerId": "cus_TiDXZZf5MqNgtk",
+  "stripeSubscriptionId": "sub_1SknCIGdme3i0KJAW3s35lNa",
+  "createdAt": "2026-01-01T14:49:54.000Z"
+}

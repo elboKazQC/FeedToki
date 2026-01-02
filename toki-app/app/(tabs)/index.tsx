@@ -12,7 +12,9 @@ import {
   View,
   Platform,
   Alert,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from '@/components/safe-area-view-wrapper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import {
@@ -28,7 +30,7 @@ import {
   DAYS_CRITICAL,
   MIN_CALORIES_FOR_COMPLETE_DAY,
 } from '../../lib/stats';
-import { classifyMealByItems, FoodItemRef } from '../../lib/classifier';
+import { classifyMealByItems, classifyMealByNutrition, FoodItemRef } from '../../lib/classifier';
 import { QUICK_MEALS } from '../../lib/presets';
 import { calculateFavoriteMeals } from '../../lib/favorite-meals';
 import { FOOD_DB, type FoodItem } from '../../lib/food-db';
@@ -38,7 +40,7 @@ import {
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
 import { getSmartRecommendations, getSmartRecommendationsByTaste, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
-import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget } from '../../lib/nutrition';
+import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget, computeMealScore, NutritionTargets } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
 import { getPortionsForItem, getDefaultPortion, formatPortionLabel, PortionReference, PortionSize, getUnitForFood, createCustomPortion, formatPortionHint, createPortionCustomPortion } from '../../lib/portions';
@@ -53,6 +55,8 @@ import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
 import { loadCustomFoods, mergeFoodsWithCustom, migrateLocalFoodsToGlobal } from '../../lib/custom-foods';
 import { userLogger, logError, flushLogsNow } from '../../lib/user-logger';
+import { isCheatDay, setCheatDay } from '../../lib/cheat-days';
+import { PaywallModal } from '../../components/paywall-modal';
 import { trackMealLogged, trackStreakMilestone, trackTargetUpdated } from '../../lib/analytics';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -82,10 +86,10 @@ const INITIAL_POINTS = 2; // Débutants commencent avec peu
 function mapScore7ToStatsUI(score: number): StatsUI {
   let label = 'À améliorer 🐉';
   let level: 1 | 2 | 3 = 1;
-  if (score >= 70) {
+  if (score >= 80) {
     label = 'Excellent 👑';
     level = 3;
-  } else if (score >= 40) {
+  } else if (score >= 60) {
     label = 'En progrès 💪';
     level = 2;
   }
@@ -111,8 +115,8 @@ function buildDayFeeds(entries: MealEntry[]): Record<string, { date: string; mea
 }
 
 function scoreToCategory(score: number): MealEntry['category'] {
-  if (score >= 70) return 'sain';
-  if (score >= 40) return 'ok';
+  if (score >= 80) return 'sain';
+  if (score >= 60) return 'ok';
   return 'cheat';
 }
 
@@ -150,6 +154,7 @@ export default function App() {
   const [preselectedItem, setPreselectedItem] = useState<{ item: FoodItem; portion: PortionReference } | null>(null);
   const [preselectedEntryItems, setPreselectedEntryItems] = useState<FoodItemRef[] | null>(null);
   const [preselectedEntryLabel, setPreselectedEntryLabel] = useState<string | null>(null);
+  const [cheatDays, setCheatDays] = useState<Record<string, boolean>>({});
   // TEMPORAIRE: Désactiver le modal dragon pour fixer le bug
   // const [showDragonDeadModal, setShowDragonDeadModal] = useState(false);
   const [isDragonDead, setIsDragonDead] = useState(false);
@@ -216,12 +221,12 @@ export default function App() {
   const prevUserIdRef = React.useRef<string | undefined>(undefined);
   
   useEffect(() => {
-    // Si l'userId a changé ET que ce n'est pas la première fois (undefined → valeur initiale), réinitialiser
-      if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId && currentUserId !== 'guest') {
-      if (__DEV__) console.log('[Index] ⚠️ Changement de compte détecté:', prevUserIdRef.current, '→', currentUserId);
-      if (__DEV__) console.log('[Index] Réinitialisation des données locales pour éviter mélange');
+    // Si l'userId a changé (et que ce n'est pas la première initialisation), réinitialiser immédiatement
+    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId) {
+      console.log('[Index] ⚠️ Changement de compte détecté:', prevUserIdRef.current, '→', currentUserId);
+      console.log('[Index] Réinitialisation immédiate des données locales pour éviter mélange');
       
-      // Réinitialiser les états pour forcer le rechargement avec les bonnes données
+      // Réinitialiser IMMÉDIATEMENT tous les états pour éviter d'afficher les données de l'ancien compte
       setEntries([]);
       setPoints(0);
       setTotalPointsEarned(0);
@@ -232,18 +237,8 @@ export default function App() {
       // Les données seront rechargées par les useEffect suivants avec le bon userId
     }
     
-    // Mettre à jour la référence
+    // Mettre à jour la référence APRÈS la réinitialisation
     prevUserIdRef.current = currentUserId;
-  }, [currentUserId]);
-  useEffect(() => {
-    if (currentUserId && currentUserId !== 'guest') {
-      if (__DEV__) console.log('[Index] User changed, resetting data for:', currentUserId);
-      // Reset pour forcer le rechargement des données du nouveau compte
-      setEntries([]);
-      setPoints(0);
-      setTotalPointsEarned(0);
-      setIsReady(false);
-    }
   }, [currentUserId]);
 
   // Charger les entrées au démarrage - recharger quand userId change
@@ -251,12 +246,46 @@ export default function App() {
   useEffect(() => {
     // Attendre que le profil soit chargé
     if (authLoading || !currentUserId || currentUserId === 'guest') {
-      if (__DEV__) console.log('[Index] Waiting for user, currentUserId:', currentUserId);
+      console.log('[Index] Waiting for user, currentUserId:', currentUserId);
       return;
     }
     
+    // CRITIQUE: Capturer le userId au début du chargement pour validation
+    const userIdAtStart = currentUserId;
+    const expectedUserId = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+    
+    // VÉRIFICATION: S'assurer que le currentUserId correspond bien au userId du profil/auth
+    if (userIdAtStart !== expectedUserId) {
+      console.log('[Index] ⚠️ ERREUR: currentUserId ne correspond pas au userId du profil!', {
+        currentUserId: userIdAtStart,
+        expectedUserId: expectedUserId,
+        authProfileUserId: authProfile?.userId,
+        authUserUid: (authUser as any)?.uid,
+      });
+      // Ne pas charger les données si le userId ne correspond pas
+      return;
+    }
+    
+    // Réinitialiser les états AVANT de charger pour éviter d'afficher les données de l'ancien compte
+    console.log('[Index] 🔄 Début chargement des données pour userId:', userIdAtStart);
+    setEntries([]);
+    setPoints(0);
+    setTotalPointsEarned(0);
+    setLastClaimDate('');
+    setIsReady(false);
+    
     const load = async () => {
       try {
+        // VÉRIFICATION 1: Vérifier que le userId n'a pas changé au début du chargement
+        const currentUserIdCheck1 = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+        if (currentUserIdCheck1 !== userIdAtStart) {
+          console.log('[Index] ⚠️ userId a changé au début du chargement, abandon:', {
+            userIdAtStart,
+            currentUserIdCheck1,
+          });
+          return;
+        }
+        
         // IMPORTANT: Ordre de chargement optimisé pour la synchronisation
         // 1. Synchroniser depuis Firestore (repas, points) ET charger les custom foods EN PARALLÈLE
         // 2. Attendre que les deux soient complétés
@@ -264,7 +293,7 @@ export default function App() {
         // 4. Valider que tous les foodId dans les items existent
         
         console.log('[Index] 🔄 Démarrage synchronisation complète depuis Firestore...');
-        console.log('[Index] UserId:', currentUserId);
+        console.log('[Index] UserId:', userIdAtStart);
         console.log('[Index] Auth user:', authUser);
         console.log('[Index] Auth profile:', authProfile);
         
@@ -275,8 +304,9 @@ export default function App() {
           const { syncFromFirestore } = await import('../../lib/data-sync');
           
           // Exécuter en parallèle pour améliorer les performances
+          // IMPORTANT: Utiliser userIdAtStart pour garantir la bonne synchronisation
           const [syncResultValue, _] = await Promise.all([
-            syncFromFirestore(currentUserId),
+            syncFromFirestore(userIdAtStart),
             loadCustomFoodsData(), // Charger les custom foods en parallèle
           ]);
           
@@ -302,9 +332,20 @@ export default function App() {
           }
         }
         
+        // VÉRIFICATION 2: Vérifier que le userId n'a pas changé avant de charger depuis AsyncStorage
+        const currentUserIdCheck2 = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+        if (currentUserIdCheck2 !== userIdAtStart) {
+          console.log('[Index] ⚠️ userId a changé avant chargement AsyncStorage, abandon:', {
+            userIdAtStart,
+            currentUserIdCheck2,
+          });
+          return;
+        }
+        
         // Étape 3: Charger les entrées depuis AsyncStorage (qui contient maintenant les données fusionnées)
-        const key = getEntriesKey();
-        console.log('[Index] 📥 Chargement des entrées depuis AsyncStorage (clé:', key, ')');
+        // IMPORTANT: Utiliser userIdAtStart pour garantir la bonne clé
+        const key = `feedtoki_entries_${userIdAtStart}_v1`;
+        console.log('[Index] 📥 Chargement des entrées depuis AsyncStorage (clé:', key, ', userId validé:', userIdAtStart, ')');
         const json = await AsyncStorage.getItem(key);
         if (json) {
           try {
@@ -332,12 +373,12 @@ export default function App() {
               
               // Étape 4: Valider que tous les foodId dans les items existent
               // Charger les custom foods directement pour la validation (pas le state qui peut être asynchrone)
-              const currentCustomFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+              const currentCustomFoods = await loadCustomFoods(userIdAtStart !== 'guest' ? userIdAtStart : undefined);
               const allFoods = mergeFoodsWithCustom(FOOD_DB, currentCustomFoods);
               
               // Étape 4.5: Réparer les items manquants (ajouter les items mentionnés dans le titre)
               // Cela doit être fait AVANT la validation pour que les nouveaux items soient validés aussi
-              console.log('[Index] 🔧 AVANT réparation - currentUserId:', currentUserId);
+              console.log('[Index] 🔧 AVANT réparation - userIdAtStart:', userIdAtStart);
               try {
                 console.log('[Index] 🔧 Démarrage réparation des items manquants dans les repas...');
                 console.log('[Index] 🔧 Import du module sync-repair...');
@@ -345,8 +386,8 @@ export default function App() {
                 console.log('[Index] 🔧 Module importé:', Object.keys(repairModule));
                 const { repairMissingItemsInMeals } = repairModule;
                 console.log('[Index] 🔧 Fonction repairMissingItemsInMeals:', typeof repairMissingItemsInMeals);
-                console.log('[Index] 🔧 Appel de repairMissingItemsInMeals avec userId:', currentUserId);
-                const repairResult = await repairMissingItemsInMeals(currentUserId);
+                console.log('[Index] 🔧 Appel de repairMissingItemsInMeals avec userId:', userIdAtStart);
+                const repairResult = await repairMissingItemsInMeals(userIdAtStart);
                 console.log('[Index] ✅ Réparation terminée:', {
                   itemsAdded: repairResult.itemsAdded,
                   mealsFixed: repairResult.mealsFixed,
@@ -385,13 +426,32 @@ export default function App() {
               const { validateAndFixMealEntries } = await import('../../lib/data-sync');
               const validatedEntries = validateAndFixMealEntries(normalized, allFoods);
               
+              // VÉRIFICATION FINALE: Vérifier que le userId n'a pas changé avant de setEntries
+              const currentUserIdFinal = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+              if (currentUserIdFinal !== userIdAtStart) {
+                console.log('[Index] ⚠️ userId a changé avant setEntries, abandon chargement des données:', {
+                  userIdAtStart,
+                  currentUserIdFinal,
+                });
+                return;
+              }
+              
               setEntries(validatedEntries);
-              console.log('[Index] ✅ Entrées normalisées, validées et chargées dans le state:', validatedEntries.length);
+              console.log('[Index] ✅ Entrées normalisées, validées et chargées dans le state pour userId:', userIdAtStart, ':', validatedEntries.length, 'repas');
               
               // Étape 5: Recalculer les points après synchronisation pour éviter les duplications
               // Attendre un peu pour s'assurer que le state est mis à jour
               setTimeout(async () => {
-                if (userProfile && currentUserId !== 'guest') {
+                // VÉRIFICATION: Vérifier que le userId n'a pas changé avant de recalculer les points
+                const currentUserIdForPoints = authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest';
+                if (currentUserIdForPoints !== userIdAtStart) {
+                  console.log('[Index] ⚠️ userId a changé avant recalcul points, abandon:', {
+                    userIdAtStart,
+                    currentUserIdForPoints,
+                  });
+                  return;
+                }
+                if (userProfile && userIdAtStart !== 'guest') {
                   console.log('[Index] 🔄 Recalcul des points après synchronisation...');
                   try {
                     const today = getTodayLocal();
@@ -1248,6 +1308,30 @@ export default function App() {
     }
   }, [currentUserId]);
 
+  // Charger les cheat days
+  useEffect(() => {
+    const loadCheatDays = async () => {
+      if (!currentUserId || currentUserId === 'guest') {
+        setCheatDays({});
+        return;
+      }
+      
+      try {
+        const { getCheatDays } = await import('../../lib/cheat-days');
+        const cheatDaysData = await getCheatDays(currentUserId);
+        setCheatDays(cheatDaysData);
+        console.log('[Index] ✅ Cheat days chargés:', Object.keys(cheatDaysData).length, 'jours');
+      } catch (error) {
+        console.error('[Index] Erreur chargement cheat days:', error);
+        setCheatDays({});
+      }
+    };
+    
+    if (isReady && currentUserId) {
+      loadCheatDays();
+    }
+  }, [currentUserId, isReady]);
+
   // Recharger les aliments personnalisés quand on revient sur l'écran add
   useEffect(() => {
     if (screen === 'add' && currentUserId) {
@@ -1281,11 +1365,30 @@ export default function App() {
 
   const handleAddEntry = async (entry: Omit<MealEntry, 'id' | 'createdAt'> & { score?: number }) => {
     try {
+      // Calculer le score avec le nouveau système si les items sont disponibles
+      let calculatedScore: number | undefined = undefined;
+      if (entry.items && entry.items.length > 0 && targets) {
+        const customFoodsForScore = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        const tempEntry: MealEntry = {
+          id: 'temp',
+          createdAt: new Date().toISOString(),
+          label: entry.label,
+          category: entry.category,
+          score: 0,
+          items: entry.items,
+        };
+        calculatedScore = computeMealScore(tempEntry, targets, 3, customFoodsForScore);
+      }
+      
       const newEntry: MealEntry = {
         id: Date.now().toString(),
         createdAt: new Date().toISOString(),
         ...entry,
-        score: typeof entry.score === 'number' ? entry.score : mapManualCategoryToScore(entry.category),
+        score: typeof entry.score === 'number' 
+          ? entry.score 
+          : calculatedScore !== undefined 
+            ? calculatedScore 
+            : mapManualCategoryToScore(entry.category),
       };
       
       await userLogger.info(
@@ -1347,7 +1450,8 @@ export default function App() {
           hasAiParser: false, // Sera mis à jour si nécessaire
         });
         
-        if (totalPoints > 0) {
+        // Ne pas déduire de points si c'est un repas cheat
+        if (totalPoints > 0 && !entry.isCheatMeal) {
           const pointsKey = getPointsKey();
           const pointsRaw = await AsyncStorage.getItem(pointsKey);
           const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
@@ -1617,7 +1721,14 @@ export default function App() {
       const oldCost = await calculateEntryCost(oldEntry);
       
       // Re-classer le repas avec les items mis à jour
-      const classification = classifyMealByItems(updatedEntry.items || []);
+      let classification: { score: number; category: MealEntry['category'] };
+      if (updatedEntry.items && updatedEntry.items.length > 0 && targets) {
+        const customFoodsForScore = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+        classification = classifyMealByNutrition(updatedEntry, targets, 3, customFoodsForScore);
+      } else {
+        classification = classifyMealByItems(updatedEntry.items || []);
+      }
+      
       const finalEntry: MealEntry = {
         ...updatedEntry,
         id: entryId,
@@ -1689,7 +1800,7 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {screen === 'home' && (
         <HomeScreen
           entries={entries}
@@ -1758,6 +1869,7 @@ export default function App() {
           lastClaimDate={lastClaimDate}
           customFoods={customFoods}
           dayCaloriesMap={dayCaloriesMap}
+          cheatDays={cheatDays}
         />
       )}
 
@@ -1779,11 +1891,12 @@ export default function App() {
           preselectedEntryLabel={preselectedEntryLabel}
           customFoods={customFoods}
           entries={entries}
+          currentUserId={currentUserId}
         />
       )}
 
       <StatusBar style="light" />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -1808,6 +1921,7 @@ function HomeScreen({
   lastClaimDate,
   customFoods,
   dayCaloriesMap,
+  cheatDays,
 }: {
   entries: MealEntry[];
   onPressAdd: () => void;
@@ -1828,12 +1942,18 @@ function HomeScreen({
   lastClaimDate: string;
   customFoods: typeof FOOD_DB;
   dayCaloriesMap: Record<string, number>;
+  cheatDays: Record<string, boolean>;
 }) {
   const { profile: authProfile, user: authUser } = useAuth();
   const currentUserId = (authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest');
   
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<{ entryId: string; itemIndex: number; itemRef: FoodItemRef; foodItem: FoodItem } | null>(null);
+  
+  // Smart recommendations state (déclaré avant return conditionnel pour respecter les règles des hooks)
+  const [showHungryMode, setShowHungryMode] = useState(false);
+  const [tastePreference, setTastePreference] = useState<'sweet' | 'salty' | null>(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Fusionner FOOD_DB avec les aliments personnalisés
   const allFoods = useMemo(() => {
@@ -1932,11 +2052,6 @@ function HomeScreen({
   const dailyBudget = userProfile?.dailyPointsBudget || DAILY_POINTS;
   const maxCap = userProfile?.maxPointsCap || MAX_POINTS;
   const weeklyCalTarget = userProfile?.weeklyCalorieTarget;
-  
-  // Smart recommendations state
-  const [showHungryMode, setShowHungryMode] = useState(false);
-  const [tastePreference, setTastePreference] = useState<'sweet' | 'salty' | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   // Get time of day for context-aware suggestions
   const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
@@ -2279,6 +2394,7 @@ function HomeScreen({
         dayCaloriesMap={dayCaloriesMap}
         minCalories={MIN_CALORIES_FOR_COMPLETE_DAY}
         daysToShow={10}
+        cheatDays={cheatDays}
       />
 
       {/* Bouton Streak - ouvre la page stats */}
@@ -2617,9 +2733,16 @@ function HomeScreen({
               <View style={rowStyle}>
                 <View style={styles.historyItemContent}>
                   <View style={styles.historyItemHeader}>
-                    <Text style={textStyle}>
-                      {isToday ? '✨' : isYesterday ? '📅' : '•'} [{item.category}] {item.label}
-                    </Text>
+                    <View style={styles.historyItemHeaderLeft}>
+                      <Text style={textStyle}>
+                        {isToday ? '✨' : isYesterday ? '📅' : '•'} [{item.category}] {item.label}
+                      </Text>
+                      {item.isCheatMeal && (
+                        <View style={styles.cheatMealBadge}>
+                          <Text style={styles.cheatMealBadgeText}>🎉 Cheat</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={dateStyle}>
                       {dateStr}
                     </Text>
@@ -2638,9 +2761,14 @@ function HomeScreen({
                       🧈 {Math.round(entryNutrition.fat)}g lipides
                     </Text>
                   </View>
-                  {entryCost > 0 && (
+                  {entryCost > 0 && !item.isCheatMeal && (
                     <Text style={styles.historyItemCost}>
                       -{entryCost} pts
+                    </Text>
+                  )}
+                  {item.isCheatMeal && (
+                    <Text style={styles.historyItemCostCheat}>
+                      🎉 Repas cheat (0 pts)
                     </Text>
                   )}
                   
@@ -2782,6 +2910,7 @@ function AddEntryScreen({
   preselectedEntryLabel,
   customFoods = [],
   entries = [],
+  currentUserId,
 }: {
   onCancel: () => void;
   onSave: (entry: Omit<MealEntry, 'id' | 'createdAt'>) => void;
@@ -2794,6 +2923,7 @@ function AddEntryScreen({
   preselectedEntryLabel: string | null;
   customFoods?: typeof FOOD_DB;
   entries?: MealEntry[];
+  currentUserId: string;
 }) {
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState<MealEntry['category']>('sain');
@@ -2802,7 +2932,9 @@ function AddEntryScreen({
   const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null); // Item ID pour modal portion
   const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => void } | null>(null);
   const [portionCount, setPortionCount] = useState<number>(1); // Nombre de portions (toujours visible)
-  
+  const [isCheatDayState, setIsCheatDayState] = useState<boolean>(false);
+  const [hasSubscriptionAccess, setHasSubscriptionAccess] = useState<boolean | null>(null);
+  const [showCheatPaywall, setShowCheatPaywall] = useState(false);
 
   // Fusionner FOOD_DB avec les aliments personnalisés
   const allFoods = useMemo(() => {
@@ -2863,7 +2995,8 @@ function AddEntryScreen({
     const baseCost = computeFoodPoints(fi);
     const cost = Math.round(baseCost * Math.sqrt(portion.multiplier));
     
-    if (pendingCost + cost > points) return; // Pas assez de points
+    // Permettre l'ajout même sans points si c'est un cheat day
+    if (!isCheatDayState && pendingCost + cost > points) return; // Pas assez de points
     
     // Formater quantityHint
     const unit = getUnitForFood(fi);
@@ -2908,6 +3041,34 @@ function AddEntryScreen({
     addItemWithPortion(foodId, customPortion);
   };
 
+  // Charger l'état cheat day et vérifier l'abonnement au montage
+  useEffect(() => {
+    const loadCheatDayAndCheckAccess = async () => {
+      if (currentUserId === 'guest') {
+        setHasSubscriptionAccess(false);
+        return;
+      }
+      
+      try {
+        // Vérifier l'abonnement
+        const { hasActiveSubscription } = await import('../../lib/subscription-utils');
+        const hasAccess = await hasActiveSubscription(currentUserId);
+        setHasSubscriptionAccess(hasAccess);
+        
+        // Charger l'état cheat day seulement si l'utilisateur a accès
+        if (hasAccess) {
+          const today = getTodayLocal();
+          const isCheat = await isCheatDay(currentUserId, today);
+          setIsCheatDayState(isCheat);
+        }
+      } catch (error) {
+        console.error('[AddEntry] Erreur vérification abonnement:', error);
+        setHasSubscriptionAccess(false);
+      }
+    };
+    loadCheatDayAndCheckAccess();
+  }, [currentUserId]);
+
   // Auto-ajouter l'item pré-sélectionné depuis les recommandations
   useEffect(() => {
     if (preselectedItem) {
@@ -2929,8 +3090,16 @@ function AddEntryScreen({
     }
   }, []); // Exécuter une seule fois au montage
 
+  // Calculer les repas favoris basés sur l'usage réel
+  const favoriteMeals = calculateFavoriteMeals(entries, 8);
+  // Combiner les repas favoris calculés avec les repas par défaut (si pas assez de favoris)
+  const allFavoriteMeals = favoriteMeals.length >= 5 
+    ? favoriteMeals 
+    : [...favoriteMeals, ...QUICK_MEALS.slice(0, Math.max(0, 5 - favoriteMeals.length))];
+
   const applyQuickMeal = (mealId: string) => {
-    const preset = QUICK_MEALS.find((m) => m.id === mealId);
+    // Chercher dans allFavoriteMeals (qui contient les favoris calculés + QUICK_MEALS)
+    const preset = allFavoriteMeals.find((m) => m.id === mealId);
     if (preset) {
       setItems(preset.items);
       setLabel(preset.name);
@@ -2938,14 +3107,6 @@ function AddEntryScreen({
       setCategory(cls.category);
     }
   };
-
-
-  // Calculer les repas favoris basés sur l'usage réel
-  const favoriteMeals = calculateFavoriteMeals(entries, 8);
-  // Combiner les repas favoris calculés avec les repas par défaut (si pas assez de favoris)
-  const allFavoriteMeals = favoriteMeals.length >= 5 
-    ? favoriteMeals 
-    : [...favoriteMeals, ...QUICK_MEALS.slice(0, Math.max(0, 5 - favoriteMeals.length))];
 
   // Filtre basé sur la recherche + la catégorie sélectionnée
   const searchLower = label.toLowerCase().trim();
@@ -2993,17 +3154,44 @@ function AddEntryScreen({
     // Générer le label automatiquement à partir des items sélectionnés
     const finalLabel = items.map(it => allFoods.find(f => f.id === it.foodId)?.name || it.foodId).join(', ');
     
-    const classification = classifyMealByItems(items);
+    // Utiliser le nouveau système de scoring si les targets sont disponibles
+    let classification: { score: number; category: MealEntry['category'] };
+    if (targets) {
+      const tempEntry: MealEntry = {
+        id: 'temp',
+        createdAt: new Date().toISOString(),
+        label: finalLabel,
+        category: 'ok',
+        score: 0,
+        items,
+      };
+      classification = classifyMealByNutrition(tempEntry, targets, 3, customFoods);
+    } else {
+      classification = classifyMealByItems(items);
+    }
+    
     // onSave gère maintenant la sauvegarde ET la déduction des points
     // Ne plus appeler spendPoints ici pour éviter la double déduction
-    onSave({ label: finalLabel, category: classification.category, score: classification.score, items });
+    // Marquer comme cheat meal si c'est un cheat day
+    onSave({ 
+      label: finalLabel, 
+      category: classification.category, 
+      score: classification.score, 
+      items,
+      isCheatMeal: isCheatDayState,
+    });
   };
 
   const [showAutocomplete, setShowAutocomplete] = useState(false);
 
   return (
-    <ScrollView style={styles.inner} contentContainerStyle={styles.innerContent}>
-      <Text style={styles.logo}>Partager avec Toki</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <ScrollView style={styles.inner} contentContainerStyle={styles.innerContent}>
+        <Text style={styles.logo}>Partager avec Toki</Text>
 
       <View style={styles.searchContainer}>
         <TextInput
@@ -3037,7 +3225,7 @@ function AddEntryScreen({
             const baseCost = computeFoodPoints(food);
             const mediumPortion = getDefaultPortion(food.tags);
             const estimatedCost = Math.round(baseCost * Math.sqrt(mediumPortion.multiplier));
-            const canAfford = pendingCost + estimatedCost <= points;
+            const canAfford = isCheatDayState || pendingCost + estimatedCost <= points;
             
             return (
               <TouchableOpacity
@@ -3102,6 +3290,77 @@ function AddEntryScreen({
         ))}
       </View>
       <Text style={styles.pointsHelper}>Points restants : {Math.max(0, points - pendingCost)} (coûts dynamiques selon l&apos;aliment)</Text>
+      
+      {/* Bouton Journée Cheat - Toujours visible */}
+      {hasSubscriptionAccess !== null && (
+        <>
+          <TouchableOpacity
+            style={[
+              styles.cheatDayButton,
+              isCheatDayState && styles.cheatDayButtonActive,
+              hasSubscriptionAccess === false && styles.cheatDayButtonDisabled,
+            ]}
+            onPress={async () => {
+              // Vérifier l'abonnement avant d'activer
+              if (hasSubscriptionAccess === false) {
+                setShowCheatPaywall(true);
+                return;
+              }
+              
+              if (hasSubscriptionAccess === null) {
+                // En cours de vérification, ne rien faire
+                return;
+              }
+              
+              const today = getTodayLocal();
+              const newCheatState = !isCheatDayState;
+              setIsCheatDayState(newCheatState);
+              await setCheatDay(currentUserId, today, newCheatState);
+              
+              // Recharger les cheat days pour mettre à jour le calendrier
+              const { getCheatDays } = await import('../../lib/cheat-days');
+              const updatedCheatDays = await getCheatDays(currentUserId);
+              setCheatDays(updatedCheatDays);
+            }}
+          >
+            <Text style={[
+              styles.cheatDayButtonText,
+              isCheatDayState && styles.cheatDayButtonTextActive,
+              hasSubscriptionAccess === false && styles.cheatDayButtonTextDisabled,
+            ]}>
+              {hasSubscriptionAccess === false 
+                ? '🎉 Journée cheat (Premium requis)' 
+                : isCheatDayState 
+                  ? '🎉 Journée cheat activée' 
+                  : '🎉 Activer journée cheat'}
+            </Text>
+            {isCheatDayState && hasSubscriptionAccess !== false && (
+              <Text style={styles.cheatDayButtonSubtext}>
+                Les repas ne consommeront pas de points
+              </Text>
+            )}
+            {hasSubscriptionAccess === false && (
+              <Text style={styles.cheatDayButtonSubtext}>
+                Fonctionnalité premium - Abonne-toi pour activer
+              </Text>
+            )}
+          </TouchableOpacity>
+          
+          {/* Paywall modal pour cheat day */}
+          {showCheatPaywall && (
+            <PaywallModal
+              visible={true}
+              onSubscribe={() => {
+                setShowCheatPaywall(false);
+                router.replace('/subscription');
+              }}
+              onClose={() => {
+                setShowCheatPaywall(false);
+              }}
+            />
+          )}
+        </>
+      )}
       
       {/* Items sélectionnés avec portions */}
       {items.length > 0 && (
@@ -3172,7 +3431,7 @@ function AddEntryScreen({
             projected.carbs_g > targets.carbs_g ||
             projected.calories_kcal > targets.calories_kcal ||
             projected.fat_g > targets.fat_g;
-          const affordable = pendingCost + totalCost <= points && !overTargets;
+          const affordable = isCheatDayState || (pendingCost + totalCost <= points && !overTargets);
           return (
             <TouchableOpacity
               key={qm.id}
@@ -3348,7 +3607,8 @@ function AddEntryScreen({
         />;
       })()}
       
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -4160,6 +4420,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#bbf7d0',
     alignItems: 'center',
+    minHeight: 44,
   },
   buttonPrimaryText: {
     color: '#022c22',
@@ -4190,6 +4451,8 @@ const styles = StyleSheet.create({
     borderColor: '#4b5563',
     alignItems: 'center',
     marginRight: 8,
+    minHeight: 44,
+    minWidth: 44,
   },
   buttonGhostText: {
     color: '#e5e7eb',
@@ -4310,6 +4573,12 @@ const styles = StyleSheet.create({
   historyItemCost: {
     color: '#f59e0b',
     fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  historyItemCostCheat: {
+    color: '#fbbf24',
+    fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
   },
@@ -4597,6 +4866,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 8,
   },
+  cheatDayButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#1f2937',
+    borderWidth: 2,
+    borderColor: '#f59e0b',
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  cheatDayButtonActive: {
+    backgroundColor: '#f59e0b33',
+    borderColor: '#f59e0b',
+  },
+  cheatDayButtonDisabled: {
+    opacity: 0.6,
+    borderColor: '#6b7280',
+  },
+  cheatDayButtonText: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cheatDayButtonTextActive: {
+    color: '#fbbf24',
+  },
+  cheatDayButtonTextDisabled: {
+    color: '#9ca3af',
+  },
+  cheatDayButtonSubtext: {
+    color: '#f59e0b',
+    fontSize: 11,
+    marginTop: 4,
+    opacity: 0.8,
+  },
   actionsRow: {
     flexDirection: 'row',
     width: '100%',
@@ -4611,6 +4915,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6b7280',
     alignItems: 'center',
+    minHeight: 44,
   },
   cancelText: {
     color: '#e5e7eb',
@@ -4620,6 +4925,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: '#22c55e',
     alignItems: 'center',
+    minHeight: 44,
   },
   saveText: {
     color: '#022c22',
@@ -5282,6 +5588,8 @@ const styles = StyleSheet.create({
     padding: 14,
     alignItems: 'center',
     marginTop: 8,
+    minHeight: 44,
+    minWidth: 44,
   },
   portionModalCancelText: {
     color: '#9ca3af',
@@ -5399,6 +5707,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
+  },
+  historyItemHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    flex: 1,
+    gap: 8,
+  },
+  cheatMealBadge: {
+    backgroundColor: '#f59e0b33',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  cheatMealBadgeText: {
+    color: '#fbbf24',
+    fontSize: 10,
+    fontWeight: '600',
   },
   historyItemsDetail: {
     marginTop: 12,

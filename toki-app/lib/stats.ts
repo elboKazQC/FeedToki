@@ -17,6 +17,8 @@ export type MealEntry = {
   score: number; // 0-100 range; higher = healthier
   createdAt: string; // ISO string
   items?: FoodItemRef[];
+  isCheatMeal?: boolean; // True si le repas a été ajouté en mode "cheat day" (ne consomme pas de points)
+  parsingTimeMs?: number; // Temps de parsing en millisecondes (pour repas créés via IA)
 };
 
 export type DayFeed = {

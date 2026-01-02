@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { router } from 'expo-router';
+import { SafeAreaView } from '../components/safe-area-view-wrapper';
 // import { spacing } from '../constants/design-tokens';
-import { signIn, signUp, resendEmailVerification, getCurrentUser, signOut } from '../lib/firebase-auth';
+import { signIn, signUp, resendEmailVerification, getCurrentUser, signOut, sendPasswordResetEmailToUser } from '../lib/firebase-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { localSignIn, localSignUp, getCurrentLocalUser } from '../lib/local-auth';
 import { useAuth } from '../lib/auth-context';
@@ -11,7 +12,7 @@ import { checkIsAdmin } from '../lib/admin-utils';
 
 export default function AuthScreen() {
   // Tous les hooks doivent être déclarés en premier, dans le même ordre à chaque render
-  const { user, profile } = useAuth();
+  const { user, profile, signOut: contextSignOut } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,6 +21,11 @@ export default function AuthScreen() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(0);
   
   // Cooldown pour renvoi d'email (30 secondes)
   useEffect(() => {
@@ -28,6 +34,14 @@ export default function AuthScreen() {
       return () => clearTimeout(timer);
     }
   }, [resendCooldown]);
+  
+  // Cooldown pour réinitialisation de mot de passe (30 secondes)
+  useEffect(() => {
+    if (resetCooldown > 0) {
+      const timer = setTimeout(() => setResetCooldown(resetCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resetCooldown]);
   
   // Vérifier périodiquement si l'email a été vérifié (doit être déclaré avant les fonctions)
   useEffect(() => {
@@ -81,7 +95,13 @@ export default function AuthScreen() {
       setResendCooldown(30); // Cooldown de 30 secondes
       
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert('✅ Courriel envoyé !\n\n⚠️ IMPORTANT : Vérifiez votre dossier SPAM/COURRIER INDÉSIRABLE. L\'email s\'y trouve très probablement.');
+        window.alert('✅ Courriel envoyé !\n\n⏰ L\'email peut prendre 5-10 minutes à arriver.\n\n⚠️ IMPORTANT : Vérifiez votre dossier SPAM/COURRIER INDÉSIRABLE. L\'email s\'y trouve très probablement.');
+      } else {
+        Alert.alert(
+          '✅ Courriel envoyé !',
+          '⏰ L\'email peut prendre 5-10 minutes à arriver.\n\n⚠️ IMPORTANT : Vérifiez votre dossier SPAM/COURRIER INDÉSIRABLE.',
+          [{ text: 'OK' }]
+        );
       }
     } catch (error: any) {
       let errorMessage = 'Erreur lors de l\'envoi de l\'email';
@@ -108,32 +128,91 @@ export default function AuthScreen() {
   // Fonction pour se déconnecter
   const handleSignOut = async () => {
     try {
-      if (FIREBASE_ENABLED && user) {
-        await signOut();
-      } else {
-        const { localSignOut } = await import('../lib/local-auth');
-        await localSignOut();
-      }
-      // Recharger la page pour réinitialiser l'état
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
+      // Utiliser la fonction signOut du contexte qui gère tout (Firebase + local)
+      await contextSignOut();
+      
+      // Redirection sécurisée pour Safari mobile
+      // Utiliser setTimeout pour s'assurer que le state est mis à jour avant la redirection
+      setTimeout(() => {
+        try {
+          router.replace('/auth');
+        } catch (error) {
+          console.warn('[Auth] Router.replace failed, using window.location:', error);
+          // Fallback: redirection via window.location si router échoue (Safari mobile)
+          if (typeof window !== 'undefined') {
+            window.location.href = '/auth';
+          }
+        }
+      }, 100);
     } catch (error: any) {
+      console.error('[Auth] Erreur lors de la déconnexion:', error);
       Alert.alert('Erreur', error.message || 'Erreur lors de la déconnexion');
     }
   };
   
+  // Fonction pour envoyer l'email de réinitialisation
+  const handlePasswordReset = async () => {
+    if (!resetEmail || !resetEmail.trim()) {
+      Alert.alert('Erreur', 'Merci d\'entrer votre adresse email');
+      return;
+    }
+    
+    if (resetCooldown > 0 || resetLoading || !FIREBASE_ENABLED) return;
+    
+    setResetLoading(true);
+    setResetSuccess(false);
+    try {
+      await sendPasswordResetEmailToUser(resetEmail.trim());
+      setResetSuccess(true);
+      setResetCooldown(30); // Cooldown de 30 secondes
+      
+      const message = `Un email de réinitialisation a été envoyé à ${resetEmail.trim()}.\n\n⚠️ IMPORTANT : L'email se trouve très probablement dans votre dossier SPAM/COURRIER INDÉSIRABLE.`;
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('✅ Email envoyé !\n\n' + message);
+      }
+    } catch (error: any) {
+      let errorMessage = 'Erreur lors de l\'envoi de l\'email de réinitialisation';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      if (error.code === 'auth/too-many-requests') {
+        setResetCooldown(60); // Cooldown plus long si trop de demandes
+      }
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Erreur: ${errorMessage}`);
+      }
+      Alert.alert('Erreur', errorMessage);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+  
   const handleAuth = async () => {
+    console.log('[Auth Screen] handleAuth appelé, mode:', mode, 'email:', email ? 'présent' : 'vide', 'password:', password ? 'présent' : 'vide');
+    
     if (!email || !password) {
+      console.warn('[Auth Screen] Champs manquants');
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Erreur: Merci de remplir tous les champs');
+      }
       Alert.alert('Erreur', 'Merci de remplir tous les champs');
       return;
     }
 
     if (mode === 'signup' && !displayName) {
+      console.warn('[Auth Screen] Nom manquant pour signup');
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Erreur: Merci d\'entrer un nom');
+      }
       Alert.alert('Erreur', 'Merci d\'entrer un nom');
       return;
     }
 
+    console.log('[Auth Screen] Début authentification, setLoading(true)');
     setLoading(true);
     try {
       if (FIREBASE_ENABLED) {
@@ -173,6 +252,7 @@ export default function AuthScreen() {
           console.log('[Auth Screen] Alert.alert appelé, return...');
           return; // Important : return pour éviter d'exécuter le code après
         } else {
+          console.log('[Auth Screen] Tentative de connexion Firebase pour:', email);
           const user = await signIn(email, password);
           console.log('[Auth Screen] Connexion réussie, user:', user?.uid);
           
@@ -229,13 +309,27 @@ export default function AuthScreen() {
         }
       }
     } catch (error: any) {
-      console.error('[Auth Screen] Erreur:', error);
+      console.error('[Auth Screen] ❌ Erreur capturée:', error);
       console.error('[Auth Screen] Error code:', error?.code);
       console.error('[Auth Screen] Error message:', error?.message);
-      console.error('[Auth Screen] Full error:', JSON.stringify(error, null, 2));
+      console.error('[Auth Screen] Error name:', error?.name);
+      console.error('[Auth Screen] Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
       
       // Toujours afficher l'erreur, même si elle semble silencieuse
-      const errorMessage = error?.message || error?.code || 'Une erreur est survenue. Vérifiez que Firebase Authentication est activé dans Firebase Console.';
+      let errorMessage = error?.message || error?.code || 'Une erreur est survenue. Vérifiez que Firebase Authentication est activé dans Firebase Console.';
+      
+      // Messages d'erreur plus spécifiques
+      if (error?.code === 'auth/user-not-found') {
+        errorMessage = 'Aucun compte trouvé avec cet email. Créez un compte d\'abord.';
+      } else if (error?.code === 'auth/wrong-password' || error?.code === 'auth/invalid-credential') {
+        errorMessage = 'Mot de passe incorrect.';
+      } else if (error?.code === 'auth/invalid-email') {
+        errorMessage = 'Email invalide. Vérifiez votre adresse email.';
+      } else if (error?.code === 'auth/network-request-failed') {
+        errorMessage = 'Erreur de connexion. Vérifiez votre connexion internet.';
+      } else if (error?.code === 'auth/too-many-requests') {
+        errorMessage = 'Trop de tentatives. Réessayez plus tard.';
+      }
       
       // Sur mobile, utiliser Alert.alert, sur web utiliser window.alert aussi pour être sûr
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -259,21 +353,19 @@ export default function AuthScreen() {
         ]
       );
     } finally {
+      console.log('[Auth Screen] finally: setLoading(false)');
       setLoading(false);
     }
   };
 
-  return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <View style={styles.inner}>
-        <Text style={styles.logo}>🐉 Toki</Text>
-        <Text style={styles.tagline}>Nourris ton dragon, apprends la modération</Text>
+  // Contenu du formulaire (réutilisé pour web et native)
+  const formContent = (
+    <View style={styles.inner}>
+      <Text style={styles.logo}>🐉 Toki</Text>
+      <Text style={styles.tagline}>Nourris ton dragon, apprends la modération</Text>
 
-        {/* Affichage si email non vérifié */}
-        {showEmailVerification ? (
+      {/* Affichage si email non vérifié */}
+      {showEmailVerification ? (
           <View style={styles.verificationBox}>
             <Text style={styles.verificationTitle}>⚠️ Ton email n&apos;est pas vérifié</Text>
             <Text style={styles.verificationText}>
@@ -288,6 +380,7 @@ export default function AuthScreen() {
             {resendSuccess && (
               <View style={styles.successBox}>
                 <Text style={styles.successText}>✅ Courriel envoyé !</Text>
+                <Text style={styles.successSubtext}>⏰ L'email peut prendre 5-10 minutes à arriver</Text>
               </View>
             )}
             
@@ -312,6 +405,63 @@ export default function AuthScreen() {
               onPress={handleSignOut}
             >
               <Text style={styles.signOutButtonText}>Se déconnecter</Text>
+            </TouchableOpacity>
+          </View>
+        ) : forgotPasswordMode ? (
+          <View style={styles.form}>
+            <Text style={styles.resetTitle}>Mot de passe oublié ?</Text>
+            <Text style={styles.resetSubtitle}>
+              Entrez votre adresse email et nous vous enverrons un lien pour réinitialiser votre mot de passe.
+            </Text>
+            
+            {resetSuccess && (
+              <View style={styles.successBox}>
+                <Text style={styles.successText}>✅ Email envoyé !</Text>
+                <Text style={styles.successSubtext}>
+                  Vérifiez votre dossier SPAM/COURRIER INDÉSIRABLE.
+                </Text>
+              </View>
+            )}
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor="#6b7280"
+              value={resetEmail}
+              onChangeText={setResetEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!resetLoading && resetCooldown === 0}
+            />
+
+            <TouchableOpacity
+              style={[styles.button, (resetLoading || resetCooldown > 0) && styles.buttonDisabled]}
+              onPress={handlePasswordReset}
+              disabled={resetLoading || resetCooldown > 0}
+            >
+              {resetLoading ? (
+                <ActivityIndicator color="#111827" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {resetCooldown > 0 
+                    ? `Renvoyer (${resetCooldown}s)`
+                    : 'Envoyer le lien de réinitialisation'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.switchMode}
+              onPress={() => {
+                setForgotPasswordMode(false);
+                setResetEmail('');
+                setResetSuccess(false);
+              }}
+            >
+              <Text style={styles.switchModeText}>
+                Retour à la connexion
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -348,14 +498,38 @@ export default function AuthScreen() {
             autoCapitalize="none"
           />
 
+          {mode === 'login' && FIREBASE_ENABLED && (
+            <TouchableOpacity
+              style={styles.forgotPasswordLink}
+              onPress={() => {
+                setForgotPasswordMode(true);
+                setResetEmail(email); // Pré-remplir avec l'email saisi si disponible
+              }}
+            >
+              <Text style={styles.forgotPasswordText}>
+                Mot de passe oublié ?
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleAuth}
+            onPress={(e) => {
+              e?.preventDefault?.();
+              e?.stopPropagation?.();
+              console.log('[Auth Screen] Bouton cliqué, email:', email ? 'présent' : 'vide', 'password:', password ? 'présent' : 'vide');
+              handleAuth();
+            }}
             disabled={loading}
+            activeOpacity={0.7}
           >
-            <Text style={styles.buttonText}>
-              {loading ? 'Chargement...' : mode === 'login' ? 'Se connecter' : 'Créer un compte'}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#111827" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {mode === 'login' ? 'Se connecter' : 'Créer un compte'}
+              </Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -382,8 +556,31 @@ export default function AuthScreen() {
           )}
         </View>
         )}
-      </View>
-    </KeyboardAvoidingView>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {Platform.OS === 'web' ? (
+        // Sur le web, utiliser ScrollView au lieu de KeyboardAvoidingView (Safari mobile)
+        <ScrollView 
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+        >
+          {formContent}
+        </ScrollView>
+      ) : (
+        // Sur native, utiliser KeyboardAvoidingView
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          {formContent}
+        </KeyboardAvoidingView>
+      )}
+    </SafeAreaView>
   );
 }
 
@@ -534,5 +731,35 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     textDecorationLine: 'underline',
+  },
+  resetTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fbbf24',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  resetSubtitle: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginBottom: 8,
+    marginTop: -8,
+  },
+  forgotPasswordText: {
+    color: '#fbbf24',
+    fontSize: 14,
+    textDecorationLine: 'underline',
+  },
+  successSubtext: {
+    color: '#10b981',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

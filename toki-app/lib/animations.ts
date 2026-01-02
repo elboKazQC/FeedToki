@@ -2,7 +2,7 @@
  * Animation Helpers - Fonctions utilitaires pour animations réutilisables
  */
 
-import { Animated } from 'react-native';
+import { Animated, Platform } from 'react-native';
 
 /**
  * Fade in animation
@@ -15,7 +15,7 @@ export function fadeIn(
   return Animated.timing(animatedValue, {
     toValue,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: Platform.OS !== 'web',
   });
 }
 
@@ -30,7 +30,7 @@ export function fadeOut(
   return Animated.timing(animatedValue, {
     toValue,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: Platform.OS !== 'web',
   });
 }
 
@@ -76,7 +76,7 @@ export function scaleIn(
     toValue,
     friction: 8,
     tension: 40,
-    useNativeDriver: true,
+    useNativeDriver: Platform.OS !== 'web',
   });
 }
 
@@ -91,7 +91,7 @@ export function scaleOut(
   return Animated.timing(animatedValue, {
     toValue,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: Platform.OS !== 'web',
   });
 }
 
@@ -109,12 +109,12 @@ export function pulse(
       Animated.timing(animatedValue, {
         toValue: maxScale,
         duration: duration / 2,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.timing(animatedValue, {
         toValue: minScale,
         duration: duration / 2,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }),
     ])
   );
@@ -130,7 +130,7 @@ export function createPressAnimation(animatedValue: Animated.Value) {
         toValue: 0.95,
         friction: 3,
         tension: 300,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     },
     pressOut: () => {
@@ -138,7 +138,7 @@ export function createPressAnimation(animatedValue: Animated.Value) {
         toValue: 1,
         friction: 3,
         tension: 300,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     },
   };
@@ -156,22 +156,22 @@ export function shake(
     Animated.timing(animatedValue, {
       toValue: distance,
       duration: duration / 5,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }),
     Animated.timing(animatedValue, {
       toValue: -distance,
       duration: (duration / 5) * 2,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }),
     Animated.timing(animatedValue, {
       toValue: distance,
       duration: (duration / 5) * 2,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }),
     Animated.timing(animatedValue, {
       toValue: 0,
       duration: duration / 5,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }),
   ]);
 }
