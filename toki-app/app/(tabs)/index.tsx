@@ -1958,6 +1958,26 @@ function HomeScreen({
   const [smartRecsLoading, setSmartRecsLoading] = useState(false);
   const [smartRecsError, setSmartRecsError] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [hasSubscriptionAccess, setHasSubscriptionAccess] = useState<boolean | null>(null);
+
+  // Vérifier l'abonnement au chargement
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (currentUserId === 'guest') {
+        setHasSubscriptionAccess(false);
+        return;
+      }
+      try {
+        const { hasActiveSubscription } = await import('../../lib/subscription-utils');
+        const hasAccess = await hasActiveSubscription(currentUserId);
+        setHasSubscriptionAccess(hasAccess);
+      } catch (error) {
+        console.error('[HomeScreen] Erreur vérification abonnement:', error);
+        setHasSubscriptionAccess(false);
+      }
+    };
+    checkSubscription();
+  }, [currentUserId]);
 
   // Fusionner FOOD_DB avec les aliments personnalisés
   const allFoods = useMemo(() => {
@@ -2083,6 +2103,19 @@ function HomeScreen({
       return;
     }
 
+    // Vérifier l'abonnement avant de faire l'appel IA
+    if (hasSubscriptionAccess === false) {
+      setSmartRecsError('Cette fonctionnalité est réservée aux membres premium 💎');
+      setSmartRecs([]);
+      setSmartRecsLoading(false);
+      return;
+    }
+
+    if (hasSubscriptionAccess === null) {
+      // En attente de la vérification de l'abonnement
+      return;
+    }
+
     const todayKey = getTodayLocal();
     const todaysEntries = entries.filter((e) => normalizeDate(e.createdAt) === todayKey);
     const consumedItems = todaysEntries.flatMap((e) =>
@@ -2165,7 +2198,7 @@ function HomeScreen({
     return () => {
       controller.abort();
     };
-  }, [showHungryMode, tastePreference, todayTotals, targets, points, entries, timeOfDay]);
+  }, [showHungryMode, tastePreference, todayTotals, targets, points, entries, timeOfDay, hasSubscriptionAccess]);
 
   // Détection de profil suspect (calories trop élevées = probable erreur lbs/kg)
   const hasSuspectProfile = userProfile && weeklyCalTarget && weeklyCalTarget > 30000;
@@ -2617,9 +2650,19 @@ function HomeScreen({
               🤖 L&apos;IA réfléchit à tes suggestions...
             </Text>
           ) : smartRecsError ? (
-            <Text style={styles.smartRecsEmpty}>
-              ⚠️ {smartRecsError}
-            </Text>
+            <>
+              <Text style={styles.smartRecsEmpty}>
+                ⚠️ {smartRecsError}
+              </Text>
+              {hasSubscriptionAccess === false && (
+                <TouchableOpacity
+                  style={styles.premiumButton}
+                  onPress={() => router.replace('/subscription')}
+                >
+                  <Text style={styles.premiumButtonText}>💎 Devenir Premium</Text>
+                </TouchableOpacity>
+              )}
+            </>
           ) : smartRecs.length === 0 ? (
             <Text style={styles.smartRecsEmpty}>
               Aucune suggestion pour l&apos;instant. Tu es peut-être proche de ton objectif! 🎯
@@ -5432,6 +5475,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  premiumButton: {
+    backgroundColor: '#8b5cf6',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  premiumButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   tasteChoiceBox: {
     backgroundColor: '#fef3c7',
