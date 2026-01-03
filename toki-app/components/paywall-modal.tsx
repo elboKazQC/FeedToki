@@ -81,11 +81,11 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
         <View pointerEvents="auto">
           <Card style={[styles.modal, { backgroundColor: colors.background }]}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Abonnement Requis
+            Débloque ton Coach IA 🧠
           </Text>
           
           <Text style={[styles.message, { color: colors.textSecondary }]}>
-            FeedToki est une application québécoise développée par un seul développeur indépendant.
+            💙 Fait au Québec par un passionné. Ton abonnement permet d'ajouter de nouvelles features et de rivaliser avec les géants US.
           </Text>
           
           <View style={styles.explanation}>
@@ -96,31 +96,49 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
 
           <View style={styles.features}>
             <Text style={[styles.featureTitle, { color: colors.text }]}>
-              Avec votre abonnement:
+              Ce que tu débloques:
             </Text>
             <View style={styles.featureItem}>
-              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>✨</Text>
               <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                50 analyses IA par jour incluses
+                Suggestions personnalisées selon TES besoins
               </Text>
             </View>
             <View style={styles.featureItem}>
-              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>⚡</Text>
               <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                Analyse de repas en texte naturel
+                Log tes repas en 5 secondes (texte naturel)
               </Text>
             </View>
             <View style={styles.featureItem}>
-              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>🎯</Text>
               <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                Annulation à tout moment
+                Choix intelligents adaptés à ton budget points
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>🍽️</Text>
+              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                "J'ai faim" - L'IA te dit quoi manger
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>🔓</Text>
+              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                Journées cheat illimitées
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>❌</Text>
+              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                Annule quand tu veux
               </Text>
             </View>
           </View>
 
           <View style={styles.actions}>
             <Button
-              label={isLoading ? "Redirection..." : "S'abonner maintenant ($10/mois)"}
+              label={isLoading ? "Redirection..." : "🚀 Activer mon Coach IA - $10/mois"}
               onPress={handleSubscribe}
               style={styles.subscribeButton}
               loading={isLoading}

@@ -2105,7 +2105,7 @@ function HomeScreen({
 
     // Vérifier l'abonnement avant de faire l'appel IA
     if (hasSubscriptionAccess === false) {
-      setSmartRecsError('Cette fonctionnalité est réservée aux membres premium 💎');
+      setSmartRecsError('🧠 L\'IA peut t\'aider à choisir quoi manger maintenant');
       setSmartRecs([]);
       setSmartRecsLoading(false);
       return;
@@ -2659,7 +2659,7 @@ function HomeScreen({
                   style={styles.premiumButton}
                   onPress={() => router.replace('/subscription')}
                 >
-                  <Text style={styles.premiumButtonText}>💎 Devenir Premium</Text>
+                  <Text style={styles.premiumButtonText}>🎯 Débloquer mes suggestions IA</Text>
                 </TouchableOpacity>
               )}
             </>
@@ -3487,7 +3487,7 @@ function AddEntryScreen({
               hasSubscriptionAccess === false && styles.cheatDayButtonTextDisabled,
             ]}>
               {hasSubscriptionAccess === false 
-                ? '🎉 Journée cheat (Premium requis)' 
+                ? '🎉 Journée Cheat (Premium) - Mange sans perdre de points!' 
                 : isCheatDayState 
                   ? '🎉 Journée cheat activée' 
                   : '🎉 Activer journée cheat'}
