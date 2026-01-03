@@ -40,6 +40,7 @@ import {
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
 import { getSmartRecommendations, getSmartRecommendationsByTaste, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
+import { fetchSmartMealSuggestions } from '../../lib/ai-suggestions';
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget, computeMealScore, NutritionTargets } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
@@ -1953,6 +1954,9 @@ function HomeScreen({
   // Smart recommendations state (déclaré avant return conditionnel pour respecter les règles des hooks)
   const [showHungryMode, setShowHungryMode] = useState(false);
   const [tastePreference, setTastePreference] = useState<'sweet' | 'salty' | null>(null);
+  const [smartRecs, setSmartRecs] = useState<SmartRecommendation[]>([]);
+  const [smartRecsLoading, setSmartRecsLoading] = useState(false);
+  const [smartRecsError, setSmartRecsError] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Fusionner FOOD_DB avec les aliments personnalisés
@@ -2062,13 +2066,106 @@ function HomeScreen({
   };
   
   const timeOfDay = getTimeOfDay();
-  
-  const smartRecs = showHungryMode 
-    ? (tastePreference 
-        ? getSmartRecommendationsByTaste(todayTotals, targets, points, tastePreference, timeOfDay)
-        : getSmartRecommendations(todayTotals, targets, points, timeOfDay))
-    : [];
   const hungerAnalysis = getHungerAnalysis(todayTotals, targets, timeOfDay);
+
+  useEffect(() => {
+    if (!showHungryMode) {
+      setSmartRecs([]);
+      setSmartRecsError(null);
+      setSmartRecsLoading(false);
+      return;
+    }
+
+    if (!tastePreference) {
+      setSmartRecs([]);
+      setSmartRecsError(null);
+      setSmartRecsLoading(false);
+      return;
+    }
+
+    const todayKey = getTodayLocal();
+    const todaysEntries = entries.filter((e) => normalizeDate(e.createdAt) === todayKey);
+    const consumedItems = todaysEntries.flatMap((e) =>
+      (e.items || [])
+        .map((i) => (i as any).foodName || (i as any).name || (i as any).title || (i as any).foodId)
+        .filter(Boolean)
+    );
+
+    const caloriesPct = targets.calories_kcal > 0 ? todayTotals.calories_kcal / targets.calories_kcal : 0;
+
+    // Garde calories: si plafond atteint, proposer uniquement de l'eau
+    if (caloriesPct >= 1) {
+      const portion = getDefaultPortion(['legume']);
+      setSmartRecs([
+        {
+          item: {
+            id: 'water_glass',
+            name: "Verre d'eau",
+            tags: ['legume'],
+            baseScore: 100,
+            calories_kcal: 0,
+            protein_g: 0,
+            carbs_g: 0,
+            fat_g: 0,
+            points: 0,
+          },
+          reason: 'Objectif calorique atteint pour la journée. Hydrate-toi plutôt. 💧',
+          priority: 10,
+          pointsCost: 0,
+          suggestedGrams: 250,
+          suggestedVisualRef: 'Un grand verre',
+          portion,
+        },
+      ]);
+      setSmartRecsLoading(false);
+      setSmartRecsError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const buildLocalFallback = () =>
+      tastePreference
+        ? getSmartRecommendationsByTaste(todayTotals, targets, points, tastePreference, timeOfDay)
+        : getSmartRecommendations(todayTotals, targets, points, timeOfDay);
+
+    const run = async () => {
+      setSmartRecsLoading(true);
+      setSmartRecsError(null);
+      try {
+        const aiRecs = await fetchSmartMealSuggestions({
+          totals: todayTotals,
+          targets,
+          availablePoints: points,
+          tastePreference,
+          timeOfDay,
+          consumedItems,
+          caloriesRemaining: Math.max(0, targets.calories_kcal - todayTotals.calories_kcal),
+          caloriesPct,
+          pointsRemaining: points,
+          signal: controller.signal,
+        });
+
+        if (aiRecs.length > 0) {
+          setSmartRecs(aiRecs);
+          return;
+        }
+
+        setSmartRecs(buildLocalFallback());
+      } catch (err: any) {
+        setSmartRecsError(err?.message || 'Suggestions IA indisponibles');
+        setSmartRecs(buildLocalFallback());
+      } finally {
+        setSmartRecsLoading(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      controller.abort();
+    };
+  }, [showHungryMode, tastePreference, todayTotals, targets, points, entries, timeOfDay]);
 
   // Détection de profil suspect (calories trop élevées = probable erreur lbs/kg)
   const hasSuspectProfile = userProfile && weeklyCalTarget && weeklyCalTarget > 30000;
@@ -2514,6 +2611,14 @@ function HomeScreen({
           {!tastePreference ? (
             <Text style={styles.smartRecsEmpty}>
               Choisis d&apos;abord si tu préfères sucré ou salé ! 👆
+            </Text>
+          ) : smartRecsLoading ? (
+            <Text style={styles.smartRecsEmpty}>
+              🤖 L&apos;IA réfléchit à tes suggestions...
+            </Text>
+          ) : smartRecsError ? (
+            <Text style={styles.smartRecsEmpty}>
+              ⚠️ {smartRecsError}
             </Text>
           ) : smartRecs.length === 0 ? (
             <Text style={styles.smartRecsEmpty}>
