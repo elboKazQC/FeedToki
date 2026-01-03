@@ -1,0 +1,43 @@
+env: load .env.local .env.production
+env: export EXPO_PUBLIC_OPENAI_API_KEY EXPO_PUBLIC_LOG_SERVER
+React Compiler enabled
+Starting Metro Bundler
+Static rendering is enabled. Learn more: https://docs.expo.dev/router/reference/static-rendering/
+λ Bundled 1686ms node_modules\expo-router\node\render.js (1361 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1296/1297)
+Web Bundled 2146ms node_modules\expo-router\entry.js (1298 modules)
+
+› web bundles (4):
+_expo/static/js/web/entry-5a4aca142158d02db31ab47b5341ac0d.js (3.29 MB)
+_expo/static/js/web/nutrition-calculator-192a787d3ea163cbd4ad9585d90cf09a.js (1.01 kB)
+_expo/static/js/web/openai-parser-0cb276299e20694f32219c383952d8b9.js (23.5 kB)
+_expo/static/js/web/subscription-service-002841aff945a3d92387b629d6b4b53e.js (1.5 kB)
+
+› Static routes (23):
+/auth (17.4 kB)
+/help (17.4 kB)
+/ (index) (17.4 kB)
+/modal (17.4 kB)
+/stats (17.4 kB)
+/version (17.4 kB)
+/explore (17.4 kB)
+/_sitemap (17.4 kB)
+/admin-kpi (17.4 kB)
+/ai-logger (17.4 kB)
+/onboarding (17.4 kB)
+/+not-found (17.4 kB)
+/subscription (17.4 kB)
+/verify-email (17.4 kB)
+/(tabs) (17.4 kB)
+/admin-requests (17.4 kB)
+/privacy-policy (17.4 kB)
+/(tabs)/explore (17.4 kB)
+/admin-beta-users (17.4 kB)
+/terms-of-service (17.4 kB)
+/admin-custom-foods (17.4 kB)
+/points-explanation (17.4 kB)
+/verify-email-firebase (17.4 kB)
+
+Exported: web-build
+Terminer le programme de commandes (O/N)�? Terminer le programme de commandes (O/N)�? 
+^C
