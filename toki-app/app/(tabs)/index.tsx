@@ -2633,13 +2633,23 @@ function HomeScreen({
                 <TouchableOpacity
                   key={rec.item.id}
                   style={styles.smartRecItem}
-                  onPress={() => {
+                  onPress={async () => {
                     setShowHungryMode(false);
-                    setPreselectedItem({
-                      item: rec.item,
-                      portion: rec.portion
-                    });
-                    onPressAdd();
+                    // Consommer directement la suggestion
+                    const newEntry: Omit<MealEntry, 'id' | 'createdAt'> = {
+                      label: rec.item.name,
+                      category: 'snack',
+                      items: [{
+                        foodId: rec.item.id,
+                        multiplier: 1.0,
+                      }],
+                    };
+                    await handleAddEntry(newEntry);
+                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                      window.alert(`✅ ${rec.item.name} ajouté à ton journal !`);
+                    } else {
+                      Alert.alert('✅', `${rec.item.name} ajouté à ton journal !`);
+                    }
                   }}
                 >
                   <View style={styles.smartRecHeader}>

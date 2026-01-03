@@ -58,6 +58,7 @@ Règles critiques:
 - Pas de doublon protéine: si un shake protéiné ou protéine a déjà été pris, évite d'en reproposer.
 - Respecte la préférence goût (sucré/salé) et l'heure (matin/après-midi/soir) pour repas vs collation.
 - Reste dans le budget de points disponible.
+- INCLUS au moins 1-2 aliments à 0 points (légumes verts, concombre, salade, tomates, céleri, courgettes, épinards, etc.) pour donner des options sans impact sur les points.
 - Réponds UNIQUEMENT en JSON compact: {"suggestions":[{...}]}
 Champ suggestion: name, reason, type (meal|snack), taste (sweet|salty), calories, protein_g, carbs_g, fat_g, points, category (protein|veggie|carb|dessert), portion.
 `;
