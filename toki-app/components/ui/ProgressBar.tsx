@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle, Platform } from 'react-native';
 import { useTheme } from '../../lib/theme-context';
 import { spacing, borderRadius, darkTheme, lightTheme } from '../../constants/design-tokens';
 
@@ -81,6 +81,7 @@ export function ProgressBar({
               height,
               borderRadius: borderRadius.full,
             },
+            Platform.OS === 'web' ? ({ transition: 'width 0.3s ease' } as any) : {},
           ]}
         />
       </View>
@@ -110,9 +111,7 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
   },
-  progress: {
-    transition: 'width 0.3s ease',
-  },
+  progress: {},
 });
 
 

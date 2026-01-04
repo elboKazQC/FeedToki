@@ -100,7 +100,7 @@ FORMAT DE RÉPONSE: JSON uniquement
 
   const body = {
     model: 'gpt-4o-mini',
-    temperature: 0.8,
+    temperature: 0.6,
     max_tokens: 800,
     messages: [
       { role: 'system', content: system },
@@ -127,8 +127,12 @@ FORMAT DE RÉPONSE: JSON uniquement
 
   let parsed: any;
   try {
-    parsed = JSON.parse(content);
+    // Try to extract JSON if wrapped in markdown code blocks
+    const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || content.match(/(\{[\s\S]*\})/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    parsed = JSON.parse(jsonStr);
   } catch (err) {
+    console.error('Failed to parse AI response:', content);
     throw new Error('Réponse IA invalide');
   }
 

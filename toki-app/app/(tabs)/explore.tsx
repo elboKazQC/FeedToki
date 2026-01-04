@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../lib/auth-context';
 import { useTheme } from '../../lib/theme-context';
@@ -6,7 +6,6 @@ import { Colors } from '../../constants/theme';
 import { checkIsAdmin, setAdminFlag } from '../../lib/admin-utils';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 export default function TabTwoScreen() {
   const { user, profile, signOut } = useAuth();
@@ -195,13 +194,13 @@ export default function TabTwoScreen() {
             <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-requests')}>
               <Text style={styles.buttonText}>📋 Voir les demandes (Admin)</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-custom-foods')}>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-custom-foods' as any)}>
               <Text style={styles.buttonText}>🍽️ Aliments personnalisés (Admin)</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-kpi')}>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-kpi' as any)}>
               <Text style={styles.buttonText}>📊 Dashboard KPI (Admin)</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-beta-users')}>
+            <TouchableOpacity style={styles.button} onPress={() => router.push('/admin-beta-users' as any)}>
               <Text style={styles.buttonText}>🔓 Débloquer Beta Users (Admin)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.button, { backgroundColor: '#8b5cf6' }]} onPress={handleSetAdminFlag}>

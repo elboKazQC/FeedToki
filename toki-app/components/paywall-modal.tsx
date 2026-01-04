@@ -142,7 +142,7 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
             </View>
             <View style={styles.featureItem}>
               <Text style={[styles.featureBullet, { color: colors.primary }]}>❌</Text>
-              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+              <Text style={[styles.featureText, { color: colors.text.secondary }]}> 
                 Annule quand tu veux
               </Text>
             </View>

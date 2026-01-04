@@ -72,12 +72,12 @@ export function Input({
       )}
       <TextInput
         {...textInputProps}
-        style={inputStyles}
+        style={inputStyles as any}
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : 'center'}
         placeholderTextColor={theme.text.tertiary}
         accessibilityLabel={label || textInputProps.accessibilityLabel}
-        accessibilityState={{ invalid: hasError }}
+        accessibilityState={{ invalid: hasError } as any}
       />
       {showError && hasError && (
         <Text

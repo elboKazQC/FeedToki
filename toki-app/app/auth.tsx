@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { router } from 'expo-router';
 import { SafeAreaView } from '../components/safe-area-view-wrapper';
 // import { spacing } from '../constants/design-tokens';
-import { signIn, signUp, resendEmailVerification, getCurrentUser, signOut, sendPasswordResetEmailToUser } from '../lib/firebase-auth';
+import { signIn, signUp, resendEmailVerification, getCurrentUser, sendPasswordResetEmailToUser } from '../lib/firebase-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { localSignIn, localSignUp, getCurrentLocalUser } from '../lib/local-auth';
 import { useAuth } from '../lib/auth-context';
@@ -380,7 +380,7 @@ export default function AuthScreen() {
             {resendSuccess && (
               <View style={styles.successBox}>
                 <Text style={styles.successText}>✅ Courriel envoyé !</Text>
-                <Text style={styles.successSubtext}>⏰ L'email peut prendre 5-10 minutes à arriver</Text>
+                <Text style={styles.successSubtext}>⏰ L&apos;email peut prendre 5-10 minutes à arriver</Text>
               </View>
             )}
             

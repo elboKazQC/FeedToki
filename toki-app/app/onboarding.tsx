@@ -518,10 +518,10 @@ export default function OnboardingScreen() {
         <View style={styles.formulaBox}>
           <Text style={styles.formulaTitle}>🧮 Comment on calcule tes besoins?</Text>
           <Text style={styles.formulaText}>
-            On utilise la <Text style={styles.bold}>formule de Mifflin-St Jeor</Text>, reconnue scientifiquement comme l'une des plus précises pour calculer ton métabolisme de base (BMR).
+            On utilise la <Text style={styles.bold}>formule de Mifflin-St Jeor</Text>, reconnue scientifiquement comme l&apos;une des plus précises pour calculer ton métabolisme de base (BMR).
           </Text>
           <Text style={styles.formulaText}>
-            Cette formule prend en compte ton <Text style={styles.bold}>poids</Text>, ta <Text style={styles.bold}>taille</Text>, ton <Text style={styles.bold}>genre</Text> et ton <Text style={styles.bold}>niveau d'activité</Text> pour déterminer exactement combien de calories ton corps brûle chaque jour.
+            Cette formule prend en compte ton <Text style={styles.bold}>poids</Text>, ta <Text style={styles.bold}>taille</Text>, ton <Text style={styles.bold}>genre</Text> et ton <Text style={styles.bold}>niveau d&apos;activité</Text> pour déterminer exactement combien de calories ton corps brûle chaque jour.
           </Text>
           <Text style={styles.formulaText}>
             Ensuite, on ajuste selon ton objectif (perte de poids, maintenance) pour te donner un budget calorique personnalisé, puis on convertit ça en <Text style={styles.bold}>points</Text> pour que ce soit simple à suivre!

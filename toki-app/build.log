@@ -1,17 +1,18 @@
-env: load .env.local .env.production
-env: export EXPO_PUBLIC_OPENAI_API_KEY EXPO_PUBLIC_LOG_SERVER
 React Compiler enabled
 Starting Metro Bundler
 Static rendering is enabled. Learn more: https://docs.expo.dev/router/reference/static-rendering/
-λ Bundled 1686ms node_modules\expo-router\node\render.js (1361 modules)
-Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1296/1297)
-Web Bundled 2146ms node_modules\expo-router\entry.js (1298 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.7% (720/749)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 92.5% (817/856)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.7% (1095/1115)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 97.0% (1252/1279)
+λ Bundled 6958ms node_modules\expo-router\node\render.js (1364 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1284/1296)
+Web Bundled 8912ms node_modules\expo-router\entry.js (1299 modules)
 
-› web bundles (4):
-_expo/static/js/web/entry-5a4aca142158d02db31ab47b5341ac0d.js (3.29 MB)
-_expo/static/js/web/nutrition-calculator-192a787d3ea163cbd4ad9585d90cf09a.js (1.01 kB)
-_expo/static/js/web/openai-parser-0cb276299e20694f32219c383952d8b9.js (23.5 kB)
-_expo/static/js/web/subscription-service-002841aff945a3d92387b629d6b4b53e.js (1.5 kB)
+› web bundles (3):
+_expo/static/js/web/entry-3222b080208822d76df60c83682cac99.js (3.32 MB)
+_expo/static/js/web/nutrition-calculator-67600694d7b490db6ed2870035f72962.js (1.01 kB)
+_expo/static/js/web/subscription-service-b0a1ef83e6b2c571ced28540374eb1ab.js (1.5 kB)
 
 › Static routes (23):
 /auth (17.4 kB)
@@ -39,5 +40,9 @@ _expo/static/js/web/subscription-service-002841aff945a3d92387b629d6b4b53e.js (1.
 /verify-email-firebase (17.4 kB)
 
 Exported: web-build
-Terminer le programme de commandes (O/N)�? Terminer le programme de commandes (O/N)�? 
-^C
+Something prevented Expo from exiting, forcefully exiting now.
+npm notice
+npm notice New minor version of npm available! 11.6.2 -> 11.7.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.7.0
+npm notice To update run: npm install -g npm@11.7.0
+npm notice
