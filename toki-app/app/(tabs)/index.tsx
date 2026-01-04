@@ -1790,6 +1790,55 @@ export default function App() {
     }
   };
 
+  const handleAdjustQuantity = async (entryId: string, itemIndex: number, delta: number) => {
+    try {
+      const entry = entries.find(e => e.id === entryId);
+      if (!entry || !entry.items) return;
+      
+      const itemRef = entry.items[itemIndex];
+      const currentMultiplier = itemRef.multiplier || 1.0;
+      const newMultiplier = Math.max(0.5, currentMultiplier + delta);
+      
+      // Trouver l'aliment pour recalculer les grammes
+      const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
+      const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
+      const foodItem = allFoods.find(f => f.id === itemRef.foodId);
+      if (!foodItem) return;
+      
+      // Obtenir la portion par défaut
+      const mediumPortion = getDefaultPortion(foodItem.tags);
+      const newGrams = Math.round(mediumPortion.grams * newMultiplier);
+      const unit = getUnitForFood(foodItem);
+      
+      // Mettre à jour l'item
+      const updatedItems = [...entry.items];
+      updatedItems[itemIndex] = {
+        ...itemRef,
+        multiplier: newMultiplier,
+        portionGrams: newGrams,
+        quantityHint: `${newGrams}${unit} (${newMultiplier.toFixed(1)} portion${newMultiplier !== 1 ? 's' : ''})`,
+      };
+      
+      const updatedEntry: MealEntry = {
+        ...entry,
+        items: updatedItems,
+      };
+      
+      await handleUpdateEntry(entryId, updatedEntry);
+      
+      await userLogger.info(
+        currentUserId,
+        `Quantité ajustée: ${foodItem.name}`,
+        'adjust-quantity',
+        { delta, oldMultiplier: currentMultiplier, newMultiplier, newGrams }
+      );
+    } catch (error) {
+      await logError(currentUserId, error, 'adjust-quantity', { entryId, itemIndex, delta });
+      console.error('[AdjustQuantity] Erreur:', error);
+      Alert.alert('Erreur', 'Impossible d\'ajuster la quantité.');
+    }
+  };
+
   // IMPORTANT (Web export): éviter les erreurs d'hydratation React (#418)
   // Ce return conditionnel doit être APRÈS tous les hooks
   if (!isClient) {
@@ -2951,6 +3000,27 @@ function HomeScreen({
                               <Text style={styles.historyItemDetailNutrition}>
                                 🔥 {itemCalories} cal · 💪 {itemProtein}g prot
                               </Text>
+                              
+                              {/* Contrôles inline de quantité */}
+                              <View style={styles.inlineQuantityControl}>
+                                <TouchableOpacity
+                                  style={styles.inlineQuantityButton}
+                                  onPress={() => handleAdjustQuantity(item.id, itemIdx, -0.5)}
+                                >
+                                  <Text style={styles.inlineQuantityButtonText}>−</Text>
+                                </TouchableOpacity>
+                                
+                                <Text style={styles.inlineQuantityValue}>
+                                  {(multiplier).toFixed(1)} portion{multiplier !== 1 ? 's' : ''}
+                                </Text>
+                                
+                                <TouchableOpacity
+                                  style={styles.inlineQuantityButton}
+                                  onPress={() => handleAdjustQuantity(item.id, itemIdx, +0.5)}
+                                >
+                                  <Text style={styles.inlineQuantityButtonText}>+</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                             <TouchableOpacity
                               style={styles.historyItemEditButton}
@@ -2963,7 +3033,7 @@ function HomeScreen({
                                 });
                               }}
                             >
-                              <Text style={styles.historyItemEditText}>✏️</Text>
+                              <Text style={styles.historyItemEditText}>⚙️</Text>
                             </TouchableOpacity>
                           </View>
                         );
@@ -5898,6 +5968,44 @@ const styles = StyleSheet.create({
   cheatMealBadgeText: {
     color: '#fbbf24',
     fontSize: 10,
+  },
+  inlineQuantityControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    padding: 6,
+    alignSelf: 'flex-start',
+  },
+  inlineQuantityButton: {
+    backgroundColor: '#374151',
+    borderRadius: 6,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  inlineQuantityButtonText: {
+    color: '#e5e7eb',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  inlineQuantityValue: {
+    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '600',
+    minWidth: 70,
+    textAlign: 'center',
+  },
+  historyItemActions: {
+    fontSize: 13,
+    fontWeight: '600',
+    minWidth: 70,
+    textAlign: 'center',
     fontWeight: '600',
   },
   historyItemsDetail: {

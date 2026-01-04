@@ -105,6 +105,41 @@ function convertQuantityToMultiplier(
     return ml / 250;
   }
   
+  // Cuillères (tablespoon/teaspoon)
+  if (quantityLower.includes('cuillère à soupe') || quantityLower.includes('cuillere à soupe') || 
+      quantityLower.includes('c. à soupe') || quantityLower.includes('càs') || quantityLower.includes('tbsp')) {
+    // 1 cuillère à soupe ≈ 15ml/15g
+    const totalAmount = quantityNumber * 15;
+    return totalAmount / defaultPortion.grams;
+  }
+  
+  if (quantityLower.includes('cuillère à thé') || quantityLower.includes('cuillere à thé') || 
+      quantityLower.includes('c. à thé') || quantityLower.includes('càt') || quantityLower.includes('tsp')) {
+    // 1 cuillère à thé ≈ 5ml/5g
+    const totalAmount = quantityNumber * 5;
+    return totalAmount / defaultPortion.grams;
+  }
+  
+  if (quantityLower.includes('cuillère') || quantityLower.includes('cuillere')) {
+    // Cuillère générique (assumer cuillère à soupe par défaut)
+    const totalAmount = quantityNumber * 15;
+    return totalAmount / defaultPortion.grams;
+  }
+  
+  // Verre/glass
+  if (quantityLower.includes('verre') || quantityLower.includes('glass')) {
+    // 1 verre ≈ 250ml
+    const totalAmount = quantityNumber * 250;
+    return totalAmount / defaultPortion.grams;
+  }
+  
+  // Bol/bowl
+  if (quantityLower.includes('bol') || quantityLower.includes('bowl')) {
+    // 1 bol ≈ 400ml
+    const totalAmount = quantityNumber * 400;
+    return totalAmount / defaultPortion.grams;
+  }
+  
   // Si c'est en portions, toasts, tasses, etc.
   if (quantityLower.includes('portion') || 
       quantityLower.includes('toast') || 

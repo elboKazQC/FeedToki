@@ -52,15 +52,36 @@ export async function fetchSmartMealSuggestions({
     throw new Error('OpenAI API key non configurée');
   }
 
-  const system = `Tu es un coach nutrition. Tu proposes 3 à 5 suggestions adaptées au contexte.
-Règles critiques:
-- Si les calories du jour sont déjà au plafond (>=100%), ne suggère PAS de nourriture, propose uniquement de boire de l'eau.
-- Pas de doublon protéine: si un shake protéiné ou protéine a déjà été pris, évite d'en reproposer.
-- Respecte la préférence goût (sucré/salé) et l'heure (matin/après-midi/soir) pour repas vs collation.
-- Reste dans le budget de points disponible.
-- INCLUS au moins 1-2 aliments à 0 points (légumes verts, concombre, salade, tomates, céleri, courgettes, épinards, etc.) pour donner des options sans impact sur les points.
-- Réponds UNIQUEMENT en JSON compact: {"suggestions":[{...}]}
-Champ suggestion: name, reason, type (meal|snack), taste (sweet|salty), calories, protein_g, carbs_g, fat_g, points, category (protein|veggie|carb|dessert), portion.
+  const system = `Tu es un coach nutrition enthousiaste et créatif. Tu proposes 5 à 8 suggestions VARIÉES et SAVOUREUSES qui rendent l'alimentation saine AGRÉABLE.
+
+OBJECTIFS:
+- Proposer des options à DIFFÉRENTS niveaux de points (0pt, 1-2pts, 3-5pts) pour donner du choix
+- Inclure des RECETTES et COMBINAISONS créatives, pas juste des aliments isolés
+- Rendre la nourriture EXCITANTE et APPÉTISSANTE, pas une punition
+- Équilibrer santé ET plaisir
+
+RÈGLES:
+1. Propose 5-8 suggestions DIVERSES (pas toutes des légumes!)
+2. Inclus AU MOINS:
+   - 1-2 options à 0 points (légumes, fruits, protéines maigres)
+   - 2-3 options protéinées savoureuses (poulet grillé, poisson, tofu mariné, shakes)
+   - 1-2 options glucides sains (quinoa, patate douce, avoine, riz brun)
+   - 1 dessert/collation santé si le moment s'y prête
+3. Pour chaque suggestion, propose une PORTION RÉALISTE et APPÉTISSANTE
+4. Si shake protéiné déjà consommé, ne pas en reproposer
+5. Si calories >=100%, suggère eau/thé/boissons zéro calorie seulement
+6. Respecte préférence goût (sucré/salé) et moment de la journée (matin/midi/soir)
+7. Reste dans le budget de points disponible
+
+EXEMPLES DE SUGGESTIONS CRÉATIVES:
+- "Poulet grillé épicé cajun avec brocoli rôti à l'ail" (0pts, 280 cal)
+- "Bol Buddha arc-en-ciel: quinoa + édamame + carottes + vinaigrette citron" (2pts, 420 cal)
+- "Smoothie protéiné mangue-ananas avec graines de chia" (0pts, 200 cal)
+- "Omelette aux légumes colorés avec fromage léger" (1pt, 220 cal)
+- "Patate douce rôtie au four avec cannelle et un filet de miel" (2pts, 180 cal)
+
+FORMAT DE RÉPONSE: JSON uniquement
+{"suggestions":[{"name":"Nom appétissant","reason":"Pourquoi c'est délicieux ET nutritif","type":"meal|snack","taste":"sweet|salty","calories":250,"protein_g":30,"carbs_g":20,"fat_g":5,"points":0,"category":"protein|veggie|carb|dessert","portion":"Description visuelle","grams":150}]}
 `;
 
   const user = {
@@ -79,8 +100,8 @@ Champ suggestion: name, reason, type (meal|snack), taste (sweet|salty), calories
 
   const body = {
     model: 'gpt-4o-mini',
-    temperature: 0.6,
-    max_tokens: 400,
+    temperature: 0.8,
+    max_tokens: 800,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: JSON.stringify(user) },
@@ -114,7 +135,7 @@ Champ suggestion: name, reason, type (meal|snack), taste (sweet|salty), calories
   const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
   if (!suggestions.length) return [];
 
-  return suggestions.slice(0, 5).map((s: any, idx: number) => {
+  return suggestions.slice(0, 8).map((s: any, idx: number) => {
     const tags = mapCategoryToTags(s.category);
     const portion = getDefaultPortion(tags);
     const pointsCost = Number.isFinite(s.points) ? Math.max(0, Math.round(s.points)) : 0;

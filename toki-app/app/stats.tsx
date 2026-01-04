@@ -26,6 +26,7 @@ import { BestDays, DaySummary } from '../components/best-days';
 import { loadCustomFoods } from '../lib/custom-foods';
 import { FOOD_DB } from '../lib/food-db';
 import { computeDailyTotals, computeMealTotals, DEFAULT_TARGETS } from '../lib/nutrition';
+import { NutritionAnalysisCard } from '../components/nutrition-analysis-card';
 
 export default function StatsScreen() {
   const { profile, user } = useAuth();
@@ -58,6 +59,7 @@ export default function StatsScreen() {
   const [selectedDay, setSelectedDay] = useState<DaySummary | null>(null); // Journée sélectionnée pour afficher les détails
   const [targets, setTargets] = useState(DEFAULT_TARGETS); // Objectifs nutritionnels
   const [cheatDays, setCheatDays] = useState<Record<string, boolean>>({}); // Journées cheat
+  const [hasSubscription, setHasSubscription] = useState(false); // Statut abonnement premium
 
   const currentUserId = profile?.userId || (user as any)?.uid || (user as any)?.id || 'guest';
 
@@ -234,6 +236,27 @@ export default function StatsScreen() {
     };
     
     loadCheatDays();
+  }, [currentUserId]);
+
+  // Vérifier le statut d'abonnement premium
+  useEffect(() => {
+    const checkSubscription = async () => {
+      if (!currentUserId || currentUserId === 'guest') {
+        setHasSubscription(false);
+        return;
+      }
+      
+      try {
+        const { hasActiveSubscription } = await import('../lib/subscription-utils');
+        const hasSub = await hasActiveSubscription(currentUserId);
+        setHasSubscription(hasSub);
+      } catch (error) {
+        console.error('[Stats] Erreur vérification abonnement:', error);
+        setHasSubscription(false);
+      }
+    };
+    
+    checkSubscription();
   }, [currentUserId]);
 
   // Calculer les stats
@@ -568,6 +591,17 @@ export default function StatsScreen() {
           <View style={[styles.calendarCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
             <StreakCalendar entries={entries} cheatDays={cheatDays} />
           </View>
+        </View>
+
+        {/* Coach Nutrition IA - Premium */}
+        <View style={styles.section}>
+          <NutritionAnalysisCard
+            entries={entries}
+            customFoods={customFoods}
+            targets={targets}
+            userId={currentUserId}
+            hasSubscription={hasSubscription}
+          />
         </View>
 
         {/* Bonus Streak */}

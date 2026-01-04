@@ -419,6 +419,18 @@ function ClientOnlySubscriptionScreen() {
             <View style={styles.featureItem}>
               <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
               <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                Analyse nutrition IA (7/14/30 jours)
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
+              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                La nutrition = 80% du succès fitness
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
+              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
                 Annulation à tout moment
               </Text>
             </View>
