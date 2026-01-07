@@ -319,8 +319,12 @@ RÈGLES CRITIQUES pour "name":
 - isComposite = false pour les ingrédients simples ou aliments de base (ex: "beurre de peanut", "pain", "poulet", "riz")
 
 IMPORTANT - Valeurs nutritionnelles:
-- Fournis TOUJOURS les valeurs nutritionnelles (calories, protéines, glucides, lipides)
-- Les valeurs doivent être réalistes et cohérentes avec le type d'aliment
+- Si l'utilisateur FOURNIT des valeurs nutritionnelles dans sa description, utilise SES VALEURS EXACTES
+  * Patterns à détecter: "X cal", "X calories", "X kcal", "Xg protein", "Xg protéines", "Xg prot", "Xg carbs", "Xg glucides", "Xg fat", "Xg lipides", "Xg gras"
+  * Exemple: "shake protéiné 200 cal, 40g protein, 10g carbs, 3g fat" → utilise calories_kcal=200, protein_g=40, carbs_g=10, fat_g=3
+  * NE PAS confondre quantité d'aliment (ex: "200g de poulet") avec valeur nutritionnelle (ex: "40g protein")
+  * Les valeurs fournies par l'utilisateur ont PRIORITÉ ABSOLUE sur tes estimations
+- Si l'utilisateur ne fournit PAS de valeurs, estime-les de façon réaliste et cohérente avec le type d'aliment
 - Pour les portions, ajuste les valeurs selon la quantité mentionnée (ex: 1/3 sachet de riz = environ 67g de riz cuit)
 - Utilise des valeurs standards pour 100g d'aliment cru/brut quand possible
 
@@ -455,6 +459,26 @@ EXEMPLES:
     "protein_g": 4,
     "carbs_g": 25,
     "fat_g": 8
+  }
+- "shake protéiné 200 cal, 35g protein, 15g carbs, 4g fat" → {
+    "name": "shake protéiné",
+    "quantity": "1 portion",
+    "quantityNumber": 1,
+    "category": "PROTEINE_MAIGRE",
+    "calories_kcal": 200,
+    "protein_g": 35,
+    "carbs_g": 15,
+    "fat_g": 4
+  }
+- "barre protéinée maison 180 calories 20g protéines 10g glucides 5g lipides" → {
+    "name": "barre protéinée maison",
+    "quantity": "1 portion",
+    "quantityNumber": 1,
+    "category": "PROTEINE_MAIGRE",
+    "calories_kcal": 180,
+    "protein_g": 20,
+    "carbs_g": 10,
+    "fat_g": 5
   }
 
 Règles importantes:

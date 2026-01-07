@@ -22,18 +22,19 @@ export function StreakCalendar({ entries, weeksToShow = 12, cheatDays = {} }: St
     const daysToShow = weeksToShow * 7;
     const data: DayData[] = [];
 
-    // Créer un set des dates avec repas
+    // Créer un set des dates avec repas (en temps local)
     const datesWithMeals = new Set(
       entries.map(e => {
         const d = new Date(e.createdAt);
+        // Utiliser getFullYear/getMonth/getDate pour le temps local
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       })
     );
 
-    // Générer les derniers X jours
+    // Générer les derniers X jours (en temps local pour cohérence)
     for (let i = daysToShow - 1; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
+      // Créer la date directement en temps local pour éviter les décalages
+      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       
       data.push({
@@ -61,7 +62,10 @@ export function StreakCalendar({ entries, weeksToShow = 12, cheatDays = {} }: St
   };
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    // Parser la date comme temps local, pas UTC
+    // new Date("2026-01-05") est interprété comme UTC minuit, causant un décalage
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('fr-FR', { 
       weekday: 'short', 
       month: 'short', 

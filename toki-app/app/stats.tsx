@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
 import { DragonDisplay } from '../components/dragon-display';
-import { StreakCalendar } from '../components/streak-calendar';
+import { MonthlyCalendar } from '../components/monthly-calendar';
 import { 
   MealEntry, 
   computeStreakWithCalories,
@@ -320,32 +320,32 @@ export default function StatsScreen() {
   // Ce return conditionnel doit être APRÈS tous les hooks (règle des hooks React)
   if (!isClient) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]} edges={['top', 'bottom']}>
-        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>Chargement…</Text>
+      <SafeAreaView style={[styles.container, { backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' }]} edges={['top', 'bottom']}>
+        <Text style={{ color: '#e5e7eb', fontSize: 16, fontWeight: '600' }}>Chargement…</Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-      <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#020617' }} edges={['top', 'bottom']}>
+      <ScrollView style={[styles.container, { backgroundColor: '#020617' }]}>
       <View style={styles.content}>
         {/* Header avec bouton retour */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.push('/(tabs)')}>
-            <Text style={[styles.backButtonText, { color: colors.tint }]}>← Retour</Text>
+            <Text style={[styles.backButtonText, { color: '#60a5fa' }]}>← Retour</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, { color: colors.text }]}>🔥 Statistiques</Text>
+        <Text style={[styles.title, { color: '#e5e7eb' }]}>🔥 Statistiques</Text>
 
         {/* Dragon Status */}
-        <View style={[styles.dragonSection, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+        <View style={[styles.dragonSection, { backgroundColor: '#1f2937' }]}>
           {isDragonDead ? (
             <View style={styles.dragonDeadContainer}>
               <Text style={styles.dragonDeadEmoji}>💀</Text>
-              <Text style={[styles.dragonDeadTitle, { color: colors.text }]}>Dragon Affamé!</Text>
-              <Text style={[styles.dragonDeadText, { color: colors.icon }]}>
+              <Text style={[styles.dragonDeadTitle, { color: '#e5e7eb' }]}>Dragon Affamé!</Text>
+              <Text style={[styles.dragonDeadText, { color: '#9ca3af' }]}>
                 Ton dragon n&apos;a pas mangé depuis {dragonState.daysSinceLastMeal} jours.
                 Nourris-le vite pour le sauver!
               </Text>
@@ -360,10 +360,10 @@ export default function StatsScreen() {
           )}
           
           <View style={styles.dragonInfo}>
-            <Text style={[styles.levelText, { color: colors.text }]}>
+            <Text style={[styles.levelText, { color: '#e5e7eb' }]}>
               {dragonLevel.emoji} Niveau {dragonLevel.level} - {dragonLevel.name}
             </Text>
-            <Text style={[styles.evolutionsText, { color: colors.icon }]}>
+            <Text style={[styles.evolutionsText, { color: '#9ca3af' }]}>
               Niveaux débloqués: {streak.evolutionsUnlocked} / 12
             </Text>
             {dragonLevel.level < 12 && (
@@ -373,10 +373,10 @@ export default function StatsScreen() {
                     <View style={[styles.progressBar, { width: `${dragonProgress * 100}%` }]} />
                   </View>
                 </View>
-                <Text style={[styles.progressText, { color: colors.icon }]}>
+                <Text style={[styles.progressText, { color: '#9ca3af' }]}>
                   {daysToNext} jour{daysToNext > 1 ? 's' : ''} pour le niveau suivant
                 </Text>
-                <Text style={[styles.progressText, { color: colors.icon, marginTop: 4 }]}>
+                <Text style={[styles.progressText, { color: '#9ca3af', marginTop: 4 }]}>
                   Progression: {Math.round(streak.progressToNextEvolution * 100)}% vers niveau {dragonLevel.level + 1}
                 </Text>
               </>
@@ -391,42 +391,42 @@ export default function StatsScreen() {
 
         {/* Streak Stats */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>🔥 Streak</Text>
+          <Text style={[styles.sectionTitle, { color: '#e5e7eb' }]}>🔥 Streak</Text>
           <View style={styles.statsGrid}>
-            <View style={[styles.statCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={[styles.statCard, { backgroundColor: '#1f2937' }]}>
               <Text style={styles.statEmoji}>🔥</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>{streak.currentStreakDays}</Text>
-              <Text style={[styles.statLabel, { color: colors.icon }]}>Jours consécutifs</Text>
+              <Text style={[styles.statValue, { color: '#e5e7eb' }]}>{streak.currentStreakDays}</Text>
+              <Text style={[styles.statLabel, { color: '#9ca3af' }]}>Jours consécutifs</Text>
             </View>
-            <View style={[styles.statCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={[styles.statCard, { backgroundColor: '#1f2937' }]}>
               <Text style={styles.statEmoji}>🏆</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>{streak.longestStreakDays}</Text>
-              <Text style={[styles.statLabel, { color: colors.icon }]}>Record</Text>
+              <Text style={[styles.statValue, { color: '#e5e7eb' }]}>{streak.longestStreakDays}</Text>
+              <Text style={[styles.statLabel, { color: '#9ca3af' }]}>Record</Text>
             </View>
-            <View style={[styles.statCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={[styles.statCard, { backgroundColor: '#1f2937' }]}>
               <Text style={styles.statEmoji}>📅</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>{streak.totalFedDays}</Text>
-              <Text style={[styles.statLabel, { color: colors.icon }]}>Jours total</Text>
+              <Text style={[styles.statValue, { color: '#e5e7eb' }]}>{streak.totalFedDays}</Text>
+              <Text style={[styles.statLabel, { color: '#9ca3af' }]}>Jours total</Text>
             </View>
-            <View style={[styles.statCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+            <View style={[styles.statCard, { backgroundColor: '#1f2937' }]}>
               <Text style={styles.statEmoji}>🎖️</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>{streak.streakBonusEarned}</Text>
-              <Text style={[styles.statLabel, { color: colors.icon }]}>Mois complétés</Text>
+              <Text style={[styles.statValue, { color: '#e5e7eb' }]}>{streak.streakBonusEarned}</Text>
+              <Text style={[styles.statLabel, { color: '#9ca3af' }]}>Mois complétés</Text>
             </View>
           </View>
         </View>
 
         {/* Poids */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>⚖️ Poids</Text>
-          <View style={[styles.weightCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+          <Text style={[styles.sectionTitle, { color: '#e5e7eb' }]}>⚖️ Poids</Text>
+          <View style={[styles.weightCard, { backgroundColor: '#1f2937' }]}>
             {baseline && (
               <View style={styles.baselineRow}>
-                <Text style={[styles.baselineText, { color: colors.icon }]}>Poids de départ:</Text>
-                <Text style={[styles.baselineValue, { color: colors.text }]}>
+                <Text style={[styles.baselineText, { color: '#9ca3af' }]}>Poids de départ:</Text>
+                <Text style={[styles.baselineValue, { color: '#e5e7eb' }]}>
                   {toDisplay(baseline.weightKg, weightUnit)} {weightUnit}
                 </Text>
-                <Text style={[styles.baselineDate, { color: colors.icon }]}>({baseline.date})</Text>
+                <Text style={[styles.baselineDate, { color: '#9ca3af' }]}>({baseline.date})</Text>
               </View>
             )}
             <View style={styles.weightRow}>
@@ -509,7 +509,7 @@ export default function StatsScreen() {
             <View style={styles.chartRow}>
               {(() => {
                 if (weights.length < 2) {
-                  return <Text style={{ color: colors.icon }}>Ajoute 2+ valeurs pour voir la tendance</Text>;
+                  return <Text style={{ color: '#9ca3af' }}>Ajoute 2+ valeurs pour voir la tendance</Text>;
                 }
                 const useWeekly = weights.length > 60;
                 if (useWeekly) {
@@ -572,7 +572,7 @@ export default function StatsScreen() {
         {/* Meilleurs jours */}
         {entries.length > 0 && (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>🏆 Meilleurs jours</Text>
+            <Text style={[styles.sectionTitle, { color: '#e5e7eb' }]}>🏆 Meilleurs jours</Text>
             <BestDays 
               entries={entries} 
               customFoods={customFoods}
@@ -587,9 +587,9 @@ export default function StatsScreen() {
 
         {/* Calendrier des streaks */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>📅 Calendrier</Text>
-          <View style={[styles.calendarCard, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
-            <StreakCalendar entries={entries} cheatDays={cheatDays} />
+          <Text style={[styles.sectionTitle, { color: '#e5e7eb' }]}>📅 Calendrier</Text>
+          <View style={[styles.calendarCard, { backgroundColor: '#1f2937' }]}>
+            <MonthlyCalendar entries={entries} cheatDays={cheatDays} />
           </View>
         </View>
 
@@ -601,13 +601,17 @@ export default function StatsScreen() {
             targets={targets}
             userId={currentUserId}
             hasSubscription={hasSubscription}
+            profile={profile}
+            weights={weights}
+            streak={streak}
+            cheatDays={cheatDays}
           />
         </View>
 
         {/* Bonus Streak */}
         {streak.streakBonusEarned > 0 && (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>🏅 Accomplissements</Text>
+            <Text style={[styles.sectionTitle, { color: '#e5e7eb' }]}>🏅 Accomplissements</Text>
             <View style={[styles.bonusCard, { backgroundColor: '#fef3c7' }]}>
               <Text style={styles.bonusEmoji}>🔥</Text>
               <View style={styles.bonusInfo}>
@@ -629,15 +633,18 @@ export default function StatsScreen() {
         onRequestClose={() => setSelectedDay(null)}
       >
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]}>
-          <View style={[styles.modalContent, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+          <View style={[styles.modalContent, { backgroundColor: '#1f2937' }]}>
             {selectedDay && (() => {
               // Formater la date
               const formatDate = (dateStr: string) => {
-                const date = new Date(dateStr);
+                // Parser la date comme temps local, pas UTC
+                // new Date("2026-01-05") est interprété comme UTC minuit, causant un décalage
+                const [year, month, day] = dateStr.split('-').map(Number);
+                const date = new Date(year, month - 1, day);
+                
                 const now = new Date();
                 const today = normalizeDate(now.toISOString());
-                const yesterday = new Date(now);
-                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
                 const yesterdayStr = normalizeDate(yesterday.toISOString());
                 
                 if (dateStr === today) return "Aujourd'hui";
@@ -667,7 +674,7 @@ export default function StatsScreen() {
                   {/* Header */}
                   <View style={styles.modalHeader}>
                     <View style={styles.modalHeaderLeft}>
-                      <Text style={[styles.modalTitle, { color: colors.text }]}>
+                      <Text style={[styles.modalTitle, { color: '#e5e7eb' }]}>
                         📅 {formatDate(selectedDay.date)}
                       </Text>
                       <View style={[styles.modalScoreBadge, { backgroundColor: getScoreColor(selectedDay.score) }]}>
@@ -678,35 +685,35 @@ export default function StatsScreen() {
                       onPress={() => setSelectedDay(null)}
                       style={styles.modalCloseButton}
                     >
-                      <Text style={[styles.modalCloseText, { color: colors.text }]}>✕</Text>
+                      <Text style={[styles.modalCloseText, { color: '#e5e7eb' }]}>✕</Text>
                     </TouchableOpacity>
                   </View>
 
                   {/* Totaux de la journée */}
-                  <View style={[styles.modalTotalsSection, { borderColor: activeTheme === 'dark' ? '#374151' : '#e5e7eb' }]}>
-                    <Text style={[styles.modalSectionTitle, { color: colors.text }]}>Totaux de la journée</Text>
+                  <View style={[styles.modalTotalsSection, { borderColor: '#374151' }]}>
+                    <Text style={[styles.modalSectionTitle, { color: '#e5e7eb' }]}>Totaux de la journée</Text>
                     <View style={styles.modalTotalsGrid}>
                       <View style={styles.modalTotalItem}>
-                        <Text style={[styles.modalTotalLabel, { color: colors.icon }]}>🔥 Calories</Text>
-                        <Text style={[styles.modalTotalValue, { color: colors.text }]}>
+                        <Text style={[styles.modalTotalLabel, { color: '#9ca3af' }]}>🔥 Calories</Text>
+                        <Text style={[styles.modalTotalValue, { color: '#e5e7eb' }]}>
                           {Math.round(selectedDay.totals.calories_kcal)}
                         </Text>
                       </View>
                       <View style={styles.modalTotalItem}>
-                        <Text style={[styles.modalTotalLabel, { color: colors.icon }]}>💪 Protéines</Text>
-                        <Text style={[styles.modalTotalValue, { color: colors.text }]}>
+                        <Text style={[styles.modalTotalLabel, { color: '#9ca3af' }]}>💪 Protéines</Text>
+                        <Text style={[styles.modalTotalValue, { color: '#e5e7eb' }]}>
                           {Math.round(selectedDay.totals.protein_g)}g
                         </Text>
                       </View>
                       <View style={styles.modalTotalItem}>
-                        <Text style={[styles.modalTotalLabel, { color: colors.icon }]}>🍞 Glucides</Text>
-                        <Text style={[styles.modalTotalValue, { color: colors.text }]}>
+                        <Text style={[styles.modalTotalLabel, { color: '#9ca3af' }]}>🍞 Glucides</Text>
+                        <Text style={[styles.modalTotalValue, { color: '#e5e7eb' }]}>
                           {Math.round(selectedDay.totals.carbs_g)}g
                         </Text>
                       </View>
                       <View style={styles.modalTotalItem}>
-                        <Text style={[styles.modalTotalLabel, { color: colors.icon }]}>🧈 Lipides</Text>
-                        <Text style={[styles.modalTotalValue, { color: colors.text }]}>
+                        <Text style={[styles.modalTotalLabel, { color: '#9ca3af' }]}>🧈 Lipides</Text>
+                        <Text style={[styles.modalTotalValue, { color: '#e5e7eb' }]}>
                           {Math.round(selectedDay.totals.fat_g)}g
                         </Text>
                       </View>
@@ -715,7 +722,7 @@ export default function StatsScreen() {
 
                   {/* Liste des repas */}
                   <View style={styles.modalMealsSection}>
-                    <Text style={[styles.modalSectionTitle, { color: colors.text }]}>
+                    <Text style={[styles.modalSectionTitle, { color: '#e5e7eb' }]}>
                       Repas ({selectedDay.meals.length})
                     </Text>
                     <ScrollView style={styles.modalMealsList} showsVerticalScrollIndicator={false}>
@@ -724,30 +731,30 @@ export default function StatsScreen() {
                         return (
                           <View
                             key={meal.id}
-                            style={[styles.modalMealCard, { backgroundColor: activeTheme === 'dark' ? '#111827' : '#f9fafb', borderColor: activeTheme === 'dark' ? '#374151' : '#e5e7eb' }]}
+                            style={[styles.modalMealCard, { backgroundColor: '#111827', borderColor: '#374151' }]}
                           >
                             <View style={styles.modalMealHeader}>
-                              <Text style={[styles.modalMealCategory, { color: colors.icon }]}>
+                              <Text style={[styles.modalMealCategory, { color: '#9ca3af' }]}>
                                 [{getCategoryLabel(meal.category)}]
                               </Text>
-                              <Text style={[styles.modalMealLabel, { color: colors.text }]} numberOfLines={2}>
+                              <Text style={[styles.modalMealLabel, { color: '#e5e7eb' }]} numberOfLines={2}>
                                 {meal.label}
                               </Text>
                             </View>
                             <View style={styles.modalMealNutrition}>
                               <View style={styles.modalMealNutritionRow}>
-                                <Text style={[styles.modalMealNutritionItem, { color: colors.icon }]}>
+                                <Text style={[styles.modalMealNutritionItem, { color: '#9ca3af' }]}>
                                   🔥 {Math.round(mealTotals.calories_kcal)} kcal
                                 </Text>
-                                <Text style={[styles.modalMealNutritionItem, { color: colors.icon }]}>
+                                <Text style={[styles.modalMealNutritionItem, { color: '#9ca3af' }]}>
                                   💪 {Math.round(mealTotals.protein_g)}g
                                 </Text>
                               </View>
                               <View style={styles.modalMealNutritionRow}>
-                                <Text style={[styles.modalMealNutritionItem, { color: colors.icon }]}>
+                                <Text style={[styles.modalMealNutritionItem, { color: '#9ca3af' }]}>
                                   🍞 {Math.round(mealTotals.carbs_g)}g
                                 </Text>
-                                <Text style={[styles.modalMealNutritionItem, { color: colors.icon }]}>
+                                <Text style={[styles.modalMealNutritionItem, { color: '#9ca3af' }]}>
                                   🧈 {Math.round(mealTotals.fat_g)}g
                                 </Text>
                               </View>

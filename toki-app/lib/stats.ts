@@ -54,7 +54,7 @@ export const DAYS_WARNING = 2;
 export const DAYS_CRITICAL = 5;
 export const MIN_CALORIES_FOR_COMPLETE_DAY = 800; // Minimum de calories pour considérer la journée comme complète
 
-// Normalize any ISO date to YYYY-MM-DD (using local date to avoid timezone issues)
+// Normalize any ISO date to YYYY-MM-DD (using LOCAL time to match user's timezone)
 export function normalizeDate(dateIso: string): string {
   // Si la date est déjà au format YYYY-MM-DD, la retourner telle quelle
   // Cela évite les problèmes de timezone avec new Date()
@@ -90,14 +90,16 @@ export function computeStreak(dayFeeds: Record<string, DayFeed>): StreakStats {
     };
   }
 
-  const today = normalizeDate(new Date().toISOString());
+  // Get today in local time to match user's timezone
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   let current = 0;
   let cursor = today;
   while (dayFeeds[cursor]) {
     current += 1;
-    const prevDay = new Date(cursor);
-    prevDay.setUTCDate(prevDay.getUTCDate() - 1);
+    const prevDay = new Date(cursor + 'T00:00:00');
+    prevDay.setDate(prevDay.getDate() - 1);
     cursor = normalizeDate(prevDay.toISOString());
   }
 
@@ -140,7 +142,11 @@ export function computeDragonState(dayFeeds: Record<string, DayFeed>): DragonSta
     return { mood: 'critique', daysSinceLastMeal: 999 };
   }
   const lastDay = days.sort().slice(-1)[0];
-  const diff = diffDays(normalizeDate(new Date().toISOString()), lastDay);
+  
+  // Get today in local time to match user's timezone
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const diff = diffDays(today, lastDay);
 
   let mood: DragonState = 'normal';
   if (diff >= DAYS_CRITICAL) mood = 'critique';
@@ -221,9 +227,11 @@ export function computeStreakWithCalories(
     };
   }
 
-  const today = normalizeDate(new Date().toISOString());
+  // Get today in local time to match user's timezone
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const completeDaysSet = new Set(completeDays);
-  console.log('[Streak] Date aujourd\'hui (normalisée):', today);
+  console.log('[Streak] Date aujourd\'hui (locale):', today);
 
   let current = 0;
   
@@ -239,9 +247,9 @@ export function computeStreakWithCalories(
     console.log(`[Streak] ✅ Aujourd'hui est complet (${todayCalories} cal), démarrage depuis aujourd'hui`);
   } else {
     // Aujourd'hui n'est pas encore complet, commencer depuis hier
-    // Utiliser la même méthode que computeStreak pour la cohérence (setUTCDate)
+    // Utiliser setDate() pour l'heure locale
     const yesterdayDate = new Date(today + 'T00:00:00');
-    yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
     cursor = normalizeDate(yesterdayDate.toISOString());
     console.log(`[Streak] ⚠️ Aujourd'hui incomplet (${todayCalories} cal), démarrage depuis hier: ${cursor}`);
   }
@@ -253,9 +261,9 @@ export function computeStreakWithCalories(
     current += 1;
     const calories = dayCaloriesMap[cursor] || 0;
     console.log(`[Streak]   Jour ${current}: ${cursor} (${calories} cal)`);
-    // Utiliser setUTCDate pour la cohérence avec computeStreak
+    // Utiliser setDate() pour l'heure locale
     const prevDay = new Date(cursor + 'T00:00:00');
-    prevDay.setUTCDate(prevDay.getUTCDate() - 1);
+    prevDay.setDate(prevDay.getDate() - 1);
     cursor = normalizeDate(prevDay.toISOString());
     iteration++;
     if (iteration > 100) {
@@ -314,7 +322,11 @@ export function computeDragonStateWithCalories(
   }
 
   const lastCompleteDay = completeDays[completeDays.length - 1];
-  const diff = diffDays(normalizeDate(new Date().toISOString()), lastCompleteDay);
+  
+  // Get today in local time to match user's timezone
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const diff = diffDays(today, lastCompleteDay);
 
   let mood: DragonState = 'normal';
   if (diff >= DAYS_CRITICAL) mood = 'critique';

@@ -162,11 +162,29 @@ export async function syncPointsToFirestore(
       }
     }
     
-    await setDoc(pointsRef, {
-      balance: finalBalance,
-      lastClaimDate,
-      updatedAt: Timestamp.now(),
-    });
+    // Inclure startOfDayBalance si dispo localement (utile pour rendre le "début de journée" cohérent entre appareils)
+    let startOfDayBalance: number | undefined;
+    try {
+      const pointsKey = `feedtoki_points_${userId}_v2`;
+      const raw = await AsyncStorage.getItem(pointsKey);
+      const local = raw ? JSON.parse(raw) : null;
+      if (local && typeof local.startOfDayBalance === 'number' && local.lastClaimDate === lastClaimDate) {
+        startOfDayBalance = local.startOfDayBalance;
+      }
+    } catch (e) {
+      // Best-effort only
+    }
+
+    await setDoc(
+      pointsRef,
+      {
+        balance: finalBalance,
+        lastClaimDate,
+        ...(typeof startOfDayBalance === 'number' ? { startOfDayBalance } : {}),
+        updatedAt: Timestamp.now(),
+      },
+      { merge: true }
+    );
     
     console.log('[Sync] ✅ Points balance sauvegardé dans Firestore', {
       path: `users/${userId}/points/current`,
@@ -454,9 +472,17 @@ export async function syncFromFirestore(userId: string): Promise<{
         }
       }
       
+      const finalStartOfDayBalance =
+        (localPointsData && localPointsData.lastClaimDate === finalLastClaimDate && typeof localPointsData.startOfDayBalance === 'number')
+          ? localPointsData.startOfDayBalance
+          : (firestorePointsData && firestorePointsData.lastClaimDate === finalLastClaimDate && typeof (firestorePointsData as any).startOfDayBalance === 'number')
+            ? (firestorePointsData as any).startOfDayBalance
+            : undefined;
+
       await AsyncStorage.setItem(pointsKey, JSON.stringify({
         balance: finalBalance,
         lastClaimDate: finalLastClaimDate,
+        ...(typeof finalStartOfDayBalance === 'number' ? { startOfDayBalance: finalStartOfDayBalance } : {}),
       }));
       console.log('[Sync] ✅ Points fusionnés et sauvegardés localement (sera recalculé après):', finalBalance);
 

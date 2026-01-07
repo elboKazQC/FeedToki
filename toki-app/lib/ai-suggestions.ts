@@ -1,7 +1,8 @@
 import { DailyNutritionTotals, NutritionTargets } from './nutrition';
-import { SmartRecommendation } from './smart-recommendations';
+import { SmartRecommendation, getSmartRecommendationsByTaste } from './smart-recommendations';
 import { FoodItem, FoodTag } from './food-db';
 import { getDefaultPortion } from './portions';
+import { computeFoodPoints } from './points-utils';
 
 export type AiSuggestionInput = {
   totals: DailyNutritionTotals;
@@ -30,7 +31,7 @@ function mapCategoryToTags(category?: string): FoodTag[] {
   const cat = category.toLowerCase();
   if (cat.includes('protein') || cat.includes('proteine') || cat.includes('lean')) return ['proteine_maigre'];
   if (cat.includes('legume') || cat.includes('veggie') || cat.includes('salad')) return ['legume'];
-  if (cat.includes('grain') || cat.includes('feculent')) return ['feculent_simple'];
+  if (cat.includes('grain') || cat.includes('feculent') || cat.includes('carb')) return ['feculent_simple'];
   if (cat.includes('dessert') || cat.includes('sweet')) return ['dessert_sante'];
   return [];
 }
@@ -101,7 +102,7 @@ FORMAT DE RÉPONSE: JSON uniquement
   const body = {
     model: 'gpt-4o-mini',
     temperature: 0.6,
-    max_tokens: 800,
+    max_tokens: 2000,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: JSON.stringify(user) },
@@ -124,25 +125,50 @@ FORMAT DE RÉPONSE: JSON uniquement
 
   const json = await res.json();
   const content: string = json?.choices?.[0]?.message?.content || '';
+  const finishReason = json?.choices?.[0]?.finish_reason;
 
   let parsed: any;
   try {
     // Try to extract JSON if wrapped in markdown code blocks
-    const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || content.match(/(\{[\s\S]*\})/);
-    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    let jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || content.match(/(\{[\s\S]*\})/);
+    let jsonStr = jsonMatch ? jsonMatch[1] : content;
+
+    // If truncated (missing closing brace), try to recover by closing the JSON
+    if (finishReason === 'length' || !jsonStr.trim().endsWith('}')) {
+      console.warn('⚠️ AI response seems truncated, attempting to recover...');
+      // Count opening vs closing braces to determine how many to add
+      const openBraces = (jsonStr.match(/\{/g) || []).length;
+      const closeBraces = (jsonStr.match(/\}/g) || []).length;
+      const missingBraces = openBraces - closeBraces;
+      
+      // Remove any incomplete final entry (after last complete "}")
+      const lastCompleteObjectIdx = jsonStr.lastIndexOf('}');
+      if (lastCompleteObjectIdx > 0) {
+        jsonStr = jsonStr.substring(0, lastCompleteObjectIdx + 1);
+      }
+      
+      // Add missing closing braces
+      for (let i = 0; i < missingBraces; i++) {
+        jsonStr += '}';
+      }
+      
+      console.log('🔧 Attempted recovery, trying parse again...');
+    }
+
     parsed = JSON.parse(jsonStr);
   } catch (err) {
-    console.error('Failed to parse AI response:', content);
-    throw new Error('Réponse IA invalide');
+    console.error('❌ Failed to parse AI response:', content.substring(0, 500));
+    console.error('Parse error:', err);
+    throw new Error('Réponse IA invalide - augmentation des tokens recommandée');
   }
 
   const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
   if (!suggestions.length) return [];
 
-  return suggestions.slice(0, 8).map((s: any, idx: number) => {
+  // Map AI suggestions to SmartRecommendation objects
+  const mappedSuggestions = suggestions.slice(0, 8).map((s: any, idx: number) => {
     const tags = mapCategoryToTags(s.category);
     const portion = getDefaultPortion(tags);
-    const pointsCost = Number.isFinite(s.points) ? Math.max(0, Math.round(s.points)) : 0;
     const name = typeof s.name === 'string' && s.name.trim().length > 0 ? s.name.trim() : `Suggestion ${idx + 1}`;
     const item: FoodItem = {
       id: `ai_${slugify(name)}_${idx}`,
@@ -153,8 +179,11 @@ FORMAT DE RÉPONSE: JSON uniquement
       protein_g: Number.isFinite(s.protein_g) ? s.protein_g : 0,
       carbs_g: Number.isFinite(s.carbs_g) ? s.carbs_g : 0,
       fat_g: Number.isFinite(s.fat_g) ? s.fat_g : 0,
-      points: pointsCost,
     };
+
+    // CORRECTION 2: Recalculer les points avec computeFoodPoints au lieu de faire confiance à l'IA
+    const pointsCost = computeFoodPoints(item);
+    item.points = pointsCost;
 
     return {
       item,
@@ -164,6 +193,60 @@ FORMAT DE RÉPONSE: JSON uniquement
       suggestedGrams: Number.isFinite(s.grams) ? s.grams : portion.grams,
       suggestedVisualRef: s.portion || portion.visualRef,
       portion,
+      aiTaste: s.taste, // Conserver le goût suggéré par l'IA pour validation
     } as SmartRecommendation;
   });
+
+  // CORRECTION 1: Filtrer les suggestions qui ne correspondent pas au goût demandé
+  const filteredByTaste = mappedSuggestions.filter((rec: SmartRecommendation & { aiTaste?: string }) => {
+    const aiTaste = rec.aiTaste;
+    
+    // Si l'IA n'a pas spécifié le goût, vérifier les tags
+    if (!aiTaste || aiTaste === tastePreference) {
+      // Vérifier si les tags correspondent au goût demandé
+      const item = rec.item;
+      if (tastePreference === 'sweet') {
+        const isSweet = item.tags.includes('dessert_sante') || 
+                       item.tags.includes('sucre') || 
+                       item.id.includes('shake') ||
+                       item.id.includes('fruit') ||
+                       item.name.toLowerCase().includes('chocolat') ||
+                       item.name.toLowerCase().includes('vanille');
+        return aiTaste === 'sweet' || (!aiTaste && isSweet);
+      } else if (tastePreference === 'salty') {
+        const isSalty = item.tags.includes('proteine_maigre') ||
+                       item.tags.includes('legume') ||
+                       item.tags.includes('feculent_simple') ||
+                       item.tags.includes('grain_complet') ||
+                       (!item.tags.includes('sucre') && !item.tags.includes('dessert_sante'));
+        return aiTaste === 'salty' || (!aiTaste && isSalty);
+      }
+    }
+    return aiTaste === tastePreference;
+  });
+
+  // CORRECTION 3: Garantir au moins 1 option à 0 point
+  const hasZeroPoint = filteredByTaste.some((rec: SmartRecommendation) => rec.pointsCost === 0);
+  
+  if (!hasZeroPoint) {
+    console.log('⚠️ Aucune option à 0 point dans suggestions IA, ajout depuis fallback...');
+    // Obtenir des suggestions locales avec le goût approprié
+    const fallbackRecs = getSmartRecommendationsByTaste(
+      totals,
+      targets,
+      availablePoints,
+      tastePreference,
+      timeOfDay
+    );
+    
+    // Trouver les options à 0 point dans le fallback
+    const zeroPointOptions = fallbackRecs.filter(rec => rec.pointsCost === 0).slice(0, 2);
+    
+    // Ajouter les options 0 point au début de la liste
+    if (zeroPointOptions.length > 0) {
+      return [...zeroPointOptions, ...filteredByTaste].slice(0, 8);
+    }
+  }
+
+  return filteredByTaste;
 }

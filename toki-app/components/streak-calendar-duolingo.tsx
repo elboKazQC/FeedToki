@@ -33,8 +33,8 @@ export function StreakCalendarDuolingo({
     }> = [];
     
     for (let i = daysToShow - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
+      // Créer la date en temps local pour éviter les décalages
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
       const dateStr = normalizeDate(date.toISOString());
       const calories = dayCaloriesMap[dateStr] || 0;
       const hasMeals = !!dayFeeds[dateStr];
@@ -78,7 +78,10 @@ export function StreakCalendarDuolingo({
   
   const formatDayLabel = (day: typeof days[0]) => {
     if (day.isToday) return 'Auj.';
-    const date = new Date(day.date);
+    // Parser la date comme temps local, pas UTC
+    // new Date("2026-01-05") est interprété comme UTC minuit, causant un décalage
+    const [year, month, dayNum] = day.date.split('-').map(Number);
+    const date = new Date(year, month - 1, dayNum);
     return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
   };
   
@@ -183,6 +186,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
     position: 'relative',
+    width: '100%',
   },
   dayPoint: {
     width: 24,
@@ -216,10 +220,10 @@ const styles = StyleSheet.create({
   },
   connectionLine: {
     position: 'absolute',
-    top: 11,
-    left: 24,
+    top: 10,
+    left: '50%',
     width: '100%',
-    height: 2,
+    height: 3,
     backgroundColor: '#fbbf24',
     zIndex: 1,
   },

@@ -6,6 +6,7 @@ export type FavoriteMeal = {
   id: string;
   name: string;
   items: FoodItemRef[];
+  count?: number; // Nombre de fois que le repas a été mangé
 };
 
 // Handy quick items (chips)

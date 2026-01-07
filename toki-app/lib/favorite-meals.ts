@@ -6,11 +6,13 @@ import { FavoriteMeal } from './presets';
  * Calcule les repas les plus consommés par l'utilisateur
  * @param entries Toutes les entrées de repas de l'utilisateur
  * @param maxMeals Nombre maximum de repas favoris à retourner (défaut: 8)
+ * @param minFrequency Fréquence minimum pour qu'un repas soit considéré favori (défaut: 2)
  * @returns Liste des repas favoris triés par fréquence
  */
 export function calculateFavoriteMeals(
   entries: MealEntry[],
-  maxMeals: number = 8
+  maxMeals: number = 8,
+  minFrequency: number = 2
 ): FavoriteMeal[] {
   if (!entries || entries.length === 0) {
     return [];
@@ -54,21 +56,34 @@ export function calculateFavoriteMeals(
     }
   }
 
+  // Simple hash function for stable IDs
+  const simpleHash = (str: string): string => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(36);
+  };
+
   // Convertir en tableau et trier par fréquence (puis par date récente)
-  const favoriteMeals: FavoriteMeal[] = Array.from(mealSignatures.values())
+  const favoriteMeals: FavoriteMeal[] = Array.from(mealSignatures.entries())
+    .filter(([_, meal]) => meal.count >= minFrequency) // Filtrer par seuil minimum
     .sort((a, b) => {
       // D'abord par fréquence (décroissant)
-      if (b.count !== a.count) {
-        return b.count - a.count;
+      if (b[1].count !== a[1].count) {
+        return b[1].count - a[1].count;
       }
       // Ensuite par date récente (décroissant)
-      return b.lastUsed.getTime() - a.lastUsed.getTime();
+      return b[1].lastUsed.getTime() - a[1].lastUsed.getTime();
     })
     .slice(0, maxMeals)
-    .map((meal, index) => ({
-      id: `favorite_${index}_${meal.count}`,
+    .map(([signature, meal]) => ({
+      id: `fav_${simpleHash(signature)}`, // ID stable basé sur le contenu
       name: meal.label.length > 30 ? meal.label.substring(0, 30) + '...' : meal.label,
       items: meal.items,
+      count: meal.count, // Ajouter le count pour l'affichage
     }));
 
   return favoriteMeals;

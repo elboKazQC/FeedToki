@@ -1,19 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Button } from './ui/Button';
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
 import { spacing } from '../constants/design-tokens';
-import { MealEntry } from '../lib/stats';
-import { FoodItem } from '../lib/food-db';
+import { MealEntry, StreakStats, computeStreak } from '../lib/stats';
+import { FoodItem, FOOD_DB } from '../lib/food-db';
 import { computeDailyTotals, NutritionTargets } from '../lib/nutrition';
 import {
   analyzeNutritionPeriod,
   NutritionPeriodDays,
   NutritionAnalysisResult,
   DailySummary,
+  UserProfileData,
+  WeightTrendData,
+  StreakData,
+  CheatDayData,
+  WeekPatternData,
+  MealTimingData,
+  FrequentFoodsData,
+  FrequentFoodItem,
 } from '../lib/ai-nutrition-coach';
 import { PaywallModal } from './paywall-modal';
+import { UserProfile } from '../lib/types';
+import { WeightEntry } from '../lib/weight';
 
 type NutritionAnalysisCardProps = {
   entries: MealEntry[];
@@ -21,6 +31,11 @@ type NutritionAnalysisCardProps = {
   targets: NutritionTargets;
   userId: string;
   hasSubscription: boolean;
+  // Nouvelles props pour personnalisation
+  profile?: UserProfile | null;
+  weights?: WeightEntry[];
+  streak?: StreakStats;
+  cheatDays?: Record<string, boolean>;
 };
 
 export function NutritionAnalysisCard({
@@ -29,14 +44,31 @@ export function NutritionAnalysisCard({
   targets,
   userId,
   hasSubscription,
+  profile,
+  weights = [],
+  streak,
+  cheatDays = {},
 }: NutritionAnalysisCardProps) {
-  const { activeTheme } = useTheme();
-  const colors = Colors[activeTheme];
+  // Force dark theme colors for consistency with stats page
+  const darkColors = {
+    surface: '#1f2937',
+    background: '#111827',
+    text: '#e5e7eb',
+    icon: '#9ca3af',
+    primary: '#f59e0b',
+    warning: '#f59e0b',
+    success: '#22c55e',
+    error: '#ef4444',
+    border: '#374151', // Added for period selector buttons
+  };
+  const colors = darkColors;
 
   console.log('[NutritionAnalysisCard] Rendering with:', { 
     entriesCount: entries.length,
     hasSubscription,
-    userId
+    userId,
+    hasProfile: !!profile,
+    weightsCount: weights.length,
   });
 
   const [selectedPeriod, setSelectedPeriod] = useState<NutritionPeriodDays>(7);
@@ -74,7 +106,7 @@ export function NutritionAnalysisCard({
             En attente de données...
           </Text>
           <Text style={[styles.waitingDescription, { color: colors.icon }]}>
-            Commence à logger tes repas pour débloquer l'analyse IA.{'\n\n'}
+            Commence à logger tes repas pour débloquer l&apos;analyse IA.{'\n\n'}
             ⏳ Besoin de 7 jours de données pour démarrer
           </Text>
         </View>
@@ -97,16 +129,16 @@ export function NutritionAnalysisCard({
     setError(null);
 
     try {
-      // Get the last N days
+      // Get the last N days EXCLUDING today (today is incomplete)
       const today = new Date();
       const dates: string[] = [];
-      for (let i = selectedPeriod - 1; i >= 0; i--) {
+      for (let i = selectedPeriod; i >= 1; i--) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
         dates.push(d.toISOString().split('T')[0]);
       }
 
-      // Compute daily summaries
+      // Compute daily summaries with cheat day info
       const dailySummaries: DailySummary[] = dates.map((date) => {
         const totals = computeDailyTotals(entries, date, customFoods);
         const dayEntries = entries.filter((e) => e.createdAt.split('T')[0] === date);
@@ -117,13 +149,234 @@ export function NutritionAnalysisCard({
           carbs_g: totals.carbs_g,
           fat_g: totals.fat_g,
           mealsCount: dayEntries.length,
+          isCheatDay: cheatDays[date] === true,
         };
       });
 
+      // === CALCUL DES DONNÉES PERSONNALISÉES ===
+
+      // 1. User Profile Data
+      const userProfileData: UserProfileData | undefined = profile ? {
+        weightGoal: profile.weightGoal,
+        currentWeight: profile.currentWeight,
+        activityLevel: profile.activityLevel,
+        gender: profile.gender,
+        heightCm: profile.heightCm,
+        tdeeEstimate: profile.tdeeEstimate,
+        dailyPointsBudget: profile.dailyPointsBudget,
+      } : undefined;
+
+      // 2. Weight Trend Data (analyser les poids sur la période)
+      let weightTrendData: WeightTrendData | undefined;
+      if (weights.length >= 2) {
+        const periodStart = dates[0];
+        const periodEnd = dates[dates.length - 1];
+        
+        // Filtrer les poids dans la période (ou prendre les plus proches)
+        const weightsInPeriod = weights.filter(w => w.date >= periodStart && w.date <= periodEnd);
+        const sortedWeights = [...weights].sort((a, b) => a.date.localeCompare(b.date));
+        
+        // Poids de départ (le premier dans la période ou le plus récent avant)
+        const startWeight = weightsInPeriod.length > 0 
+          ? weightsInPeriod[0].weightKg
+          : sortedWeights.filter(w => w.date < periodStart).pop()?.weightKg;
+        
+        // Poids actuel (le dernier enregistré)
+        const currentWeight = sortedWeights[sortedWeights.length - 1]?.weightKg;
+        
+        if (startWeight && currentWeight) {
+          const change = currentWeight - startWeight;
+          const weeks = selectedPeriod / 7;
+          const weeklyRate = change / weeks;
+          
+          weightTrendData = {
+            startWeight,
+            currentWeight,
+            weightChange: change,
+            trend: Math.abs(change) < 0.3 ? 'stable' : change < 0 ? 'down' : 'up',
+            weeklyRate,
+          };
+        } else {
+          weightTrendData = { trend: 'unknown' };
+        }
+      }
+
+      // 3. Streak Data
+      const streakData: StreakData | undefined = streak ? {
+        currentStreak: streak.currentStreakDays,
+        longestStreak: streak.longestStreakDays,
+        totalFedDays: streak.totalFedDays,
+      } : undefined;
+
+      // 4. Cheat Day Analysis
+      let cheatDayAnalysis: CheatDayData | undefined;
+      const cheatDaysInPeriod = dates.filter(d => cheatDays[d] === true);
+      if (cheatDaysInPeriod.length > 0) {
+        const cheatDaySummaries = dailySummaries.filter(d => d.isCheatDay && d.mealsCount > 0);
+        const normalDaySummaries = dailySummaries.filter(d => !d.isCheatDay && d.mealsCount > 0);
+        
+        const avgCheatCal = cheatDaySummaries.length > 0
+          ? cheatDaySummaries.reduce((sum, d) => sum + d.calories, 0) / cheatDaySummaries.length
+          : 0;
+        const avgNormalCal = normalDaySummaries.length > 0
+          ? normalDaySummaries.reduce((sum, d) => sum + d.calories, 0) / normalDaySummaries.length
+          : 0;
+        
+        cheatDayAnalysis = {
+          totalCheatDays: cheatDaysInPeriod.length,
+          cheatDayDates: cheatDaysInPeriod,
+          avgCaloriesOnCheatDays: avgCheatCal,
+          avgCaloriesOnNormalDays: avgNormalCal,
+        };
+      }
+
+      // 5. Weekend vs Weekday Pattern
+      const weekdays: DailySummary[] = [];
+      const weekends: DailySummary[] = [];
+      for (const summary of dailySummaries) {
+        const dayOfWeek = new Date(summary.date + 'T12:00:00').getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          weekends.push(summary);
+        } else {
+          weekdays.push(summary);
+        }
+      }
+      
+      const weekdaysWithData = weekdays.filter(d => d.mealsCount > 0);
+      const weekendsWithData = weekends.filter(d => d.mealsCount > 0);
+      
+      let weekPatternData: WeekPatternData | undefined;
+      if (weekdaysWithData.length > 0 && weekendsWithData.length > 0) {
+        const avgWeekdays = weekdaysWithData.reduce((sum, d) => sum + d.calories, 0) / weekdaysWithData.length;
+        const avgWeekends = weekendsWithData.reduce((sum, d) => sum + d.calories, 0) / weekendsWithData.length;
+        
+        weekPatternData = {
+          avgCaloriesWeekdays: avgWeekdays,
+          avgCaloriesWeekends: avgWeekends,
+          consistencyWeekdays: (weekdaysWithData.length / weekdays.length) * 100,
+          consistencyWeekends: (weekendsWithData.length / weekends.length) * 100,
+          weekendCalorieDiff: avgWeekdays > 0 ? ((avgWeekends - avgWeekdays) / avgWeekdays) * 100 : 0,
+        };
+      }
+
+      // 6. Meal Timing Data
+      const daysWithSingleMeal = dailySummaries.filter(d => d.mealsCount === 1).length;
+      const daysWithManyMeals = dailySummaries.filter(d => d.mealsCount >= 4).length;
+      const totalMeals = dailySummaries.reduce((sum, d) => sum + d.mealsCount, 0);
+      
+      const mealTimingData: MealTimingData = {
+        avgMealsPerDay: dailySummaries.length > 0 ? totalMeals / dailySummaries.length : 0,
+        daysWithSingleMeal,
+        daysWithManyMeals,
+      };
+
+      // 7. Analyse des aliments fréquents pour FOOD SWAPS 🔄
+      // Filtrer les entrées de la période sélectionnée
+      const periodEntries = entries.filter(e => {
+        const entryDate = e.createdAt.split('T')[0];
+        return dates.includes(entryDate);
+      });
+      
+      // Compter la fréquence de chaque aliment
+      const foodCounts: Record<string, { 
+        count: number; 
+        totalCal: number; 
+        totalProt: number;
+        name: string;
+        points: number;
+      }> = {};
+      
+      // Créer un index des foods pour lookup rapide
+      const allFoods = [...FOOD_DB, ...customFoods];
+      const foodIndex: Record<string, FoodItem> = {};
+      for (const food of allFoods) {
+        foodIndex[food.id] = food;
+      }
+      
+      for (const entry of periodEntries) {
+        if (entry.items && entry.items.length > 0) {
+          for (const item of entry.items) {
+            const food = foodIndex[item.foodId];
+            if (food) {
+              const multiplier = item.multiplier || 1;
+              const calories = (food.calories_kcal || 0) * multiplier;
+              const protein = (food.protein_g || 0) * multiplier;
+              const points = (food.points || 0) * multiplier;
+              
+              if (!foodCounts[food.id]) {
+                foodCounts[food.id] = {
+                  count: 0,
+                  totalCal: 0,
+                  totalProt: 0,
+                  name: food.name,
+                  points: 0,
+                };
+              }
+              
+              foodCounts[food.id].count += 1;
+              foodCounts[food.id].totalCal += calories;
+              foodCounts[food.id].totalProt += protein;
+              foodCounts[food.id].points += points;
+            }
+          }
+        }
+      }
+      
+      // Convertir en array et trier
+      const foodArray = Object.entries(foodCounts)
+        .map(([id, data]) => ({
+          name: data.name,
+          count: data.count,
+          totalCalories: data.totalCal,
+          avgCaloriesPerServing: data.count > 0 ? data.totalCal / data.count : 0,
+          avgProteinPerServing: data.count > 0 ? data.totalProt / data.count : 0,
+          points: data.count > 0 ? data.points / data.count : 0,
+          category: (data.points / data.count) <= 0 ? 'healthy' as const : 
+                   (data.points / data.count) <= 2 ? 'moderate' as const : 'indulgent' as const,
+        }));
+      
+      // Top aliments par fréquence
+      const topFoods = [...foodArray]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15);
+      
+      // Aliments à haute calorie (gros contributeurs)
+      const highCalorieFoods = [...foodArray]
+        .filter(f => f.count >= 2) // Au moins 2 fois pour être significatif
+        .sort((a, b) => b.totalCalories - a.totalCalories)
+        .slice(0, 5);
+      
+      // Aliments à optimiser: haute calorie, faible protéine (ratio cal/prot élevé)
+      const lowProteinHighCalorie = [...foodArray]
+        .filter(f => f.count >= 2 && f.avgCaloriesPerServing > 100)
+        .map(f => ({
+          ...f,
+          calProtRatio: f.avgProteinPerServing > 0 ? f.avgCaloriesPerServing / f.avgProteinPerServing : 999,
+        }))
+        .sort((a, b) => b.calProtRatio - a.calProtRatio)
+        .slice(0, 5);
+      
+      let frequentFoodsData: FrequentFoodsData | undefined;
+      if (topFoods.length > 0) {
+        frequentFoodsData = {
+          topFoods,
+          highCalorieFoods,
+          lowProteinHighCalorie,
+        };
+      }
+
+      // === APPEL À L'IA AVEC TOUTES LES DONNÉES ===
       const result = await analyzeNutritionPeriod({
         dailySummaries,
         targets,
         periodDays: selectedPeriod,
+        userProfile: userProfileData,
+        weightTrend: weightTrendData,
+        streakData,
+        cheatDayData: cheatDayAnalysis,
+        weekPattern: weekPatternData,
+        mealTiming: mealTimingData,
+        frequentFoods: frequentFoodsData,
       });
 
       setAnalysis(result);
@@ -147,7 +400,7 @@ export function NutritionAnalysisCard({
             </Text>
             <Text style={[styles.lockedDescription, { color: colors.icon }]}>
               • Identifie où couper les calories facilement{'\n'}
-              • Conseils d'expert en nutrition{'\n'}
+              • Conseils d&apos;expert en nutrition{'\n'}
               • Analyse sur 7, 14 ou 30 jours{'\n'}
               • La nutrition = 80% du succès fitness
             </Text>
