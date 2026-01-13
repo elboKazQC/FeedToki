@@ -35,14 +35,14 @@ export async function setAdminFlag(userId: string): Promise<void> {
   }
 
   try {
-    const { db } = await import('./firebase-config');
+    const { db, getDb } = await import('./firebase-config');
     const { doc, setDoc } = await import('firebase/firestore');
     
     if (!db) {
       throw new Error('Firestore non initialisé');
     }
 
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(getDb(), 'users', userId);
     await setDoc(userRef, { isAdmin: true }, { merge: true });
     
     console.log('[Admin Utils] ✅ Flag isAdmin défini pour', userId);

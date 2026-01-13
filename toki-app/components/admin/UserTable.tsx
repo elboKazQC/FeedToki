@@ -93,7 +93,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
   };
 
   return (
-    <Card variant="elevated" padding="none" style={styles.container}>
+    <Card variant="elevated" style={styles.container}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View>
           {/* Header */}
@@ -103,7 +103,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
               onPress={() => sortable && handleSort('email')}
               disabled={!sortable}
             >
-              <Text style={[styles.headerText, { color: colors.text }]}>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>
                 Email {sortable && getSortIcon('email')}
               </Text>
             </TouchableOpacity>
@@ -112,7 +112,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
               onPress={() => sortable && handleSort('createdAt')}
               disabled={!sortable}
             >
-              <Text style={[styles.headerText, { color: colors.text }]}>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>
                 Créé {sortable && getSortIcon('createdAt')}
               </Text>
             </TouchableOpacity>
@@ -121,7 +121,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
               onPress={() => sortable && handleSort('totalMeals')}
               disabled={!sortable}
             >
-              <Text style={[styles.headerText, { color: colors.text }]}>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>
                 Repas {sortable && getSortIcon('totalMeals')}
               </Text>
             </TouchableOpacity>
@@ -130,7 +130,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
               onPress={() => sortable && handleSort('currentStreak')}
               disabled={!sortable}
             >
-              <Text style={[styles.headerText, { color: colors.text }]}>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>
                 Streak {sortable && getSortIcon('currentStreak')}
               </Text>
             </TouchableOpacity>
@@ -139,12 +139,12 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
               onPress={() => sortable && handleSort('lastActivityDate')}
               disabled={!sortable}
             >
-              <Text style={[styles.headerText, { color: colors.text }]}>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>
                 Dernière activité {sortable && getSortIcon('lastActivityDate')}
               </Text>
             </TouchableOpacity>
             <View style={[styles.headerCell, styles.subscriptionCell]}>
-              <Text style={[styles.headerText, { color: colors.text }]}>Abonnement</Text>
+              <Text style={[styles.headerText, { color: colors.text.primary }]}>Abonnement</Text>
             </View>
           </View>
 
@@ -169,7 +169,7 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
                   disabled={!onRowPress}
                 >
                   <View style={[styles.cell, styles.emailCell]}>
-                    <Text style={[styles.cellText, { color: colors.text }]} numberOfLines={1}>
+                    <Text style={[styles.cellText, { color: colors.text.primary }]} numberOfLines={1}>
                       {userKPI.user.email || 'N/A'}
                     </Text>
                   </View>
@@ -179,12 +179,12 @@ export function UserTable({ data, onRowPress, sortable = true }: UserTableProps)
                     </Text>
                   </View>
                   <View style={[styles.cell, styles.statsCell]}>
-                    <Text style={[styles.cellText, { color: colors.text }]}>
+                    <Text style={[styles.cellText, { color: colors.text.primary }]}>
                       {userKPI.stats.totalMeals}
                     </Text>
                   </View>
                   <View style={[styles.cell, styles.statsCell]}>
-                    <Text style={[styles.cellText, { color: colors.text }]}>
+                    <Text style={[styles.cellText, { color: colors.text.primary }]}>
                       {userKPI.stats.currentStreak}
                     </Text>
                   </View>

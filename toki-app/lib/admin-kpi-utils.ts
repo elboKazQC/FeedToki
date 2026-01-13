@@ -2,7 +2,7 @@
 // Permet de récupérer et calculer toutes les métriques utilisateurs
 
 import { collection, doc, getDoc, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { db, FIREBASE_ENABLED } from './firebase-config';
+import { db, FIREBASE_ENABLED, getDb } from './firebase-config';
 import { MealEntry, normalizeDate, computeStreak, DayFeed } from './stats';
 import { UserProfile, UserDetailedStats, GlobalKPIs, UserKPI, KPIFilter, SubscriptionStatus, SubscriptionTier, WeightGoal, ActivityLevel } from './types';
 import { getUserLogs } from './user-logger';
@@ -25,7 +25,7 @@ export async function fetchAllUsers(): Promise<UserProfile[]> {
   }
 
   try {
-    const usersRef = collection(db, 'users');
+    const usersRef = collection(getDb(), 'users');
     const snapshot = await getDocs(usersRef);
     
     return snapshot.docs.map((docSnap) => {
@@ -48,7 +48,7 @@ export async function fetchUserMeals(userId: string): Promise<MealEntry[]> {
   if (!isFirebaseAvailable()) return [];
 
   try {
-    const mealsRef = collection(db, 'users', userId, 'meals');
+    const mealsRef = collection(getDb(), 'users', userId, 'meals');
     const snapshot = await getDocs(mealsRef);
     
     return snapshot.docs.map((docSnap) => {
@@ -78,8 +78,8 @@ export async function fetchUserPoints(userId: string): Promise<{
   }
 
   try {
-    const currentRef = doc(db, 'users', userId, 'points', 'current');
-    const totalRef = doc(db, 'users', userId, 'points', 'total');
+    const currentRef = doc(getDb(), 'users', userId, 'points', 'current');
+    const totalRef = doc(getDb(), 'users', userId, 'points', 'total');
     
     const [currentDoc, totalDoc] = await Promise.all([
       getDoc(currentRef),
@@ -107,7 +107,7 @@ export async function fetchUserCustomFoodsCount(userId: string): Promise<number>
   if (!isFirebaseAvailable()) return 0;
 
   try {
-    const customFoodsRef = collection(db, 'users', userId, 'customFoods');
+    const customFoodsRef = collection(getDb(), 'users', userId, 'customFoods');
     const snapshot = await getDocs(customFoodsRef);
     return snapshot.size;
   } catch (error) {

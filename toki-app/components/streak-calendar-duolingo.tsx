@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { normalizeDate } from '../lib/stats';
 
@@ -11,6 +11,9 @@ type StreakCalendarDuolingoProps = {
   cheatDays?: Record<string, boolean>; // Dates des jours cheat
 };
 
+// Date par défaut pour éviter les erreurs d'hydratation SSR
+const DEFAULT_NOW = new Date('2026-01-01T12:00:00.000Z');
+
 export function StreakCalendarDuolingo({
   currentStreakDays,
   dayFeeds,
@@ -19,9 +22,16 @@ export function StreakCalendarDuolingo({
   daysToShow = 10,
   cheatDays = {},
 }: StreakCalendarDuolingoProps) {
+  // État pour forcer le re-render côté client avec la vraie date
+  const [clientNow, setClientNow] = useState<Date>(DEFAULT_NOW);
+  
+  useEffect(() => {
+    setClientNow(new Date());
+  }, []);
+  
   // Calculer les jours une seule fois avec useMemo pour éviter l'erreur d'hydratation
   const { today, days } = useMemo(() => {
-    const now = new Date();
+    const now = clientNow;
     const todayStr = normalizeDate(now.toISOString());
     
     // Générer les jours à afficher (du plus ancien au plus récent)
@@ -50,7 +60,7 @@ export function StreakCalendarDuolingo({
     }
     
     return { today: todayStr, days: daysArray };
-  }, [dayFeeds, dayCaloriesMap, minCalories, daysToShow]);
+  }, [clientNow, dayFeeds, dayCaloriesMap, minCalories, daysToShow]);
   
   // Trouver le premier jour complet dans la séquence (pour le streak)
   let streakStartIndex = -1;

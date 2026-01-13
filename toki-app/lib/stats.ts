@@ -1,5 +1,14 @@
 // Core types and stats helpers (no side effects yet)
 
+// Helper pour obtenir la date locale au format YYYY-MM-DD
+export function getTodayLocal(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export type MealCategory = 'sain' | 'ok' | 'cheat';
 
 export type FoodItemRef = {
@@ -8,6 +17,7 @@ export type FoodItemRef = {
   portionSize?: string; // 'small' | 'medium' | 'large' | 'custom'
   portionGrams?: number; // Poids en grammes
   multiplier?: number; // Multiplicateur pour les macros (1.0 = portion moyenne)
+  nutritionSource?: 'db' | 'off' | 'estimated' | 'custom'; // Source des données nutritionnelles
 };
 
 export type MealEntry = {
@@ -47,6 +57,12 @@ export type Score7Jours = {
   score: number; // 0-100
   zone: 'vert' | 'jaune' | 'rouge';
   mealsCount: number;
+  // Breakdown par catégorie
+  sainCount: number;
+  okCount: number;
+  cheatCount: number;
+  // Conseil actionable
+  tip: string;
 };
 
 const EVOLUTION_STEP_DAYS = 30;
@@ -158,10 +174,36 @@ export function computeDragonState(dayFeeds: Record<string, DayFeed>): DragonSta
 export function computeScore7Jours(meals: MealEntry[]): Score7Jours {
   const now = Date.now();
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const recent = meals.filter((m) => new Date(m.createdAt).getTime() >= sevenDaysAgo);
+  const today = getTodayLocal();
+  
+  // Filtrer les repas des 7 derniers jours EXCLUANT la journée actuelle (incomplète)
+  const recent = meals.filter((m) => {
+    const mealTime = new Date(m.createdAt).getTime();
+    const mealDate = normalizeDate(m.createdAt);
+    return mealTime >= sevenDaysAgo && mealDate !== today;
+  });
+
+  // Calculer le breakdown par catégorie
+  let sainCount = 0;
+  let okCount = 0;
+  let cheatCount = 0;
+  
+  recent.forEach((m) => {
+    if (m.category === 'sain') sainCount++;
+    else if (m.category === 'ok') okCount++;
+    else cheatCount++;
+  });
 
   if (recent.length === 0) {
-    return { score: 0, zone: 'rouge', mealsCount: 0 };
+    return { 
+      score: 0, 
+      zone: 'rouge', 
+      mealsCount: 0,
+      sainCount: 0,
+      okCount: 0,
+      cheatCount: 0,
+      tip: 'Commence à logger tes repas! 🍽️'
+    };
   }
 
   const raw = recent.reduce((sum, m) => sum + m.score, 0);
@@ -172,7 +214,35 @@ export function computeScore7Jours(meals: MealEntry[]): Score7Jours {
   if (clamped < 40) zone = 'rouge';
   else if (clamped < 70) zone = 'jaune';
 
-  return { score: clamped, zone, mealsCount: recent.length };
+  // Générer un conseil actionable basé sur les données
+  let tip = '';
+  const cheatRatio = cheatCount / recent.length;
+  const sainRatio = sainCount / recent.length;
+  
+  if (clamped >= 80) {
+    tip = 'Excellent! Continue comme ça! 🏆';
+  } else if (cheatRatio > 0.3) {
+    // Plus de 30% de cheat meals
+    tip = 'Remplace 1 cheat par 1 sain = +6% 📈';
+  } else if (sainRatio < 0.3) {
+    // Moins de 30% de repas sains
+    tip = '+protéines au déjeuner = score ↑ 🥩';
+  } else if (okCount > sainCount) {
+    // Beaucoup de repas OK, peu de sains
+    tip = 'Upgrade 1 repas OK → sain = +4% 💪';
+  } else {
+    tip = 'Tu progresses bien! Vise 60%+ 🎯';
+  }
+
+  return { 
+    score: clamped, 
+    zone, 
+    mealsCount: recent.length,
+    sainCount,
+    okCount,
+    cheatCount,
+    tip
+  };
 }
 
 // Helper to map manual categories to a score for 7j calculation

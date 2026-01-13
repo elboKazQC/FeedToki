@@ -3,7 +3,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 import { MealEntry } from './stats';
 import { UserProfile } from './types';
 import { WeightEntry } from './weight';
@@ -65,7 +65,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       return result;
     }
 
-    const batch = writeBatch(db);
+    const batch = writeBatch(getDb());
 
     // 1. Migrer les repas (entries)
     try {
@@ -74,7 +74,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       if (entriesRaw) {
         const entries: MealEntry[] = JSON.parse(entriesRaw);
         if (Array.isArray(entries) && entries.length > 0) {
-          const mealsRef = collection(db, 'users', userId, 'meals');
+          const mealsRef = collection(getDb(), 'users', userId, 'meals');
           for (const entry of entries) {
             const mealRef = doc(mealsRef, entry.id);
             batch.set(mealRef, {
@@ -95,7 +95,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       const pointsRaw = await AsyncStorage.getItem(pointsKey);
       if (pointsRaw) {
         const pointsData = JSON.parse(pointsRaw);
-        const pointsRef = doc(db, 'users', userId, 'points', 'current');
+        const pointsRef = doc(getDb(), 'users', userId, 'points', 'current');
         batch.set(pointsRef, pointsData);
         result.pointsMigrated = true;
       }
@@ -105,7 +105,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
       if (totalPointsRaw) {
         const totalPoints = JSON.parse(totalPointsRaw);
-        const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
+        const totalPointsRef = doc(getDb(), 'users', userId, 'points', 'total');
         batch.set(totalPointsRef, { value: totalPoints });
       }
     } catch (e: any) {
@@ -118,7 +118,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       const targetsRaw = await AsyncStorage.getItem(targetsKey);
       if (targetsRaw) {
         const targets = JSON.parse(targetsRaw);
-        const targetsRef = doc(db, 'users', userId, 'targets', 'nutrition');
+        const targetsRef = doc(getDb(), 'users', userId, 'targets', 'nutrition');
         batch.set(targetsRef, targets);
         result.targetsMigrated = true;
       }
@@ -133,7 +133,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       if (weightsRaw) {
         const weights: WeightEntry[] = JSON.parse(weightsRaw);
         if (Array.isArray(weights) && weights.length > 0) {
-          const weightsRef = collection(db, 'users', userId, 'weights');
+          const weightsRef = collection(getDb(), 'users', userId, 'weights');
           for (const weight of weights) {
             const weightRef = doc(weightsRef, weight.date);
             batch.set(weightRef, weight);

@@ -1,7 +1,7 @@
 // Gestion des aliments personnalisés créés par l'utilisateur
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FoodItem } from './food-db';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 import { collection, doc, setDoc, getDocs, query, where } from 'firebase/firestore';
 import { FIREBASE_ENABLED } from './firebase-config';
 
@@ -78,7 +78,7 @@ export async function loadCustomFoodsFromFirestore(): Promise<FoodItem[]> {
 
   try {
     console.log('[Custom Foods] 🔍 Démarrage chargement depuis Firestore (globalFoods)...');
-    const globalFoodsRef = collection(db, 'globalFoods');
+    const globalFoodsRef = collection(getDb(), 'globalFoods');
     const snapshot = await getDocs(globalFoodsRef);
     const foods = snapshot.docs.map(doc => {
       const data = doc.data() as FoodItem;
@@ -102,6 +102,20 @@ export async function loadCustomFoodsFromFirestore(): Promise<FoodItem[]> {
  * Ajouter un aliment personnalisé (dans la collection globale partagée)
  */
 export async function addCustomFood(food: FoodItem, userId?: string): Promise<void> {
+  // ⚠️ AVERTISSEMENT: Vérifier si l'ID existe déjà dans la base de données
+  const { FOOD_DB } = await import('./food-db');
+  const existsInBaseDb = FOOD_DB.some(item => item.id === food.id);
+  if (existsInBaseDb) {
+    const baseItem = FOOD_DB.find(item => item.id === food.id);
+    console.warn(
+      `[Custom Foods] ⚠️⚠️⚠️ ATTENTION: L'ID "${food.id}" existe déjà dans la base de données de base!`,
+      `\n  Aliment de base: "${baseItem?.name}" (${baseItem?.calories_kcal} kcal)`,
+      `\n  Nouvel aliment personnalisé: "${food.name}" (${food.calories_kcal} kcal)`,
+      `\n  ⚠️ Ceci peut causer des divergences de calories entre appareils!`,
+      `\n  💡 Recommandation: Utiliser un ID unique (ex: "${food.id}_custom_${Date.now()}")`
+    );
+  }
+  
   // Utiliser une clé globale pour le cache local (partagée par tous les utilisateurs)
   const storageKey = 'feedtoki_custom_foods_global_v1';
   
@@ -126,7 +140,7 @@ export async function addCustomFood(food: FoodItem, userId?: string): Promise<vo
         carbs: food.carbs_g,
         fat: food.fat_g,
       });
-      const globalFoodRef = doc(db, 'globalFoods', food.id);
+      const globalFoodRef = doc(getDb(), 'globalFoods', food.id);
       const foodData = {
         ...food,
         createdAt: new Date().toISOString(), // Ajouter timestamp pour référence
@@ -233,7 +247,7 @@ export async function migrateLocalFoodsToGlobal(userId?: string): Promise<{ migr
 
       try {
         console.log(`[Custom Foods Migration] 📤 Migration de "${food.name}" (${food.id})...`);
-        const globalFoodRef = doc(db, 'globalFoods', food.id);
+        const globalFoodRef = doc(getDb(), 'globalFoods', food.id);
         await setDoc(globalFoodRef, {
           ...food,
           createdAt: new Date().toISOString(),

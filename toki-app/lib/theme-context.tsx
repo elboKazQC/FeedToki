@@ -2,14 +2,19 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useColorScheme as useSystemColorScheme } from 'react-native';
+import { Colors } from '../constants/theme';
 
 type Theme = 'light' | 'dark' | 'system';
 type ActiveTheme = 'light' | 'dark';
 
+// Extended context type to be compatible with components expecting a React Navigation-like theme
 type ThemeContextType = {
   theme: Theme;
   activeTheme: ActiveTheme;
   setTheme: (theme: Theme) => Promise<void>;
+  // Use a flexible type to avoid over-constraining token shapes across light/dark
+  colors: any;
+  isDark: boolean;
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -61,8 +66,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Build a convenient colors object and isDark flag for consumers
+  const colors = Colors[activeTheme];
+  const isDark = activeTheme === 'dark';
+
   return (
-    <ThemeContext.Provider value={{ theme, activeTheme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, activeTheme, setTheme, colors, isDark }}>
       {children}
     </ThemeContext.Provider>
   );

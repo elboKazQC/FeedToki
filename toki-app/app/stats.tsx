@@ -6,19 +6,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
-import { DragonDisplay } from '../components/dragon-display';
 import { MonthlyCalendar } from '../components/monthly-calendar';
 import { 
   MealEntry, 
   computeStreakWithCalories,
-  computeDragonStateWithCalories,
   normalizeDate,
   StreakStats,
-  DragonStatus,
-  DAYS_CRITICAL,
   MIN_CALORIES_FOR_COMPLETE_DAY,
 } from '../lib/stats';
-import { getDragonLevel, getDragonProgress, getDaysToNextLevel } from '../lib/dragon-levels';
 import { loadWeights, saveWeight, toDisplay, toKg, WeightEntry, loadBaseline, getWeeklyAverageSeries } from '../lib/weight';
 import { WeightChart } from '../components/weight-chart';
 import { validateWeight } from '../lib/validation';
@@ -49,7 +44,6 @@ export default function StatsScreen() {
     streakBonusEarned: 0,
     isStreakBonusDay: false,
   });
-  const [dragonState, setDragonState] = useState<DragonStatus>({ mood: 'normal', daysSinceLastMeal: 0 });
   const [weights, setWeights] = useState<WeightEntry[]>([]);
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('lbs');
   const [weightInput, setWeightInput] = useState('');
@@ -83,7 +77,6 @@ export default function StatsScreen() {
         streakBonusEarned: 0,
         isStreakBonusDay: false,
       });
-      setDragonState({ mood: 'normal', daysSinceLastMeal: 0 });
       setWeights([]);
       setBaseline(null);
       setExcludedBestDays([]);
@@ -270,12 +263,7 @@ export default function StatsScreen() {
 
     // IMPORTANT: même logique que la Home (streak validé par calories minimum)
     setStreak(computeStreakWithCalories(dayFeeds, dayCaloriesMap, MIN_CALORIES_FOR_COMPLETE_DAY));
-    setDragonState(computeDragonStateWithCalories(dayFeeds, dayCaloriesMap, MIN_CALORIES_FOR_COMPLETE_DAY));
   }, [entries, dayCaloriesMap]);
-
-  const dragonLevel = getDragonLevel(streak.currentStreakDays);
-  const dragonProgress = getDragonProgress(streak.currentStreakDays);
-  const daysToNext = getDaysToNextLevel(streak.currentStreakDays);
 
   const saveWeightEntry = async (weightKg: number) => {
     const today = new Date().toISOString().slice(0, 10);
@@ -313,9 +301,6 @@ export default function StatsScreen() {
     setSelectedDay(day);
   }, []);
 
-  // Vérifier si le dragon est mort (5 jours sans nourrir)
-  const isDragonDead = dragonState.daysSinceLastMeal >= DAYS_CRITICAL;
-
   // IMPORTANT (Web export): éviter les erreurs d'hydratation React (#418/#310)
   // Ce return conditionnel doit être APRÈS tous les hooks (règle des hooks React)
   if (!isClient) {
@@ -338,56 +323,6 @@ export default function StatsScreen() {
         </View>
 
         <Text style={[styles.title, { color: '#e5e7eb' }]}>🔥 Statistiques</Text>
-
-        {/* Dragon Status */}
-        <View style={[styles.dragonSection, { backgroundColor: '#1f2937' }]}>
-          {isDragonDead ? (
-            <View style={styles.dragonDeadContainer}>
-              <Text style={styles.dragonDeadEmoji}>💀</Text>
-              <Text style={[styles.dragonDeadTitle, { color: '#e5e7eb' }]}>Dragon Affamé!</Text>
-              <Text style={[styles.dragonDeadText, { color: '#9ca3af' }]}>
-                Ton dragon n&apos;a pas mangé depuis {dragonState.daysSinceLastMeal} jours.
-                Nourris-le vite pour le sauver!
-              </Text>
-            </View>
-          ) : (
-            <DragonDisplay
-              streakDays={streak.currentStreakDays}
-              mood={dragonState.mood}
-              showInfo={false}
-              size={120}
-            />
-          )}
-          
-          <View style={styles.dragonInfo}>
-            <Text style={[styles.levelText, { color: '#e5e7eb' }]}>
-              {dragonLevel.emoji} Niveau {dragonLevel.level} - {dragonLevel.name}
-            </Text>
-            <Text style={[styles.evolutionsText, { color: '#9ca3af' }]}>
-              Niveaux débloqués: {streak.evolutionsUnlocked} / 12
-            </Text>
-            {dragonLevel.level < 12 && (
-              <>
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressBar, { width: `${dragonProgress * 100}%` }]} />
-                  </View>
-                </View>
-                <Text style={[styles.progressText, { color: '#9ca3af' }]}>
-                  {daysToNext} jour{daysToNext > 1 ? 's' : ''} pour le niveau suivant
-                </Text>
-                <Text style={[styles.progressText, { color: '#9ca3af', marginTop: 4 }]}>
-                  Progression: {Math.round(streak.progressToNextEvolution * 100)}% vers niveau {dragonLevel.level + 1}
-                </Text>
-              </>
-            )}
-            {dragonLevel.level === 12 && (
-              <Text style={[styles.maxLevelText, { color: '#10b981' }]}>
-                🎉 Niveau maximum atteint!
-              </Text>
-            )}
-          </View>
-        </View>
 
         {/* Streak Stats */}
         <View style={styles.section}>

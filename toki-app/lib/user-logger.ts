@@ -1,7 +1,7 @@
 // Système de logging centralisé pour déboguer les problèmes utilisateurs
 // Les logs sont envoyés à Firestore pour être consultables par utilisateur
 
-import { FIREBASE_ENABLED, db } from './firebase-config';
+import { FIREBASE_ENABLED, db, getDb } from './firebase-config';
 import { collection, addDoc, query, where, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -114,7 +114,7 @@ async function flushLogs(): Promise<void> {
   }
 
   try {
-    const logsRef = collection(db, 'user_logs');
+    const logsRef = collection(getDb(), 'user_logs');
     const logsToFlush = [...logCache]; // Copier le cache
     logCache.length = 0; // Vider le cache immédiatement pour éviter les doublons
     
@@ -158,7 +158,7 @@ export async function getUserLogs(
   }
 
   try {
-    const logsRef = collection(db, 'user_logs');
+    const logsRef = collection(getDb(), 'user_logs');
     let q = query(
       logsRef,
       where('userId', '==', userId),

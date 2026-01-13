@@ -104,8 +104,7 @@ export type FrequentFoodItem = {
   totalCalories: number; // Calories totales apportées
   avgCaloriesPerServing: number; // Calories moyennes par portion
   avgProteinPerServing: number; // Protéines moyennes par portion
-  category: 'healthy' | 'moderate' | 'indulgent'; // Classification
-  points: number; // Points moyens par portion
+  category: 'healthy' | 'moderate' | 'indulgent'; // Classification basée sur ratio protéines/calories
 };
 
 export type FrequentFoodsData = {

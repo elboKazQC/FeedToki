@@ -38,6 +38,7 @@ export default function AdminKPIScreen() {
   const { profile, user } = useAuth();
   const { activeTheme } = useTheme();
   const colors = Colors[activeTheme];
+  const colorValue = (c: any): string => (typeof c === 'string' ? c : (c && typeof c.primary === 'string' ? c.primary : String(c)) );
 
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [loading, setLoading] = useState(true);
@@ -156,7 +157,7 @@ export default function AdminKPIScreen() {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={styles.accessDeniedEmoji}>🔒</Text>
-        <Text style={[styles.accessDeniedText, { color: colors.text }]}>
+        <Text style={[styles.accessDeniedText, { color: colors.text.primary }]}>
           Accès réservé aux administrateurs
         </Text>
         <TouchableOpacity style={styles.backButtonCentered} onPress={() => router.back()}>
@@ -205,7 +206,7 @@ export default function AdminKPIScreen() {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.text }]}>Chargement des KPI...</Text>
+        <Text style={[styles.loadingText, { color: colors.text.primary }]}>Chargement des KPI...</Text>
       </View>
     );
   }
@@ -217,7 +218,7 @@ export default function AdminKPIScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={[styles.backButtonText, { color: colors.tint }]}>← Retour</Text>
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>📊 Dashboard KPI</Text>
+        <Text style={[styles.title, { color: colors.text.primary }]}>📊 Dashboard KPI</Text>
         <TouchableOpacity
           style={styles.refreshButton}
           onPress={() => loadData(true)}
@@ -353,7 +354,7 @@ export default function AdminKPIScreen() {
           <View style={styles.tableView}>
             <View style={styles.filters}>
               <TextInput
-                style={[styles.searchInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                style={[styles.searchInput, { backgroundColor: colors.surface, color: colors.text.primary, borderColor: colors.border }]}
                 placeholder="Rechercher par email..."
                 placeholderTextColor={colors.icon}
                 value={searchQuery}

@@ -164,7 +164,6 @@ function RootLayoutContent() {
         <Stack.Screen name="admin-beta-users" options={{ headerShown: false }} />
         <Stack.Screen name="stats" options={{ headerShown: false }} />
         <Stack.Screen name="help" options={{ headerShown: false }} />
-        <Stack.Screen name="points-explanation" options={{ headerShown: false }} />
         <Stack.Screen name="privacy-policy" options={{ headerShown: false }} />
         <Stack.Screen name="terms-of-service" options={{ headerShown: false }} />
         <Stack.Screen name="version" options={{ headerShown: false }} />

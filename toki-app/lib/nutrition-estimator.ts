@@ -2,7 +2,6 @@
 // Utilise des moyennes par catégorie et des heuristiques basées sur le nom
 
 import { FoodItem, FoodTag } from './food-db';
-import { computeFoodPoints } from './points-utils';
 
 /**
  * Catégories de référence pour estimation
@@ -285,12 +284,6 @@ export function createEstimatedFoodItem(
     baseScore,
   };
 
-  // Calculer points (utiliser la logique existante)
-  const points = computeFoodPoints(tempItem);
-
-  return {
-    ...tempItem,
-    points,
-  };
+  return tempItem;
 }
 

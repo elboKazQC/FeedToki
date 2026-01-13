@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Button } from './ui/Button';
+// No changes required
 import { useTheme } from '../lib/theme-context';
 import { Colors } from '../constants/theme';
 import { spacing } from '../constants/design-tokens';
@@ -53,7 +54,12 @@ export function NutritionAnalysisCard({
   const darkColors = {
     surface: '#1f2937',
     background: '#111827',
-    text: '#e5e7eb',
+    text: {
+      primary: '#e5e7eb',
+      secondary: '#9ca3af',
+      tertiary: '#6b7280',
+      inverse: '#111827',
+    },
     icon: '#9ca3af',
     primary: '#f59e0b',
     warning: '#f59e0b',
@@ -62,6 +68,7 @@ export function NutritionAnalysisCard({
     border: '#374151', // Added for period selector buttons
   };
   const colors = darkColors;
+  const colorValue = (c: any): string => (typeof c === 'string' ? c : (c && typeof c.primary === 'string' ? c.primary : String(c)) );
 
   console.log('[NutritionAnalysisCard] Rendering with:', { 
     entriesCount: entries.length,
@@ -101,7 +108,7 @@ export function NutritionAnalysisCard({
       <View style={[styles.card, { backgroundColor: colors.surface }]}>
         <View style={styles.waitingOverlay}>
           <Text style={[styles.waitingIcon]}>📊</Text>
-          <Text style={[styles.waitingTitle, { color: colors.text }]}>Coach Nutrition IA</Text>
+          <Text style={[styles.waitingTitle, { color: colorValue(colors.text) }]}>Coach Nutrition IA</Text>
           <Text style={[styles.waitingSubtitle, { color: colors.icon }]}>
             En attente de données...
           </Text>
@@ -163,7 +170,6 @@ export function NutritionAnalysisCard({
         gender: profile.gender,
         heightCm: profile.heightCm,
         tdeeEstimate: profile.tdeeEstimate,
-        dailyPointsBudget: profile.dailyPointsBudget,
       } : undefined;
 
       // 2. Weight Trend Data (analyser les poids sur la période)
@@ -283,7 +289,6 @@ export function NutritionAnalysisCard({
         totalCal: number; 
         totalProt: number;
         name: string;
-        points: number;
       }> = {};
       
       // Créer un index des foods pour lookup rapide
@@ -301,7 +306,6 @@ export function NutritionAnalysisCard({
               const multiplier = item.multiplier || 1;
               const calories = (food.calories_kcal || 0) * multiplier;
               const protein = (food.protein_g || 0) * multiplier;
-              const points = (food.points || 0) * multiplier;
               
               if (!foodCounts[food.id]) {
                 foodCounts[food.id] = {
@@ -309,14 +313,12 @@ export function NutritionAnalysisCard({
                   totalCal: 0,
                   totalProt: 0,
                   name: food.name,
-                  points: 0,
                 };
               }
               
               foodCounts[food.id].count += 1;
               foodCounts[food.id].totalCal += calories;
               foodCounts[food.id].totalProt += protein;
-              foodCounts[food.id].points += points;
             }
           }
         }
@@ -330,9 +332,9 @@ export function NutritionAnalysisCard({
           totalCalories: data.totalCal,
           avgCaloriesPerServing: data.count > 0 ? data.totalCal / data.count : 0,
           avgProteinPerServing: data.count > 0 ? data.totalProt / data.count : 0,
-          points: data.count > 0 ? data.points / data.count : 0,
-          category: (data.points / data.count) <= 0 ? 'healthy' as const : 
-                   (data.points / data.count) <= 2 ? 'moderate' as const : 'indulgent' as const,
+          // Catégoriser par ratio protéines/calories (plus sain = plus de protéines par calorie)
+          category: data.totalProt / data.totalCal > 0.1 ? 'healthy' as const : 
+                   data.totalProt / data.totalCal > 0.05 ? 'moderate' as const : 'indulgent' as const,
         }));
       
       // Top aliments par fréquence
@@ -394,7 +396,7 @@ export function NutritionAnalysisCard({
         <View style={[styles.card, { backgroundColor: colors.surface }]}>
           <View style={styles.lockedOverlay}>
             <Text style={[styles.lockedIcon]}>🔒</Text>
-            <Text style={[styles.lockedTitle, { color: colors.text }]}>Coach Nutrition IA</Text>
+            <Text style={[styles.lockedTitle, { color: colorValue(colors.text) }]}>Coach Nutrition IA</Text>
             <Text style={[styles.lockedSubtitle, { color: colors.icon }]}>
               Analyse personnalisée de tes habitudes alimentaires
             </Text>
@@ -419,7 +421,7 @@ export function NutritionAnalysisCard({
   return (
     <View style={[styles.card, { backgroundColor: colors.surface }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>🧠 Coach Nutrition IA</Text>
+        <Text style={[styles.title, { color: colorValue(colors.text) }]}>🧠 Coach Nutrition IA</Text>
         <Text style={[styles.subtitle, { color: colors.icon }]}>
           Analyse personnalisée de tes {selectedPeriod} derniers jours
         </Text>
@@ -440,7 +442,7 @@ export function NutritionAnalysisCard({
           <Text
             style={[
               styles.periodButtonText,
-              { color: colors.text },
+              { color: colors.text.primary },
               selectedPeriod === 7 && { color: '#fff', fontWeight: '600' },
             !canAnalyze7 && { color: colors.icon },
             ]}
@@ -462,7 +464,7 @@ export function NutritionAnalysisCard({
           <Text
             style={[
               styles.periodButtonText,
-              { color: colors.text },
+              { color: colors.text.primary },
               selectedPeriod === 14 && { color: '#fff', fontWeight: '600' },
             !canAnalyze14 && { color: colors.icon },
             ]}
@@ -484,7 +486,7 @@ export function NutritionAnalysisCard({
           <Text
             style={[
               styles.periodButtonText,
-              { color: colors.text },
+              { color: colors.text.primary },
               selectedPeriod === 30 && { color: '#fff', fontWeight: '600' },
             !canAnalyze30 && { color: colors.icon },
             ]}
@@ -533,31 +535,31 @@ export function NutritionAnalysisCard({
 
           {/* Averages */}
           <View style={[styles.averagesCard, { backgroundColor: colors.background }]}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>📊 Moyennes quotidiennes</Text>
+            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>📊 Moyennes quotidiennes</Text>
             <View style={styles.averageRow}>
               <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Calories: <Text style={{ color: colors.text, fontWeight: '600' }}>{analysis.averages.calories} kcal</Text>
+                Calories: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.calories} kcal</Text>
               </Text>
               <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Protéines: <Text style={{ color: colors.text, fontWeight: '600' }}>{analysis.averages.protein_g}g</Text>
+                Protéines: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.protein_g}g</Text>
               </Text>
             </View>
             <View style={styles.averageRow}>
               <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Glucides: <Text style={{ color: colors.text, fontWeight: '600' }}>{analysis.averages.carbs_g}g</Text>
+                Glucides: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.carbs_g}g</Text>
               </Text>
               <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Lipides: <Text style={{ color: colors.text, fontWeight: '600' }}>{analysis.averages.fat_g}g</Text>
+                Lipides: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.fat_g}g</Text>
               </Text>
             </View>
             <Text style={[styles.averageLabel, { color: colors.icon }]}>
-              Consistance: <Text style={{ color: colors.text, fontWeight: '600' }}>{analysis.averages.consistency}%</Text>
+              Consistance: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.consistency}%</Text>
             </Text>
           </View>
 
           {/* Insights */}
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>💡 Insights</Text>
+            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>💡 Insights</Text>
             {analysis.insights.map((insight, idx) => (
               <View
                 key={idx}
@@ -568,7 +570,7 @@ export function NutritionAnalysisCard({
               >
                 <Text style={styles.insightIcon}>{insight.icon}</Text>
                 <View style={styles.insightContent}>
-                  <Text style={[styles.insightTitle, { color: colors.text }]}>{insight.title}</Text>
+                  <Text style={[styles.insightTitle, { color: colorValue(colors.text) }]}>{insight.title}</Text>
                   <Text style={[styles.insightMessage, { color: colors.icon }]}>
                     {insight.message}
                   </Text>
@@ -579,7 +581,7 @@ export function NutritionAnalysisCard({
 
           {/* Recommendations */}
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>🎯 Recommandations</Text>
+            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>🎯 Recommandations</Text>
             {analysis.recommendations.map((rec, idx) => (
               <View
                 key={idx}
@@ -596,7 +598,7 @@ export function NutritionAnalysisCard({
                     <Text style={styles.priorityText}>Priorité {rec.priority}</Text>
                   </View>
                 </View>
-                <Text style={[styles.recAction, { color: colors.text }]}>{rec.action}</Text>
+                <Text style={[styles.recAction, { color: colorValue(colors.text) }]}>{rec.action}</Text>
                 <Text style={[styles.recReason, { color: colors.icon }]}>{rec.reason}</Text>
                 {rec.impact && (
                   <Text style={[styles.recImpact, { color: colors.primary }]}>

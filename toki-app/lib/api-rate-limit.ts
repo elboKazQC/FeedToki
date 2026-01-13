@@ -2,7 +2,7 @@
 // Empêche le spam en limitant le nombre d'appels par jour par utilisateur
 
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 
 const DAILY_LIMIT = 50; // Nombre maximum d'appels OpenAI par jour par utilisateur
 const MIN_TIME_BETWEEN_CALLS_MS = 2000; // Délai minimum de 2 secondes entre appels
@@ -33,7 +33,7 @@ async function resetDailyLimitIfNeeded(userId: string): Promise<void> {
   if (!db) return;
 
   try {
-    const usageRef = doc(db, 'api_usage', userId);
+    const usageRef = doc(getDb(), 'api_usage', userId);
     const usageDoc = await getDoc(usageRef);
     
     const today = getTodayDateString();

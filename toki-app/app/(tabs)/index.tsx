@@ -40,7 +40,6 @@ import {
   scheduleDailyDragonReminders,
 } from '../../lib/notifications';
 import { getSmartRecommendations, getSmartRecommendationsByTaste, getHungerAnalysis, SmartRecommendation, getCanadaGuideRecommendations } from '../../lib/smart-recommendations';
-import { fetchSmartMealSuggestions } from '../../lib/ai-suggestions';
 import { computeDailyTotals, DEFAULT_TARGETS, percentageOfTarget, computeMealScore, NutritionTargets } from '../../lib/nutrition';
 import { UserProfile } from '../../lib/types';
 import { getDailyCalorieTarget } from '../../lib/points-calculator';
@@ -52,7 +51,7 @@ import { StreakCalendarDuolingo } from '../../components/streak-calendar-duoling
 import { useAuth } from '../../lib/auth-context';
 import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon } from '../../lib/dragon-life';
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
-import { computeFoodPoints, getPointsReasons } from '../../lib/points-utils';
+import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
 import { loadCustomFoods, mergeFoodsWithCustom, migrateLocalFoodsToGlobal } from '../../lib/custom-foods';
 import { userLogger, logError, flushLogsNow } from '../../lib/user-logger';
@@ -148,7 +147,6 @@ export default function App() {
   const [entries, setEntries] = useState<MealEntry[]>([]);
   const [isReady, setIsReady] = useState(false);
   const [points, setPoints] = useState<number>(0);
-  const [startOfDayBalance, setStartOfDayBalance] = useState<number | null>(null);
   const [totalPointsEarned, setTotalPointsEarned] = useState<number>(0); // Points totaux pour le niveau du dragon
   const [lastClaimDate, setLastClaimDate] = useState<string>('');
   const [targets, setTargets] = useState(DEFAULT_TARGETS);
@@ -166,9 +164,6 @@ export default function App() {
   useEffect(() => {
     setIsClient(true);
   }, []);
-
-  // Valeurs de budget pour affichage et limites
-  const pointsMaxCap = userProfile?.maxPointsCap || MAX_POINTS;
 
   // IMPORTANT: Déclarer currentUserId AVANT les useEffect qui l'utilisent
   // Utiliser authUser.uid pour Firebase (pas authUser.id qui n'existe pas)
@@ -234,7 +229,6 @@ export default function App() {
       // Réinitialiser IMMÉDIATEMENT tous les états pour éviter d'afficher les données de l'ancien compte
       setEntries([]);
       setPoints(0);
-      setStartOfDayBalance(null);
       setTotalPointsEarned(0);
       setLastClaimDate('');
       setIsReady(false);
@@ -726,9 +720,9 @@ export default function App() {
           const parsed = JSON.parse(raw);
           let balance = parsed.balance ?? 0;
           const last = parsed.lastClaimDate ?? '';
-          const storedStartOfDayBalance = parsed.startOfDayBalance;
+          const startOfDayBalance = parsed.startOfDayBalance;
           
-          if (__DEV__) console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance, 'startOfDayBalance:', storedStartOfDayBalance);
+          if (__DEV__) console.log('[Index] Points check - lastClaimDate:', last, 'today:', today, 'balance:', balance, 'startOfDayBalance:', startOfDayBalance);
           
           if (last !== today) {
             // Nouveau jour : créditer les points quotidiens (carryover)
@@ -742,8 +736,6 @@ export default function App() {
               lastClaimDate: today,
               startOfDayBalance: balance 
             }));
-
-            setStartOfDayBalance(balance);
             
             // Incrémenter les points totaux
             const currentTotal = totalRaw ? JSON.parse(totalRaw) : 0;
@@ -753,12 +745,6 @@ export default function App() {
           } else {
             if (__DEV__) console.log('[Index] Points déjà crédités aujourd\'hui. Balance actuelle:', balance);
             // Le recalcul se fera dans un useEffect séparé après le chargement des entrées
-
-            if (typeof storedStartOfDayBalance === 'number') {
-              setStartOfDayBalance(storedStartOfDayBalance);
-            } else {
-              setStartOfDayBalance(null);
-            }
           }
           setPoints(balance);
           setLastClaimDate(today);
@@ -774,7 +760,6 @@ export default function App() {
             startOfDayBalance: initBalance 
           }));
           setPoints(initBalance);
-          setStartOfDayBalance(initBalance);
           setLastClaimDate(today);
           
           // Initialiser points totaux
@@ -877,8 +862,6 @@ export default function App() {
           startOfDayBalance = Math.min(maxCapFromProfile, currentBalance + totalSpentToday);
           if (__DEV__) console.log('[Recalc] startOfDayBalance non trouvé, estimation:', startOfDayBalance);
         }
-
-        setStartOfDayBalance(startOfDayBalance);
 
         // Calculer le solde attendu : solde de début de journée - dépenses (carryover préservé)
         const expectedBalance = Math.max(0, startOfDayBalance - totalSpentToday);
@@ -1806,55 +1789,6 @@ export default function App() {
     }
   };
 
-  const handleAdjustQuantity = async (entryId: string, itemIndex: number, delta: number) => {
-    try {
-      const entry = entries.find(e => e.id === entryId);
-      if (!entry || !entry.items) return;
-      
-      const itemRef = entry.items[itemIndex];
-      const currentMultiplier = itemRef.multiplier || 1.0;
-      const newMultiplier = Math.max(0.5, currentMultiplier + delta);
-      
-      // Trouver l'aliment pour recalculer les grammes
-      const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
-      const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
-      const foodItem = allFoods.find(f => f.id === itemRef.foodId);
-      if (!foodItem) return;
-      
-      // Obtenir la portion par défaut
-      const mediumPortion = getDefaultPortion(foodItem.tags);
-      const newGrams = Math.round(mediumPortion.grams * newMultiplier);
-      const unit = getUnitForFood(foodItem);
-      
-      // Mettre à jour l'item
-      const updatedItems = [...entry.items];
-      updatedItems[itemIndex] = {
-        ...itemRef,
-        multiplier: newMultiplier,
-        portionGrams: newGrams,
-        quantityHint: `${newGrams}${unit} (${newMultiplier.toFixed(1)} portion${newMultiplier !== 1 ? 's' : ''})`,
-      };
-      
-      const updatedEntry: MealEntry = {
-        ...entry,
-        items: updatedItems,
-      };
-      
-      await handleUpdateEntry(entryId, updatedEntry);
-      
-      await userLogger.info(
-        currentUserId,
-        `Quantité ajustée: ${foodItem.name}`,
-        'adjust-quantity',
-        { delta, oldMultiplier: currentMultiplier, newMultiplier, newGrams }
-      );
-    } catch (error) {
-      await logError(currentUserId, error, 'adjust-quantity', { entryId, itemIndex, delta });
-      console.error('[AdjustQuantity] Erreur:', error);
-      Alert.alert('Erreur', 'Impossible d\'ajuster la quantité.');
-    }
-  };
-
   // IMPORTANT (Web export): éviter les erreurs d'hydratation React (#418)
   // Ce return conditionnel doit être APRÈS tous les hooks
   if (!isClient) {
@@ -1936,7 +1870,6 @@ export default function App() {
           customFoods={customFoods}
           dayCaloriesMap={dayCaloriesMap}
           cheatDays={cheatDays}
-          startOfDayBalance={startOfDayBalance}
         />
       )}
 
@@ -1959,8 +1892,6 @@ export default function App() {
           customFoods={customFoods}
           entries={entries}
           currentUserId={currentUserId}
-          startOfDayBalance={startOfDayBalance}
-          maxCap={pointsMaxCap}
         />
       )}
 
@@ -1991,7 +1922,6 @@ function HomeScreen({
   customFoods,
   dayCaloriesMap,
   cheatDays,
-  startOfDayBalance,
 }: {
   entries: MealEntry[];
   onPressAdd: () => void;
@@ -2013,7 +1943,6 @@ function HomeScreen({
   customFoods: typeof FOOD_DB;
   dayCaloriesMap: Record<string, number>;
   cheatDays: Record<string, boolean>;
-  startOfDayBalance: number | null;
 }) {
   const { profile: authProfile, user: authUser } = useAuth();
   const currentUserId = (authProfile?.userId || (authUser as any)?.uid || (authUser as any)?.id || 'guest');
@@ -2024,30 +1953,7 @@ function HomeScreen({
   // Smart recommendations state (déclaré avant return conditionnel pour respecter les règles des hooks)
   const [showHungryMode, setShowHungryMode] = useState(false);
   const [tastePreference, setTastePreference] = useState<'sweet' | 'salty' | null>(null);
-  const [smartRecs, setSmartRecs] = useState<SmartRecommendation[]>([]);
-  const [smartRecsLoading, setSmartRecsLoading] = useState(false);
-  const [smartRecsError, setSmartRecsError] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [hasSubscriptionAccess, setHasSubscriptionAccess] = useState<boolean | null>(null);
-
-  // Vérifier l'abonnement au chargement
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (currentUserId === 'guest') {
-        setHasSubscriptionAccess(false);
-        return;
-      }
-      try {
-        const { hasActiveSubscription } = await import('../../lib/subscription-utils');
-        const hasAccess = await hasActiveSubscription(currentUserId);
-        setHasSubscriptionAccess(hasAccess);
-      } catch (error) {
-        console.error('[HomeScreen] Erreur vérification abonnement:', error);
-        setHasSubscriptionAccess(false);
-      }
-    };
-    checkSubscription();
-  }, [currentUserId]);
 
   // Fusionner FOOD_DB avec les aliments personnalisés
   const allFoods = useMemo(() => {
@@ -2066,29 +1972,6 @@ function HomeScreen({
       const cost = Math.round(baseCost * Math.sqrt(multiplier));
       return sum + cost;
     }, 0);
-  };
-  
-  // Helper pour obtenir toutes les raisons de points d'une entrée
-  const getEntryPointsReasons = (entry: MealEntry): string[] => {
-    if (!entry.items || entry.items.length === 0) return [];
-    
-    const allReasons: string[] = [];
-    entry.items.forEach((itemRef) => {
-      const fi = allFoods.find(f => f.id === itemRef.foodId);
-      if (!fi) return;
-      const baseCost = computeFoodPoints(fi);
-      if (baseCost > 0) {
-        const itemReasons = getPointsReasons(fi);
-        // Ajouter le nom de l'aliment et ses raisons
-        if (itemReasons.length > 0) {
-          const reasonsText = itemReasons.filter(r => !r.includes('gratuit')).join(', ');
-          if (reasonsText) {
-            allReasons.push(`${fi.name}: ${reasonsText}`);
-          }
-        }
-      }
-    });
-    return allReasons;
   };
   // Calculer le coût en points d'une entrée
   const calculateEntryCost = (entry: MealEntry): number => {
@@ -2169,45 +2052,6 @@ function HomeScreen({
   const dailyBudget = userProfile?.dailyPointsBudget || DAILY_POINTS;
   const maxCap = userProfile?.maxPointsCap || MAX_POINTS;
   const weeklyCalTarget = userProfile?.weeklyCalorieTarget;
-
-  const todaySpentPoints = useMemo(() => {
-    const today = getTodayLocal();
-    if (entries.length === 0) return 0;
-
-    const todayEntries = entries.filter(e => normalizeDate(e.createdAt) === today);
-    if (todayEntries.length === 0) return 0;
-
-    const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
-    let totalSpent = 0;
-
-    for (const entry of todayEntries) {
-      if (entry.items && entry.items.length > 0) {
-        const entryCost = entry.items.reduce((sum, itemRef) => {
-          const fi = allFoods.find(f => f.id === itemRef.foodId);
-          if (!fi) return sum;
-          const multiplier = itemRef.multiplier || 1.0;
-          const baseCost = computeFoodPoints(fi);
-          const cost = Math.round(baseCost * Math.sqrt(multiplier));
-          return sum + cost;
-        }, 0);
-        totalSpent += entryCost;
-      }
-    }
-
-    return totalSpent;
-  }, [entries, customFoods]);
-
-  const displayedStartOfDayPoints = useMemo(() => {
-    // startOfDayBalance inclut le carry d'hier + l'ajout du matin (cap inclus)
-    // Si absent (ex: sync), on l'estime pour l'affichage.
-    const estimated = Math.min(maxCap, points + todaySpentPoints);
-    const raw = typeof startOfDayBalance === 'number' ? startOfDayBalance : estimated;
-    return Math.max(0, Math.min(maxCap, Math.round(raw)));
-  }, [startOfDayBalance, maxCap, points, todaySpentPoints]);
-
-  const displayedSpentTodayPoints = useMemo(() => {
-    return Math.max(0, displayedStartOfDayPoints - points);
-  }, [displayedStartOfDayPoints, points]);
   
   // Get time of day for context-aware suggestions
   const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
@@ -2218,119 +2062,13 @@ function HomeScreen({
   };
   
   const timeOfDay = getTimeOfDay();
-  const hungerAnalysis = getHungerAnalysis(todayTotals, targets, timeOfDay);
-
-  useEffect(() => {
-    if (!showHungryMode) {
-      setSmartRecs([]);
-      setSmartRecsError(null);
-      setSmartRecsLoading(false);
-      return;
-    }
-
-    if (!tastePreference) {
-      setSmartRecs([]);
-      setSmartRecsError(null);
-      setSmartRecsLoading(false);
-      return;
-    }
-
-    // Vérifier l'abonnement avant de faire l'appel IA
-    if (hasSubscriptionAccess === false) {
-      setSmartRecsError('🧠 L\'IA peut t\'aider à choisir quoi manger maintenant');
-      setSmartRecs([]);
-      setSmartRecsLoading(false);
-      return;
-    }
-
-    if (hasSubscriptionAccess === null) {
-      // En attente de la vérification de l'abonnement
-      return;
-    }
-
-    const todayKey = getTodayLocal();
-    const todaysEntries = entries.filter((e) => normalizeDate(e.createdAt) === todayKey);
-    const consumedItems = todaysEntries.flatMap((e) =>
-      (e.items || [])
-        .map((i) => (i as any).foodName || (i as any).name || (i as any).title || (i as any).foodId)
-        .filter(Boolean)
-    );
-
-    const caloriesPct = targets.calories_kcal > 0 ? todayTotals.calories_kcal / targets.calories_kcal : 0;
-
-    // Garde calories: si plafond atteint, proposer uniquement de l'eau
-    if (caloriesPct >= 1) {
-      const portion = getDefaultPortion(['legume']);
-      setSmartRecs([
-        {
-          item: {
-            id: 'water_glass',
-            name: "Verre d'eau",
-            tags: ['legume'],
-            baseScore: 100,
-            calories_kcal: 0,
-            protein_g: 0,
-            carbs_g: 0,
-            fat_g: 0,
-            points: 0,
-          },
-          reason: 'Objectif calorique atteint pour la journée. Hydrate-toi plutôt. 💧',
-          priority: 10,
-          pointsCost: 0,
-          suggestedGrams: 250,
-          suggestedVisualRef: 'Un grand verre',
-          portion,
-        },
-      ]);
-      setSmartRecsLoading(false);
-      setSmartRecsError(null);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const buildLocalFallback = () =>
-      tastePreference
+  
+  const smartRecs = showHungryMode 
+    ? (tastePreference 
         ? getSmartRecommendationsByTaste(todayTotals, targets, points, tastePreference, timeOfDay)
-        : getSmartRecommendations(todayTotals, targets, points, timeOfDay);
-
-    const run = async () => {
-      setSmartRecsLoading(true);
-      setSmartRecsError(null);
-      try {
-        const aiRecs = await fetchSmartMealSuggestions({
-          totals: todayTotals,
-          targets,
-          availablePoints: points,
-          tastePreference,
-          timeOfDay,
-          consumedItems,
-          caloriesRemaining: Math.max(0, targets.calories_kcal - todayTotals.calories_kcal),
-          caloriesPct,
-          pointsRemaining: points,
-          signal: controller.signal,
-        });
-
-        if (aiRecs.length > 0) {
-          setSmartRecs(aiRecs);
-          return;
-        }
-
-        setSmartRecs(buildLocalFallback());
-      } catch (err: any) {
-        setSmartRecsError(err?.message || 'Suggestions IA indisponibles');
-        setSmartRecs(buildLocalFallback());
-      } finally {
-        setSmartRecsLoading(false);
-      }
-    };
-
-    run();
-
-    return () => {
-      controller.abort();
-    };
-  }, [showHungryMode, tastePreference, todayTotals, targets, points, entries, timeOfDay, hasSubscriptionAccess]);
+        : getSmartRecommendations(todayTotals, targets, points, timeOfDay))
+    : [];
+  const hungerAnalysis = getHungerAnalysis(todayTotals, targets, timeOfDay);
 
   // Détection de profil suspect (calories trop élevées = probable erreur lbs/kg)
   const hasSuspectProfile = userProfile && weeklyCalTarget && weeklyCalTarget > 30000;
@@ -2604,7 +2342,7 @@ function HomeScreen({
             )}
             {points > 0 && lastClaimDate === getTodayLocal() && (
               <Text style={styles.budgetHint}>
-                Ajouté ce matin : {dailyBudget} pts
+                Reçu ce matin : {dailyBudget} pts
               </Text>
             )}
             {lastClaimDate !== getTodayLocal() && (
@@ -2612,15 +2350,6 @@ function HomeScreen({
                 Nouveau jour ! +{dailyBudget} pts ajoutés
               </Text>
             )}
-
-            <View style={styles.budgetBreakdown}>
-              <Text style={styles.budgetBreakdownLine}>
-                Début de journée : {displayedStartOfDayPoints} pts (report inclus)
-              </Text>
-              <Text style={styles.budgetBreakdownLine}>
-                Dépensés aujourd&apos;hui : {displayedSpentTodayPoints} pts
-              </Text>
-            </View>
           </View>
 
           {/* Détails du système */}
@@ -2786,24 +2515,6 @@ function HomeScreen({
             <Text style={styles.smartRecsEmpty}>
               Choisis d&apos;abord si tu préfères sucré ou salé ! 👆
             </Text>
-          ) : smartRecsLoading ? (
-            <Text style={styles.smartRecsEmpty}>
-              🤖 L&apos;IA réfléchit à tes suggestions...
-            </Text>
-          ) : smartRecsError ? (
-            <>
-              <Text style={styles.smartRecsEmpty}>
-                ⚠️ {smartRecsError}
-              </Text>
-              {hasSubscriptionAccess === false && (
-                <TouchableOpacity
-                  style={styles.premiumButton}
-                  onPress={() => router.replace('/subscription')}
-                >
-                  <Text style={styles.premiumButtonText}>🎯 Débloquer mes suggestions IA</Text>
-                </TouchableOpacity>
-              )}
-            </>
           ) : smartRecs.length === 0 ? (
             <Text style={styles.smartRecsEmpty}>
               Aucune suggestion pour l&apos;instant. Tu es peut-être proche de ton objectif! 🎯
@@ -2817,23 +2528,13 @@ function HomeScreen({
                 <TouchableOpacity
                   key={rec.item.id}
                   style={styles.smartRecItem}
-                  onPress={async () => {
+                  onPress={() => {
                     setShowHungryMode(false);
-                    // Consommer directement la suggestion
-                    const newEntry: Omit<MealEntry, 'id' | 'createdAt'> = {
-                      label: rec.item.name,
-                      category: 'snack',
-                      items: [{
-                        foodId: rec.item.id,
-                        multiplier: 1.0,
-                      }],
-                    };
-                    await handleAddEntry(newEntry);
-                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                      window.alert(`✅ ${rec.item.name} ajouté à ton journal !`);
-                    } else {
-                      Alert.alert('✅', `${rec.item.name} ajouté à ton journal !`);
-                    }
+                    setPreselectedItem({
+                      item: rec.item,
+                      portion: rec.portion
+                    });
+                    onPressAdd();
                   }}
                 >
                   <View style={styles.smartRecHeader}>
@@ -3061,16 +2762,9 @@ function HomeScreen({
                     </Text>
                   </View>
                   {entryCost > 0 && !item.isCheatMeal && (
-                    <View style={styles.historyItemCostContainer}>
-                      <Text style={styles.historyItemCost}>
-                        -{entryCost} pts
-                      </Text>
-                      {getEntryPointsReasons(item).length > 0 && (
-                        <Text style={styles.historyItemCostReason}>
-                          {getEntryPointsReasons(item).join(' | ')}
-                        </Text>
-                      )}
-                    </View>
+                    <Text style={styles.historyItemCost}>
+                      -{entryCost} pts
+                    </Text>
                   )}
                   {item.isCheatMeal && (
                     <Text style={styles.historyItemCostCheat}>
@@ -3099,27 +2793,6 @@ function HomeScreen({
                               <Text style={styles.historyItemDetailNutrition}>
                                 🔥 {itemCalories} cal · 💪 {itemProtein}g prot
                               </Text>
-                              
-                              {/* Contrôles inline de quantité */}
-                              <View style={styles.inlineQuantityControl}>
-                                <TouchableOpacity
-                                  style={styles.inlineQuantityButton}
-                                  onPress={() => handleAdjustQuantity(item.id, itemIdx, -0.5)}
-                                >
-                                  <Text style={styles.inlineQuantityButtonText}>−</Text>
-                                </TouchableOpacity>
-                                
-                                <Text style={styles.inlineQuantityValue}>
-                                  {(multiplier).toFixed(1)} portion{multiplier !== 1 ? 's' : ''}
-                                </Text>
-                                
-                                <TouchableOpacity
-                                  style={styles.inlineQuantityButton}
-                                  onPress={() => handleAdjustQuantity(item.id, itemIdx, +0.5)}
-                                >
-                                  <Text style={styles.inlineQuantityButtonText}>+</Text>
-                                </TouchableOpacity>
-                              </View>
                             </View>
                             <TouchableOpacity
                               style={styles.historyItemEditButton}
@@ -3132,7 +2805,7 @@ function HomeScreen({
                                 });
                               }}
                             >
-                              <Text style={styles.historyItemEditText}>⚙️</Text>
+                              <Text style={styles.historyItemEditText}>✏️</Text>
                             </TouchableOpacity>
                           </View>
                         );
@@ -3238,8 +2911,6 @@ function AddEntryScreen({
   customFoods = [],
   entries = [],
   currentUserId,
-  startOfDayBalance,
-  maxCap,
 }: {
   onCancel: () => void;
   onSave: (entry: Omit<MealEntry, 'id' | 'createdAt'>) => void;
@@ -3253,15 +2924,13 @@ function AddEntryScreen({
   customFoods?: typeof FOOD_DB;
   entries?: MealEntry[];
   currentUserId: string;
-  startOfDayBalance: number | null;
-  maxCap: number;
 }) {
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState<MealEntry['category']>('sain');
   const [items, setItems] = useState<FoodItemRef[]>([]);
   const [quickFilter, setQuickFilter] = useState<CategoryFilter>('all');
-  const [selectedItemForPortion, setSelectedItemForPortion] = useState<{ foodId: string; index: number | null } | null>(null); // Item + index pour modal portion (index = édition quantité)
-  const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; replaceIndex?: number | null; onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => void } | null>(null);
+  const [selectedItemForPortion, setSelectedItemForPortion] = useState<string | null>(null); // Item ID pour modal portion
+  const [showCustomPortionModal, setShowCustomPortionModal] = useState<{ foodId: string; unit: 'g' | 'ml'; initialGrams?: number; onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => void } | null>(null);
   const [portionCount, setPortionCount] = useState<number>(1); // Nombre de portions (toujours visible)
   const [isCheatDayState, setIsCheatDayState] = useState<boolean>(false);
   const [hasSubscriptionAccess, setHasSubscriptionAccess] = useState<boolean | null>(null);
@@ -3288,41 +2957,6 @@ function AddEntryScreen({
       { protein_g: 0, carbs_g: 0, calories_kcal: 0, fat_g: 0 }
     );
   }, [items, allFoods]);
-
-  const todaySpentPoints = useMemo(() => {
-    const today = getTodayLocal();
-    if (!entries || entries.length === 0) return 0;
-
-    const todayEntries = entries.filter((e) => normalizeDate(e.createdAt) === today);
-    if (todayEntries.length === 0) return 0;
-
-    const allFoodsWithCustom = mergeFoodsWithCustom(FOOD_DB, customFoods);
-
-    return todayEntries.reduce((total, entry) => {
-      if (!entry.items || entry.items.length === 0) return total;
-
-      const entryCost = entry.items.reduce((sum, itemRef) => {
-        const fi = allFoodsWithCustom.find((f) => f.id === itemRef.foodId);
-        if (!fi) return sum;
-        const multiplier = itemRef.multiplier || 1.0;
-        const baseCost = computeFoodPoints(fi);
-        const cost = Math.round(baseCost * Math.sqrt(multiplier));
-        return sum + cost;
-      }, 0);
-
-      return total + entryCost;
-    }, 0);
-  }, [entries, customFoods]);
-
-  const displayedStartOfDayPoints = useMemo(() => {
-    const estimated = Math.min(maxCap, points + todaySpentPoints);
-    const raw = typeof startOfDayBalance === 'number' ? startOfDayBalance : estimated;
-    return Math.max(0, Math.min(maxCap, Math.round(raw)));
-  }, [startOfDayBalance, maxCap, points, todaySpentPoints]);
-
-  const displayedSpentTodayPoints = useMemo(() => {
-    return Math.max(0, displayedStartOfDayPoints - points);
-  }, [displayedStartOfDayPoints, points]);
 
   const pendingCost = items.reduce((sum, ref) => {
     const fi = allFoods.find((f) => f.id === ref.foodId);
@@ -3351,34 +2985,18 @@ function AddEntryScreen({
     
     // Ouvrir le sélecteur de portion au lieu d'ajouter directement
     console.log('[AddEntry] Ouverture du modal de portion pour:', fi.name);
-    setPortionCount(1);
-    setSelectedItemForPortion({ foodId, index: null });
+    setSelectedItemForPortion(foodId);
   };
   
-  const addItemWithPortion = (foodId: string, portion: PortionReference, replaceIndex?: number | null) => {
+  const addItemWithPortion = (foodId: string, portion: PortionReference) => {
     const fi = allFoods.find((f) => f.id === foodId);
     if (!fi) return;
     
     const baseCost = computeFoodPoints(fi);
     const cost = Math.round(baseCost * Math.sqrt(portion.multiplier));
     
-    // Permettre l'ajout/modif même sans points si c'est un cheat day
-    if (!isCheatDayState) {
-      let nextPendingCost = pendingCost + cost;
-      if (replaceIndex !== null && replaceIndex !== undefined) {
-        const prevRef = items[replaceIndex];
-        if (prevRef) {
-          const prevFi = allFoods.find((f) => f.id === prevRef.foodId);
-          if (prevFi) {
-            const prevBaseCost = computeFoodPoints(prevFi);
-            const prevMultiplier = prevRef.multiplier || 1.0;
-            const prevCost = Math.round(prevBaseCost * Math.sqrt(prevMultiplier));
-            nextPendingCost = pendingCost - prevCost + cost;
-          }
-        }
-      }
-      if (nextPendingCost > points) return; // Pas assez de points
-    }
+    // Permettre l'ajout même sans points si c'est un cheat day
+    if (!isCheatDayState && pendingCost + cost > points) return; // Pas assez de points
     
     // Formater quantityHint
     const unit = getUnitForFood(fi);
@@ -3392,26 +3010,20 @@ function AddEntryScreen({
       quantityHint = `${portion.grams}g (${portion.visualRef})`;
     }
     
-    setItems((prev) => {
-      const nextRef: FoodItemRef = {
+    setItems((prev) => [
+      ...prev,
+      {
         foodId,
         portionSize: portion.size,
         portionGrams: portion.grams,
         multiplier: portion.multiplier,
         quantityHint: quantityHint,
-      };
-      if (replaceIndex !== null && replaceIndex !== undefined) {
-        if (!prev[replaceIndex]) return prev;
-        const next = [...prev];
-        next[replaceIndex] = nextRef;
-        return next;
-      }
-      return [...prev, nextRef];
-    });
+      },
+    ]);
     setSelectedItemForPortion(null);
   };
 
-  const addItemWithCustomPortion = (foodId: string, grams: number, unit: 'g' | 'ml', mode?: 'g/ml' | 'portion', portionValue?: number, replaceIndex?: number | null) => {
+  const addItemWithCustomPortion = (foodId: string, grams: number, unit: 'g' | 'ml', mode?: 'g/ml' | 'portion', portionValue?: number) => {
     const fi = allFoods.find((f) => f.id === foodId);
     if (!fi) return;
     
@@ -3426,7 +3038,7 @@ function AddEntryScreen({
       customPortion = createCustomPortion(grams, mediumPortion, unit);
     }
     
-    addItemWithPortion(foodId, customPortion, replaceIndex);
+    addItemWithPortion(foodId, customPortion);
   };
 
   // Charger l'état cheat day et vérifier l'abonnement au montage
@@ -3478,14 +3090,12 @@ function AddEntryScreen({
     }
   }, []); // Exécuter une seule fois au montage
 
-  // Calculer les repas favoris basés sur l'usage réel - avec mémoization
-  const favoriteMeals = useMemo(() => calculateFavoriteMeals(entries, 8), [entries]);
+  // Calculer les repas favoris basés sur l'usage réel
+  const favoriteMeals = calculateFavoriteMeals(entries, 8);
   // Combiner les repas favoris calculés avec les repas par défaut (si pas assez de favoris)
-  const allFavoriteMeals = useMemo(() => {
-    return favoriteMeals.length >= 5 
-      ? favoriteMeals 
-      : [...favoriteMeals, ...QUICK_MEALS.slice(0, Math.max(0, 5 - favoriteMeals.length))];
-  }, [favoriteMeals]);
+  const allFavoriteMeals = favoriteMeals.length >= 5 
+    ? favoriteMeals 
+    : [...favoriteMeals, ...QUICK_MEALS.slice(0, Math.max(0, 5 - favoriteMeals.length))];
 
   const applyQuickMeal = (mealId: string) => {
     // Chercher dans allFavoriteMeals (qui contient les favoris calculés + QUICK_MEALS)
@@ -3502,14 +3112,12 @@ function AddEntryScreen({
   const searchLower = label.toLowerCase().trim();
   
   // Ne plus afficher les quick items - seulement les repas favoris
-  const filteredMeals = useMemo(() => {
-    return allFavoriteMeals.filter((qm) => {
-      const cls = classifyMealByItems(qm.items);
-      const matchesCategory = quickFilter === 'all' || cls.category === quickFilter;
-      const matchesSearch = !searchLower || qm.name.toLowerCase().includes(searchLower);
-      return matchesCategory && matchesSearch;
-    });
-  }, [allFavoriteMeals, quickFilter, searchLower]);
+  const filteredMeals = allFavoriteMeals.filter((qm) => {
+    const cls = classifyMealByItems(qm.items);
+    const matchesCategory = quickFilter === 'all' || cls.category === quickFilter;
+    const matchesSearch = !searchLower || qm.name.toLowerCase().includes(searchLower);
+    return matchesCategory && matchesSearch;
+  });
 
   // Filtrer les aliments individuels pour la liste
   const filteredFoods = useMemo(() => {
@@ -3682,9 +3290,6 @@ function AddEntryScreen({
         ))}
       </View>
       <Text style={styles.pointsHelper}>Points restants : {Math.max(0, points - pendingCost)} (coûts dynamiques selon l&apos;aliment)</Text>
-      <Text style={styles.pointsHelperSub}>
-        Début de journée : {displayedStartOfDayPoints} pts · Dépensés : {displayedSpentTodayPoints} pts
-      </Text>
       
       {/* Bouton Journée Cheat - Toujours visible */}
       {hasSubscriptionAccess !== null && (
@@ -3724,7 +3329,7 @@ function AddEntryScreen({
               hasSubscriptionAccess === false && styles.cheatDayButtonTextDisabled,
             ]}>
               {hasSubscriptionAccess === false 
-                ? '🎉 Journée Cheat (Premium) - Mange sans perdre de points!' 
+                ? '🎉 Journée cheat (Premium requis)' 
                 : isCheatDayState 
                   ? '🎉 Journée cheat activée' 
                   : '🎉 Activer journée cheat'}
@@ -3766,27 +3371,15 @@ function AddEntryScreen({
               const fi = allFoods.find(f => f.id === itemRef.foodId);
               if (!fi) return null;
               const multiplier = itemRef.multiplier || 1.0;
-              // Calculate point cost for this item
-              const baseCost = computeFoodPoints(fi);
-              const itemPointCost = Math.round(baseCost * Math.sqrt(multiplier));
               return (
                 <View key={`${itemRef.foodId}-${idx}`} style={styles.selectedItem}>
                   <View style={styles.selectedItemInfo}>
                     <Text style={styles.selectedItemName}>{fi.name}</Text>
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        setPortionCount(1);
-                        setSelectedItemForPortion({ foodId: itemRef.foodId, index: idx });
-                      }}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <Text style={styles.selectedItemPortion}>
-                        {itemRef.quantityHint || `${itemRef.portionGrams || 100}g`}
-                      </Text>
-                    </TouchableOpacity>
+                    <Text style={styles.selectedItemPortion}>
+                      {itemRef.quantityHint || `${itemRef.portionGrams || 100}g`}
+                    </Text>
                     <Text style={styles.selectedItemNutrition}>
-                      {Math.round((fi.calories_kcal || 0) * multiplier)} cal · {Math.round((fi.protein_g || 0) * multiplier)}g prot · <Text style={{ color: itemPointCost === 0 ? '#22c55e' : '#f59e0b', fontWeight: '600' }}>{itemPointCost} pts</Text>
+                      {Math.round((fi.calories_kcal || 0) * multiplier)} cal · {Math.round((fi.protein_g || 0) * multiplier)}g prot
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -3849,7 +3442,7 @@ function AddEntryScreen({
               }}
             >
               <Text style={[styles.quickMealText, (!affordable || overTargets) && styles.quickChipTextDisabled]}>
-                {qm.name}{qm.count ? ` (${qm.count}x)` : ''} · {totalCost} pts
+                {qm.name} · {totalCost} pts
               </Text>
             </TouchableOpacity>
           );
@@ -3869,10 +3462,10 @@ function AddEntryScreen({
       
       {/* Modal de sélection de portion */}
       {selectedItemForPortion && (() => {
-        const selectedFood = allFoods.find(f => f.id === selectedItemForPortion.foodId);
-        console.log('[AddEntry] Affichage modal pour:', selectedItemForPortion.foodId, selectedFood?.name);
+        const selectedFood = allFoods.find(f => f.id === selectedItemForPortion);
+        console.log('[AddEntry] Affichage modal pour:', selectedItemForPortion, selectedFood?.name);
         if (!selectedFood) {
-          console.error('[AddEntry] Aliment non trouvé pour modal:', selectedItemForPortion.foodId);
+          console.error('[AddEntry] Aliment non trouvé pour modal:', selectedItemForPortion);
           return null;
         }
         return (
@@ -3890,11 +3483,8 @@ function AddEntryScreen({
                 <Text style={styles.portionModalTitle}>
                   Choisis la portion
                 </Text>
-                <Text style={[styles.portionModalSubtitle, { marginBottom: 8 }]}>
+                <Text style={styles.portionModalSubtitle}>
                   {selectedFood.name}
-                </Text>
-                <Text style={styles.portionModalHint}>
-                  Tape une portion pour ajouter l&apos;aliment
                 </Text>
                 
                 {/* Contrôle Portions (toujours visible) */}
@@ -3940,21 +3530,18 @@ function AddEntryScreen({
                       multiplier: portion.multiplier * portionCount,
                       visualRef: portionCount !== 1 ? `${portionCount} × ${portion.visualRef}` : portion.visualRef,
                     };
-                    addItemWithPortion(selectedItemForPortion.foodId, finalPortion, selectedItemForPortion.index);
+                    addItemWithPortion(selectedItemForPortion, finalPortion);
                     setPortionCount(1); // Reset pour prochain item
                   }}
                 >
                   <Text style={styles.portionOptionLabel}>
                     {formatPortionLabel(portion)}
                   </Text>
-                  <View style={styles.portionOptionRight}>
-                    <Text style={styles.portionOptionCost}>
-                      {Math.round(
-                        computeFoodPoints(selectedFood) * Math.sqrt(portion.multiplier)
-                      )} pts
-                    </Text>
-                    <Text style={styles.portionOptionAction}>Ajouter</Text>
-                  </View>
+                  <Text style={styles.portionOptionCost}>
+                    {Math.round(
+                      computeFoodPoints(selectedFood) * Math.sqrt(portion.multiplier)
+                    )} pts
+                  </Text>
                 </TouchableOpacity>
               ))}
               
@@ -3965,16 +3552,14 @@ function AddEntryScreen({
                   <TouchableOpacity
                     style={styles.portionOption}
                     onPress={() => {
-                      const ctx = selectedItemForPortion;
                       setSelectedItemForPortion(null);
                       setShowCustomPortionModal({
-                        foodId: ctx.foodId,
+                        foodId: selectedItemForPortion,
                         unit: unit,
-                        replaceIndex: ctx.index,
                         onConfirm: (grams: number, mode?: 'g/ml' | 'portion', portionValue?: number) => {
                           // Appliquer le multiplicateur de portions sur les grammes personnalisés
                           const finalGrams = grams * portionCount;
-                          addItemWithCustomPortion(ctx.foodId, finalGrams, unit, mode, portionValue, ctx.index);
+                          addItemWithCustomPortion(selectedItemForPortion, finalGrams, unit, mode, portionValue);
                           setShowCustomPortionModal(null);
                           setPortionCount(1); // Reset pour prochain item
                         },
@@ -4985,19 +4570,11 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 11,
   },
-  historyItemCostContainer: {
-    marginTop: 4,
-  },
   historyItemCost: {
     color: '#f59e0b',
     fontSize: 13,
     fontWeight: '600',
-  },
-  historyItemCostReason: {
-    color: '#9ca3af',
-    fontSize: 11,
-    fontStyle: 'italic',
-    marginTop: 2,
+    marginTop: 4,
   },
   historyItemCostCheat: {
     color: '#fbbf24',
@@ -5288,11 +4865,6 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 12,
     marginBottom: 8,
-  },
-  pointsHelperSub: {
-    color: '#9ca3af',
-    fontSize: 12,
-    marginBottom: 12,
   },
   cheatDayButton: {
     paddingVertical: 12,
@@ -5617,15 +5189,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontStyle: 'italic',
   },
-  budgetBreakdown: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  budgetBreakdownLine: {
-    color: '#065f46',
-    fontSize: 11,
-    marginTop: 2,
-  },
   budgetDetailsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -5754,19 +5317,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
-  },
-  premiumButton: {
-    backgroundColor: '#8b5cf6',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 12,
-    alignItems: 'center',
-  },
-  premiumButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
   },
   tasteChoiceBox: {
     backgroundColor: '#fef3c7',
@@ -5925,12 +5475,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
-  portionModalHint: {
-    color: '#6b7280',
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
   portionCountControl: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -6037,16 +5581,6 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontSize: 16,
     fontWeight: '700',
-  },
-  portionOptionRight: {
-    alignItems: 'flex-end',
-    marginLeft: 12,
-  },
-  portionOptionAction: {
-    color: '#9ca3af',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 2,
   },
   portionModalCancel: {
     backgroundColor: '#374151',
@@ -6193,44 +5727,7 @@ const styles = StyleSheet.create({
   cheatMealBadgeText: {
     color: '#fbbf24',
     fontSize: 10,
-  },
-  inlineQuantityControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    padding: 6,
-    alignSelf: 'flex-start',
-  },
-  inlineQuantityButton: {
-    backgroundColor: '#374151',
-    borderRadius: 6,
-    width: 28,
-    height: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#4b5563',
-  },
-  inlineQuantityButtonText: {
-    color: '#e5e7eb',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  inlineQuantityValue: {
-    color: '#10b981',
-    fontSize: 13,
     fontWeight: '600',
-    minWidth: 70,
-    textAlign: 'center',
-  },
-  historyItemActions: {
-    fontSize: 13,
-    fontWeight: '600',
-    minWidth: 70,
-    textAlign: 'center',
   },
   historyItemsDetail: {
     marginTop: 12,

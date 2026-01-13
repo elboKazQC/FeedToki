@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               console.log('[AuthContext] 📥 Début sync depuis Firestore');
               const { syncFromFirestore } = await import('./data-sync');
               const syncResult = await syncFromFirestore(authUser.uid);
-              if (syncResult.mealsMerged > 0 || syncResult.pointsRestored || syncResult.targetsRestored || syncResult.weightsMerged > 0) {
+              if (syncResult.mealsMerged > 0 || syncResult.targetsRestored || syncResult.weightsMerged > 0) {
                 console.log('[AuthContext] ✅ Données synchronisées depuis Firestore:', syncResult);
                 // Les composants se rechargeront via leurs useEffect qui dépendent de currentUserId
               } else {
@@ -144,27 +144,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 console.error('[AuthContext] Erreur mise à jour objectifs nutritionnels:', error);
                 // Continue même si la mise à jour échoue
               }
-            }
-            
-            // Corriger les profils avec dailyPointsBudget = 45 (ancienne valeur incorrecte)
-            // MAIS seulement si onboardingCompleted est true (pour éviter de rediriger vers onboarding)
-            if (userProfile && userProfile.dailyPointsBudget === 45 && userProfile.onboardingCompleted) {
-              console.log('[AuthContext] Correction du profil avec 45 points -> recalcul...');
-              const { calculateDailyPoints, calculateMaxCap } = await import('./points-calculator');
-              const correctedPoints = calculateDailyPoints(userProfile.weeklyCalorieTarget);
-              const correctedCap = calculateMaxCap(correctedPoints);
-              
-              userProfile = {
-                ...userProfile,
-                dailyPointsBudget: correctedPoints,
-                maxPointsCap: correctedCap,
-                // Préserver onboardingCompleted
-                onboardingCompleted: true,
-              };
-              
-              // Sauvegarder la correction dans Firestore
-              await updateUserProfile(authUser.uid, userProfile);
-              console.log('[AuthContext] Profil corrigé:', correctedPoints, 'pts/jour');
             }
             
             console.log('[AuthContext] 💾 Définition du profil dans le state');

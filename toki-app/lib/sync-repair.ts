@@ -2,135 +2,14 @@
 // Permet de corriger les incohérences entre appareils
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { FIREBASE_ENABLED } from './firebase-config';
 import { FoodItem } from './food-db';
 import { MealEntry } from './stats';
 import { loadCustomFoods, loadCustomFoodsFromFirestore, mergeFoodsWithCustom } from './custom-foods';
 import { FOOD_DB } from './food-db';
-import { computeFoodPoints } from './points-utils';
 import { validateAndFixMealEntries } from './data-sync';
-
-/**
- * Réparer les points en recalculant à partir des repas
- * @param userId ID de l'utilisateur
- * @param dailyPointsBudget Budget quotidien de points
- * @param maxPointsCap Cap maximum de points
- * @returns Résultat de la réparation
- */
-export async function repairPoints(
-  userId: string,
-  dailyPointsBudget: number,
-  maxPointsCap: number
-): Promise<{
-  success: boolean;
-  oldBalance: number;
-  newBalance: number;
-  totalSpent: number;
-  errors: string[];
-}> {
-  const errors: string[] = [];
-  let oldBalance = 0;
-  let newBalance = 0;
-  let totalSpent = 0;
-
-  try {
-    console.log('[Sync Repair] 🔧 Démarrage réparation des points...');
-    
-    // 1. Charger les points actuels
-    const pointsKey = `feedtoki_points_${userId}_v2`;
-    const pointsRaw = await AsyncStorage.getItem(pointsKey);
-    if (!pointsRaw) {
-      errors.push('Aucun point trouvé localement');
-      return { success: false, oldBalance: 0, newBalance: 0, totalSpent: 0, errors };
-    }
-
-    const pointsData = JSON.parse(pointsRaw);
-    oldBalance = pointsData.balance || 0;
-    const lastClaimDate = pointsData.lastClaimDate || '';
-    const today = new Date().toISOString().slice(0, 10);
-
-    // 2. Charger les repas
-    const entriesKey = `feedtoki_entries_${userId}_v1`;
-    const entriesRaw = await AsyncStorage.getItem(entriesKey);
-    if (!entriesRaw) {
-      errors.push('Aucun repas trouvé');
-      return { success: false, oldBalance, newBalance: oldBalance, totalSpent: 0, errors };
-    }
-
-    const entries: MealEntry[] = JSON.parse(entriesRaw);
-    
-    // 3. Charger les custom foods
-    const customFoods = await loadCustomFoods(userId);
-    const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
-
-    // 4. Calculer les points dépensés aujourd'hui
-    const todayEntries = entries.filter(e => {
-      const entryDate = new Date(e.createdAt).toISOString().slice(0, 10);
-      return entryDate === today;
-    });
-
-    for (const entry of todayEntries) {
-      if (entry.items && entry.items.length > 0) {
-        const entryCost = entry.items.reduce((sum, itemRef) => {
-          const fi = allFoods.find(f => f.id === itemRef.foodId);
-          if (!fi) {
-            errors.push(`Aliment introuvable: ${itemRef.foodId} dans "${entry.label}"`);
-            return sum;
-          }
-          const multiplier = itemRef.multiplier || 1.0;
-          const baseCost = computeFoodPoints(fi);
-          const cost = Math.round(baseCost * Math.sqrt(multiplier));
-          return sum + cost;
-        }, 0);
-        totalSpent += entryCost;
-      }
-    }
-
-    // 5. Calculer le nouveau solde
-    let startOfDayBalance = pointsData.startOfDayBalance;
-    if (startOfDayBalance === undefined) {
-      startOfDayBalance = Math.min(maxPointsCap, oldBalance + totalSpent);
-    }
-
-    newBalance = Math.max(0, startOfDayBalance - totalSpent);
-
-    // 6. Sauvegarder les points corrigés
-    await AsyncStorage.setItem(pointsKey, JSON.stringify({
-      ...pointsData,
-      balance: newBalance,
-      startOfDayBalance,
-    }));
-
-    // 7. Synchroniser vers Firestore
-    if (FIREBASE_ENABLED && db) {
-      try {
-        const { syncPointsToFirestore } = await import('./data-sync');
-        const totalPointsKey = `feedtoki_total_points_${userId}_v1`;
-        const totalRaw = await AsyncStorage.getItem(totalPointsKey);
-        const totalPointsVal = totalRaw ? JSON.parse(totalRaw) : 0;
-        await syncPointsToFirestore(userId, newBalance, lastClaimDate, totalPointsVal);
-        console.log('[Sync Repair] ✅ Points synchronisés vers Firestore');
-      } catch (syncError) {
-        errors.push(`Erreur sync Firestore: ${syncError}`);
-      }
-    }
-
-    console.log('[Sync Repair] ✅ Points réparés:', {
-      oldBalance,
-      newBalance,
-      totalSpent,
-      startOfDayBalance,
-    });
-
-    return { success: true, oldBalance, newBalance, totalSpent, errors };
-  } catch (error: any) {
-    errors.push(`Erreur réparation: ${error?.message || error}`);
-    console.error('[Sync Repair] ❌ Erreur:', error);
-    return { success: false, oldBalance, newBalance: oldBalance, totalSpent, errors };
-  }
-}
 
 /**
  * Synchroniser tous les custom foods manquants entre local et Firestore
@@ -198,10 +77,10 @@ export async function syncMissingCustomFoods(userId: string): Promise<{
 
     // 6. Envoyer les aliments locaux vers Firestore
     if (missingInFirestore.length > 0) {
-      const batch = writeBatch(db);
+      const batch = writeBatch(getDb());
       for (const food of missingInFirestore) {
         try {
-          const globalFoodRef = doc(db, 'globalFoods', food.id);
+          const globalFoodRef = doc(getDb(), 'globalFoods', food.id);
           batch.set(globalFoodRef, {
             ...food,
             createdAt: new Date().toISOString(),
@@ -666,19 +545,14 @@ export async function syncMissingMeals(userId: string): Promise<{
 }
 
 /**
- * Réparation complète : points, custom foods, et repas
+ * Réparation complète : custom foods, et repas
  * @param userId ID de l'utilisateur
- * @param dailyPointsBudget Budget quotidien de points
- * @param maxPointsCap Cap maximum de points
  * @returns Résultat complet de la réparation
  */
 export async function fullRepair(
-  userId: string,
-  dailyPointsBudget: number,
-  maxPointsCap: number
+  userId: string
 ): Promise<{
   success: boolean;
-  points: { success: boolean; oldBalance: number; newBalance: number; totalSpent: number };
   customFoods: { success: boolean; localToFirestore: number; firestoreToLocal: number };
   meals: { 
     success: boolean; 
@@ -695,31 +569,25 @@ export async function fullRepair(
   
   const errors: string[] = [];
 
-  // 1. Réparer les points
-  const pointsResult = await repairPoints(userId, dailyPointsBudget, maxPointsCap);
-  if (!pointsResult.success) {
-    errors.push(...pointsResult.errors);
-  }
-
-  // 2. Synchroniser les custom foods
+  // 1. Synchroniser les custom foods
   const customFoodsResult = await syncMissingCustomFoods(userId);
   if (!customFoodsResult.success) {
     errors.push(...customFoodsResult.errors);
   }
 
-  // 3. Synchroniser les repas manquants
+  // 2. Synchroniser les repas manquants
   const syncMealsResult = await syncMissingMeals(userId);
   if (!syncMealsResult.success) {
     errors.push(...syncMealsResult.errors);
   }
 
-  // 4. Réparer les items manquants dans les repas (ajouter les items mentionnés dans le titre)
+  // 3. Réparer les items manquants dans les repas (ajouter les items mentionnés dans le titre)
   const repairItemsResult = await repairMissingItemsInMeals(userId);
   if (!repairItemsResult.success) {
     errors.push(...repairItemsResult.errors);
   }
 
-  // 5. Réparer les repas (validation et nettoyage)
+  // 4. Réparer les repas (validation et nettoyage)
   const mealsResult = await repairMealEntries(userId);
   if (!mealsResult.success) {
     errors.push(...mealsResult.errors);
@@ -729,7 +597,6 @@ export async function fullRepair(
 
   console.log('[Sync Repair] ✅ Réparation complète terminée:', {
     success,
-    points: pointsResult.success,
     customFoods: customFoodsResult.success,
     meals: mealsResult.success,
     errorsCount: errors.length,
@@ -737,12 +604,6 @@ export async function fullRepair(
 
   return {
     success,
-    points: {
-      success: pointsResult.success,
-      oldBalance: pointsResult.oldBalance,
-      newBalance: pointsResult.newBalance,
-      totalSpent: pointsResult.totalSpent,
-    },
     customFoods: {
       success: customFoodsResult.success,
       localToFirestore: customFoodsResult.localToFirestore,

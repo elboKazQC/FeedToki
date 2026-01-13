@@ -43,7 +43,7 @@ export function KPICard({ title, value, subtitle, trend, icon }: KPICardProps) {
         )}
         <View style={styles.textContainer}>
           <Text style={[styles.title, { color: colors.icon }]}>{title}</Text>
-          <Text style={[styles.value, { color: colors.text }]}>
+          <Text style={[styles.value, { color: colors.text.primary }]}>
             {typeof value === 'number' ? value.toLocaleString('fr-FR') : value}
           </Text>
           {subtitle && (

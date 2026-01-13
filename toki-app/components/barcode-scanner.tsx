@@ -143,9 +143,14 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
   // Vérifier la netteté d'une image
   const checkImageSharpness = async (dataUrl: string): Promise<number> => {
     try {
+      if (typeof window === 'undefined' || typeof document === 'undefined') {
+        // Not running in a browser environment — return neutral score
+        return 50;
+      }
+
       const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
+        const image = new (window as any).Image();
+        image.onload = () => resolve(image as HTMLImageElement);
         image.onerror = reject;
         image.src = dataUrl;
       });
@@ -428,9 +433,9 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
           const captureDuration = Date.now() - captureStartTime;
           
           logger.info(`[BarcodeScanner] ✅ Photo capturée en ${captureDuration}ms`, {
-            width: photo.width,
-            height: photo.height,
-            base64Size: photo.base64?.length || 0,
+            width: photo?.width,
+            height: photo?.height,
+            base64Size: photo?.base64?.length || 0,
             attempt
           });
           
@@ -443,23 +448,26 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
             throw new Error('Photo non capturée ou base64 manquant');
           }
           
+          // Déduire un alias non-nullable pour simplifier le reste du code
+          const p = photo as { width: number; height: number; base64: string; uri?: string };
+
           // Mode debug: sauvegarder la photo capturée et infos détaillées
-          const base64SizeKB = Math.round(photo.base64.length / 1024);
+          const base64SizeKB = Math.round(p.base64.length / 1024);
           const base64SizeMB = (base64SizeKB / 1024).toFixed(2);
           if (debugMode) {
-            setCapturedPhotoData(`data:image/jpeg;base64,${photo.base64}`);
-            addDebugLog(`Photo capturée: ${photo.width}x${photo.height}`);
+            setCapturedPhotoData(`data:image/jpeg;base64,${p.base64}`);
+            addDebugLog(`Photo capturée: ${p.width}x${p.height}`);
             addDebugLog(`Taille base64: ${base64SizeKB} KB (${base64SizeMB} MB)`);
             setDebugInfo(prev => ({
               ...prev,
-              imageWidth: photo.width,
-              imageHeight: photo.height,
-              base64Size: photo.base64.length,
+              imageWidth: p.width,
+              imageHeight: p.height,
+              base64Size: p.base64.length,
             }));
           }
           
           // Afficher l'aperçu de la photo
-          setCapturedPhotoUri(photo.uri);
+          setCapturedPhotoUri(p.uri ?? null);
           setShowPhotoPreview(true);
           
           // Logger la capture réussie
@@ -468,13 +476,13 @@ export function BarcodeScanner({ onBarcodeScanned, onClose }: BarcodeScannerProp
               currentUserId,
               `Photo capturée avec succès (tentative ${attempt})`,
               'barcode-scanner',
-              { attempt, width: photo.width, height: photo.height, base64Size: photo.base64.length, captureDuration }
+              { attempt, width: p.width, height: p.height, base64Size: p.base64.length, captureDuration }
             ).catch(() => {}); // Ignorer les erreurs de logging debug
           }
           
       // Vérifier la netteté de l'image (en arrière-plan pour ne pas bloquer)
       setIsBlurCheckActive(true);
-      const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+      const dataUrl = `data:image/jpeg;base64,${p.base64}`;
       checkImageSharpness(dataUrl).then((sharpness) => {
         setBlurScore(sharpness);
         setIsBlurCheckActive(false);
@@ -1658,7 +1666,6 @@ const styles = StyleSheet.create({
   sharpnessBarFill: {
     height: '100%',
     borderRadius: 4,
-    transition: 'width 0.3s ease',
   },
   sharpnessStatus: {
     fontSize: 12,

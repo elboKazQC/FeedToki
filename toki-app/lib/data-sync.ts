@@ -3,12 +3,12 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, doc, setDoc, getDoc, getDocs, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
+
 import { MealEntry } from './stats';
 import { UserProfile } from './types';
 import { WeightEntry } from './weight';
 import { NutritionTargets } from './nutrition';
-import { computeFoodPoints } from './points-utils';
 import { FoodItem } from './food-db';
 import { syncCheatDaysFromFirestore, getCheatDays, setCheatDay } from './cheat-days';
 
@@ -38,7 +38,7 @@ export async function syncMealEntryToFirestore(userId: string, entry: MealEntry)
       itemsCount: entry.items?.length || 0,
     });
     
-    const mealsRef = collection(db, 'users', userId, 'meals');
+    const mealsRef = collection(getDb(), 'users', userId, 'meals');
     const mealRef = doc(mealsRef, entry.id);
     await setDoc(mealRef, {
       ...entry,
@@ -62,7 +62,7 @@ export async function deleteMealEntryFromFirestore(userId: string, entryId: stri
   if (!isFirebaseAvailable() || !db) return;
 
   try {
-    const mealsRef = collection(db, 'users', userId, 'meals');
+    const mealsRef = collection(getDb(), 'users', userId, 'meals');
     const mealRef = doc(mealsRef, entryId);
     await deleteDoc(mealRef);
     console.log('[Sync] Entrée supprimée de Firestore:', entryId);
@@ -79,8 +79,8 @@ export async function syncMealsToFirestore(userId: string, entries: MealEntry[])
   if (!isFirebaseAvailable()) return;
 
   try {
-    const batch = writeBatch(db);
-    const mealsRef = collection(db, 'users', userId, 'meals');
+    const batch = writeBatch(getDb());
+    const mealsRef = collection(getDb(), 'users', userId, 'meals');
 
     // Sauvegarder tous les repas
     for (const entry of entries) {
@@ -106,7 +106,7 @@ export async function loadMealsFromFirestore(userId: string): Promise<MealEntry[
   if (!isFirebaseAvailable()) return [];
 
   try {
-    const mealsRef = collection(db, 'users', userId, 'meals');
+    const mealsRef = collection(getDb(), 'users', userId, 'meals');
     const snapshot = await getDocs(mealsRef);
     
     return snapshot.docs.map((docSnap) => {
@@ -124,96 +124,13 @@ export async function loadMealsFromFirestore(userId: string): Promise<MealEntry[
 }
 
 /**
- * Sauvegarder les points dans Firestore
- */
-export async function syncPointsToFirestore(
-  userId: string,
-  balance: number,
-  lastClaimDate: string,
-  totalPoints: number
-): Promise<void> {
-  if (!isFirebaseAvailable()) {
-    console.warn('[Sync] Firebase non disponible, skip sync points');
-    return;
-  }
-
-  try {
-    console.log('[Sync] 📤 Envoi des points vers Firestore...', {
-      userId,
-      balance,
-      lastClaimDate,
-      totalPoints,
-    });
-    
-    const pointsRef = doc(db, 'users', userId, 'points', 'current');
-    
-    // IMPORTANT: Ne jamais écraser avec une valeur plus basse
-    // (pour préserver les remboursements et corrections manuelles)
-    const existingSnap = await getDoc(pointsRef);
-    const existingData = existingSnap.exists() ? existingSnap.data() : null;
-    const today = new Date().toISOString().slice(0, 10);
-    
-    let finalBalance = balance;
-    if (existingData && existingData.lastClaimDate === today && lastClaimDate === today) {
-      // Même jour: prendre la valeur la plus haute
-      finalBalance = Math.max(balance, existingData.balance || 0);
-      if (finalBalance !== balance) {
-        console.log('[Sync] ⚠️ Points: garde la valeur Firestore plus haute:', existingData.balance, 'vs local:', balance);
-      }
-    }
-    
-    // Inclure startOfDayBalance si dispo localement (utile pour rendre le "début de journée" cohérent entre appareils)
-    let startOfDayBalance: number | undefined;
-    try {
-      const pointsKey = `feedtoki_points_${userId}_v2`;
-      const raw = await AsyncStorage.getItem(pointsKey);
-      const local = raw ? JSON.parse(raw) : null;
-      if (local && typeof local.startOfDayBalance === 'number' && local.lastClaimDate === lastClaimDate) {
-        startOfDayBalance = local.startOfDayBalance;
-      }
-    } catch (e) {
-      // Best-effort only
-    }
-
-    await setDoc(
-      pointsRef,
-      {
-        balance: finalBalance,
-        lastClaimDate,
-        ...(typeof startOfDayBalance === 'number' ? { startOfDayBalance } : {}),
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true }
-    );
-    
-    console.log('[Sync] ✅ Points balance sauvegardé dans Firestore', {
-      path: `users/${userId}/points/current`,
-      finalBalance,
-    });
-
-    const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
-    await setDoc(totalPointsRef, {
-      value: totalPoints,
-      updatedAt: Timestamp.now(),
-    });
-    
-    console.log('[Sync] ✅ Points total sauvegardé dans Firestore', {
-      path: `users/${userId}/points/total`,
-      totalPoints,
-    });
-  } catch (error) {
-    console.error('[Sync] ❌ Erreur sync points:', error);
-  }
-}
-
-/**
  * Sauvegarder les targets nutrition dans Firestore
  */
 export async function syncTargetsToFirestore(userId: string, targets: NutritionTargets): Promise<void> {
   if (!isFirebaseAvailable()) return;
 
   try {
-    const targetsRef = doc(db, 'users', userId, 'targets', 'nutrition');
+    const targetsRef = doc(getDb(), 'users', userId, 'targets', 'nutrition');
     await setDoc(targetsRef, {
       ...targets,
       updatedAt: Timestamp.now(),
@@ -230,8 +147,8 @@ export async function syncWeightsToFirestore(userId: string, weights: WeightEntr
   if (!isFirebaseAvailable()) return;
 
   try {
-    const batch = writeBatch(db);
-    const weightsRef = collection(db, 'users', userId, 'weights');
+    const batch = writeBatch(getDb());
+    const weightsRef = collection(getDb(), 'users', userId, 'weights');
 
     // Sauvegarder tous les poids
     for (const weight of weights) {
@@ -273,18 +190,7 @@ export async function syncAllToFirestore(userId: string): Promise<void> {
       await syncMealsToFirestore(userId, entries);
     }
 
-    // 2. Sync points
-    const pointsKey = `feedtoki_points_${userId}_v2`;
-    const pointsRaw = await AsyncStorage.getItem(pointsKey);
-    if (pointsRaw) {
-      const pointsData = JSON.parse(pointsRaw);
-      const totalPointsKey = `feedtoki_total_points_${userId}_v1`;
-      const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
-      const totalPoints = totalPointsRaw ? JSON.parse(totalPointsRaw) : 0;
-      await syncPointsToFirestore(userId, pointsData.balance || 0, pointsData.lastClaimDate || '', totalPoints);
-    }
-
-    // 3. Sync targets
+    // 2. Sync targets
     const targetsKey = `feedtoki_targets_${userId}_v1`;
     const targetsRaw = await AsyncStorage.getItem(targetsKey);
     if (targetsRaw) {
@@ -324,13 +230,11 @@ export async function syncAllToFirestore(userId: string): Promise<void> {
  */
 export async function syncFromFirestore(userId: string): Promise<{
   mealsMerged: number;
-  pointsRestored: boolean;
   targetsRestored: boolean;
   weightsMerged: number;
 }> {
   const result = {
     mealsMerged: 0,
-    pointsRestored: false,
     targetsRestored: false,
     weightsMerged: 0,
   };
@@ -409,107 +313,12 @@ export async function syncFromFirestore(userId: string): Promise<{
       console.log('[Sync] ℹ️ Aucun repas à fusionner');
     }
 
-    // 2. Synchroniser points - recalculer à partir des repas pour éviter les duplications
-    // Au lieu de simplement fusionner les balances, on recalcule les points à partir des repas synchronisés
-    const pointsKey = `feedtoki_points_${userId}_v2`;
-    const localPointsRaw = await AsyncStorage.getItem(pointsKey);
-    const localPointsData = localPointsRaw ? JSON.parse(localPointsRaw) : null;
-    console.log('[Sync] Points locaux:', localPointsData);
-    
-    const pointsRef = doc(db, 'users', userId, 'points', 'current');
-    const pointsSnap = await getDoc(pointsRef);
-    
-    const today = new Date().toISOString().slice(0, 10);
-    
-    // IMPORTANT: Au lieu de fusionner les balances, on va recalculer les points
-    // à partir des repas synchronisés. Cela évite les duplications.
-    // Le recalcul complet sera fait dans index.tsx après la synchronisation.
-    // Ici, on fait juste une fusion basique pour éviter de perdre des données.
-    
-    if (pointsSnap.exists()) {
-      const firestorePointsData = pointsSnap.data();
-      console.log('[Sync] Points Firestore:', firestorePointsData);
-      
-      // Déterminer quelle balance utiliser (fusion basique)
-      let finalBalance: number;
-      let finalLastClaimDate: string;
-      
-      if (!localPointsData) {
-        // Pas de données locales, utiliser Firestore
-        finalBalance = firestorePointsData.balance || 0;
-        finalLastClaimDate = firestorePointsData.lastClaimDate || '';
-        console.log('[Sync] Pas de points locaux, utilisation Firestore:', finalBalance);
-      } else if (localPointsData.lastClaimDate === today && firestorePointsData.lastClaimDate === today) {
-        // Même jour sur les deux sources - prendre la plus HAUTE balance
-        // (pour préserver les remboursements de points après suppression d'entrées
-        // et les corrections manuelles dans Firebase)
-        finalBalance = Math.max(localPointsData.balance || 0, firestorePointsData.balance || 0);
-        finalLastClaimDate = today;
-        console.log('[Sync] Points fusion (même jour): local=', localPointsData.balance, 'firestore=', firestorePointsData.balance, '-> final=', finalBalance);
-        console.log('[Sync] ⚠️ Note: Les points seront recalculés à partir des repas après la sync pour éviter les duplications');
-      } else if (localPointsData.lastClaimDate === today) {
-        // Local est plus récent (a réclamé les points aujourd'hui)
-        finalBalance = localPointsData.balance;
-        finalLastClaimDate = localPointsData.lastClaimDate;
-        console.log('[Sync] Local plus récent (aujourd\'hui):', finalBalance);
-      } else if (firestorePointsData.lastClaimDate === today) {
-        // Firestore est plus récent
-        finalBalance = firestorePointsData.balance || 0;
-        finalLastClaimDate = firestorePointsData.lastClaimDate || '';
-        console.log('[Sync] Firestore plus récent (aujourd\'hui):', finalBalance);
-      } else {
-        // Aucun n'est d'aujourd'hui, utiliser le plus récent
-        const localDate = localPointsData.lastClaimDate || '';
-        const firestoreDate = firestorePointsData.lastClaimDate || '';
-        if (localDate >= firestoreDate) {
-          finalBalance = localPointsData.balance;
-          finalLastClaimDate = localDate;
-          console.log('[Sync] Local plus récent (date):', finalBalance, localDate);
-        } else {
-          finalBalance = firestorePointsData.balance || 0;
-          finalLastClaimDate = firestoreDate;
-          console.log('[Sync] Firestore plus récent (date):', finalBalance, firestoreDate);
-        }
-      }
-      
-      const finalStartOfDayBalance =
-        (localPointsData && localPointsData.lastClaimDate === finalLastClaimDate && typeof localPointsData.startOfDayBalance === 'number')
-          ? localPointsData.startOfDayBalance
-          : (firestorePointsData && firestorePointsData.lastClaimDate === finalLastClaimDate && typeof (firestorePointsData as any).startOfDayBalance === 'number')
-            ? (firestorePointsData as any).startOfDayBalance
-            : undefined;
-
-      await AsyncStorage.setItem(pointsKey, JSON.stringify({
-        balance: finalBalance,
-        lastClaimDate: finalLastClaimDate,
-        ...(typeof finalStartOfDayBalance === 'number' ? { startOfDayBalance: finalStartOfDayBalance } : {}),
-      }));
-      console.log('[Sync] ✅ Points fusionnés et sauvegardés localement (sera recalculé après):', finalBalance);
-
-      const totalPointsRef = doc(db, 'users', userId, 'points', 'total');
-      const totalPointsSnap = await getDoc(totalPointsRef);
-      if (totalPointsSnap.exists()) {
-        const totalPointsKey = `feedtoki_total_points_${userId}_v1`;
-        const localTotalRaw = await AsyncStorage.getItem(totalPointsKey);
-        const localTotal = localTotalRaw ? JSON.parse(localTotalRaw) : 0;
-        const firestoreTotal = totalPointsSnap.data().value || 0;
-        // Prendre le plus grand total (car il ne peut qu'augmenter)
-        const finalTotal = Math.max(localTotal, firestoreTotal);
-        await AsyncStorage.setItem(totalPointsKey, JSON.stringify(finalTotal));
-        console.log('[Sync] ✅ Total points fusionné:', finalTotal, '(local:', localTotal, ', firestore:', firestoreTotal, ')');
-      }
-
-      result.pointsRestored = true;
-    } else {
-      console.log('[Sync] ℹ️ Aucun point dans Firestore');
-    }
-
-    // 3. Restore targets - ne remplace que si local est vide
+    // 2. Restore targets - ne remplace que si local est vide
     const targetsKey = `feedtoki_targets_${userId}_v1`;
     const localTargetsRaw = await AsyncStorage.getItem(targetsKey);
     
     if (!localTargetsRaw) {
-      const targetsRef = doc(db, 'users', userId, 'targets', 'nutrition');
+      const targetsRef = doc(getDb(), 'users', userId, 'targets', 'nutrition');
       const targetsSnap = await getDoc(targetsRef);
       if (targetsSnap.exists()) {
         const targets = targetsSnap.data();
@@ -518,15 +327,15 @@ export async function syncFromFirestore(userId: string): Promise<{
       }
     }
 
-    // 4. Synchroniser cheat days depuis Firestore
+    // 3. Synchroniser cheat days depuis Firestore
     await syncCheatDaysFromFirestore(userId);
 
-    // 5. Synchroniser weights - fusionner les deux sources
+    // 4. Synchroniser weights - fusionner les deux sources
     const weightsKey = `feedtoki_weights_${userId}_v1`;
     const localWeightsRaw = await AsyncStorage.getItem(weightsKey);
     const localWeights: WeightEntry[] = localWeightsRaw ? JSON.parse(localWeightsRaw) : [];
     
-    const weightsRef = collection(db, 'users', userId, 'weights');
+    const weightsRef = collection(getDb(), 'users', userId, 'weights');
     const weightsSnap = await getDocs(weightsRef);
     const firestoreWeights: WeightEntry[] = [];
     let baseline: WeightEntry | null = null;
@@ -614,4 +423,15 @@ export function validateAndFixMealEntries(
   return validatedEntries;
 }
 
-
+/**
+ * Fonction factice pour compatibilité (système de points supprimé)
+ */
+export async function syncPointsToFirestore(
+  _userId: string,
+  _balance: number,
+  _lastClaimDate: string,
+  _totalPointsEarned: number
+): Promise<void> {
+  // Points system removed - this function is kept for backward compatibility
+  return Promise.resolve();
+}

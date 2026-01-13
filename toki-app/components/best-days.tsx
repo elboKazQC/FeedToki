@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { MealEntry, normalizeDate } from '../lib/stats';
 import { computeDailyTotals, computeDayScore, NutritionTargets } from '../lib/nutrition';
@@ -27,16 +27,26 @@ type BestDaysProps = {
   onDayPress?: (day: DaySummary) => void; // Callback pour cliquer sur une journée
 };
 
+// Date par défaut pour éviter les erreurs d'hydratation SSR
+const DEFAULT_NOW = new Date('2026-01-01T12:00:00.000Z');
+
 export function BestDays({ entries, customFoods = [], targets, expectedMealsPerDay = 3, daysToShow = 3, excludedDays = [], onExcludeDay, onDayPress }: BestDaysProps) {
+  // État pour la date côté client (évite erreur d'hydratation)
+  const [clientNow, setClientNow] = useState<Date>(DEFAULT_NOW);
+  
+  useEffect(() => {
+    setClientNow(new Date());
+  }, []);
+  
   // Calculer les dates de référence une seule fois (évite l'erreur d'hydratation)
   const dateRefs = useMemo(() => {
-    const now = new Date();
+    const now = clientNow;
     const today = normalizeDate(now.toISOString());
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = normalizeDate(yesterday.toISOString());
     return { today, yesterday: yesterdayStr };
-  }, []);
+  }, [clientNow]);
   
   // Grouper les entrées par jour et calculer le score pour chaque jour
   const scoreGroups = useMemo(() => {

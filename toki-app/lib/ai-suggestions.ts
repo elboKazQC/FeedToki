@@ -2,7 +2,6 @@ import { DailyNutritionTotals, NutritionTargets } from './nutrition';
 import { SmartRecommendation, getSmartRecommendationsByTaste } from './smart-recommendations';
 import { FoodItem, FoodTag } from './food-db';
 import { getDefaultPortion } from './portions';
-import { computeFoodPoints } from './points-utils';
 
 export type AiSuggestionInput = {
   totals: DailyNutritionTotals;
@@ -181,19 +180,15 @@ FORMAT DE RÉPONSE: JSON uniquement
       fat_g: Number.isFinite(s.fat_g) ? s.fat_g : 0,
     };
 
-    // CORRECTION 2: Recalculer les points avec computeFoodPoints au lieu de faire confiance à l'IA
-    const pointsCost = computeFoodPoints(item);
-    item.points = pointsCost;
-
     return {
       item,
       reason: s.reason || 'Suggestion personnalisée IA',
       priority: 5 - idx,
-      pointsCost,
       suggestedGrams: Number.isFinite(s.grams) ? s.grams : portion.grams,
       suggestedVisualRef: s.portion || portion.visualRef,
       portion,
       aiTaste: s.taste, // Conserver le goût suggéré par l'IA pour validation
+      pointsCost: 0, // Placeholder until points system is migrated/removed
     } as SmartRecommendation;
   });
 

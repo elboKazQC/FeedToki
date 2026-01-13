@@ -35,7 +35,7 @@ export function KPIGraph({ title, type, data, height = DEFAULT_HEIGHT }: KPIGrap
   if (data.length === 0) {
     return (
       <Card variant="elevated" padding="md" style={styles.card}>
-        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.title, { color: colors.text.primary }]}>{title}</Text>
         <View style={[styles.emptyState, { height }]}>
           <Text style={[styles.emptyText, { color: colors.icon }]}>
             Aucune donnée disponible
@@ -50,7 +50,7 @@ export function KPIGraph({ title, type, data, height = DEFAULT_HEIGHT }: KPIGrap
 
   return (
     <Card variant="elevated" padding="md" style={styles.card}>
-      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.title, { color: colors.text.primary }]}>{title}</Text>
       <View style={[styles.graphContainer, { height }]}>
         {type === 'line' && <LineGraph data={data} maxValue={maxValue} colors={colors} />}
         {type === 'bar' && <BarGraph data={data} maxValue={maxValue} colors={colors} />}
@@ -65,7 +65,7 @@ export function KPIGraph({ title, type, data, height = DEFAULT_HEIGHT }: KPIGrap
                 { backgroundColor: item.color || getColorForIndex(index, colors) },
               ]}
             />
-            <Text style={[styles.legendLabel, { color: colors.text }]}>
+            <Text style={[styles.legendLabel, { color: colors.text.primary }]}>
               {item.label}: {item.value.toLocaleString('fr-FR')}
             </Text>
           </View>
@@ -180,7 +180,7 @@ function BarGraph({
                 style={[
                   styles.barValue,
                   {
-                    color: colors.text,
+                    color: colors.text.primary,
                     fontSize: barWidth < 30 ? 8 : 10,
                   },
                 ]}
@@ -222,7 +222,7 @@ function PieGraph({
                 ]}
               />
             </View>
-            <Text style={[styles.pieSegmentLabel, { color: colors.text }]}>
+            <Text style={[styles.pieSegmentLabel, { color: colors.text.primary }]}>
               {item.label}: {percentage.toFixed(1)}%
             </Text>
           </View>

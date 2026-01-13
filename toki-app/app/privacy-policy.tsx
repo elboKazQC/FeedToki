@@ -8,15 +8,16 @@ import { spacing, typography } from '../constants/design-tokens';
 export default function PrivacyPolicyScreen() {
   const { activeTheme } = useTheme();
   const colors = Colors[activeTheme];
+  const colorValue = (c: any): string => (typeof c === 'string' ? c : (c && typeof c.primary === 'string' ? c.primary : String(c)) );
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background.primary }]}>
+    <ScrollView style={[styles.container, { backgroundColor: colorValue(colors.background) }]}>
       <View style={styles.content}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Text style={[styles.backButtonText, { color: colors.tint }]}>← Retour</Text>
+            <Text style={[styles.backButtonText, { color: colorValue(colors.tint) }]}>← Retour</Text>
           </TouchableOpacity>
-          <Text style={[styles.title, { color: colors.text.primary }]}>🔒 Politique de Confidentialité</Text>
+          <Text style={[styles.title, { color: colorValue(colors.text) }]}>🔒 Politique de Confidentialité</Text>
         </View>
 
         <Text style={[styles.lastUpdated, { color: colors.text.secondary }]}>
@@ -122,7 +123,7 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.medium as any,
   },
   title: {
-    fontSize: typography.fontSize.h2,
+    fontSize: typography.fontSize['3xl'],
     fontWeight: typography.fontWeight.bold as any,
     marginBottom: spacing.sm,
   },
@@ -147,7 +148,7 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: typography.fontSize.md,
-    lineHeight: typography.lineHeight.standard * typography.fontSize.md,
+    lineHeight: typography.lineHeight.normal * typography.fontSize.md,
     marginBottom: spacing.sm,
   },
   footer: {

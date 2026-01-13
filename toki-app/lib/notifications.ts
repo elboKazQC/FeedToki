@@ -33,7 +33,7 @@ export async function scheduleDailyDragonReminders() {
         title: 'FeedToki a faim 🐉',
         body: "Qu'est-ce que tu manges ?",
       },
-      trigger: { hour: t.hour, minute: t.minute, repeats: true },
+      trigger: { type: 'calendar', hour: t.hour, minute: t.minute, repeats: true },
     });
   }
 }

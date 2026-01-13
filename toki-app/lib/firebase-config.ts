@@ -51,3 +51,11 @@ if (FIREBASE_ENABLED) {
 export { app };
 export const auth = authInstance;
 export const db = dbInstance;
+
+// Helper to ensure Firestore is initialized — throws helpful error at runtime if not
+export function getDb(): Firestore {
+  if (!dbInstance) {
+    throw new Error('Firestore not initialized');
+  }
+  return dbInstance;
+}

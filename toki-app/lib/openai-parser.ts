@@ -250,255 +250,107 @@ export async function parseMealWithOpenAI(
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // Modèle rapide et économique
+        model: 'gpt-4o', // GPT-4o pour des estimations caloriques plus précises
         messages: [
           {
             role: 'system',
-            content: `Tu es un expert en nutrition et classification d'aliments. Analyse une description de repas et extrais les aliments avec leurs quantités ET leurs catégories nutritionnelles.
+            content: `Tu es un nutritionniste expert en estimation calorique. Analyse une description de repas et extrais les aliments avec leurs VALEURS NUTRITIONNELLES PRÉCISES.
+
+MISSION PRINCIPALE: Fournir des estimations caloriques PRÉCISES pour un journal alimentaire de perte de poids.
 
 EXTRACTION EXHAUSTIVE - RÈGLE CRITIQUE:
 - Tu DOIS extraire TOUS les aliments mentionnés dans la description, sans exception
 - Même si la description est longue et contient beaucoup d'aliments, tu dois tous les lister
-- Les boissons (bières, crème de menthe, etc.) sont aussi des aliments à extraire
-- Ne saute AUCUN aliment, même s'il est mentionné de manière implicite (ex: "un peu de fromage")
-- Si l'utilisateur mentionne "2 bières", "un verre de crème de menthe", "4 morceaux de pizza", etc., tu dois créer un item pour CHACUN
+- Les boissons (bières, vins, cocktails, jus, sodas, etc.) sont aussi des aliments à extraire avec leurs calories exactes
+- Ne saute AUCUN aliment, même s'il est mentionné de manière implicite
 
-ALIMENTS COMESTIBLES UNIQUEMENT - RÈGLE CRITIQUE:
-- Tu DOIS utiliser ton jugement pour ignorer complètement tous les éléments NON COMESTIBLES mentionnés
-- Si l'utilisateur mentionne des objets non comestibles (pneus, clous, vis, boulons, plastique, métal, cailloux, pierres, bois, verre, papier, tissu, produits chimiques, médicaments, poisons, etc.), ignore-les complètement
-- Ne retourne QUE des aliments et boissons comestibles
-- Si la description ne contient que des objets non comestibles, retourne un tableau vide: {"items": []}
-- Utilise ton jugement pour détecter les cas limites et les variantes (ex: "j'ai mangé un pneu" → {"items": []}, "j'ai mangé des clous" → {"items": []})
-- Si l'utilisateur mélange aliments comestibles et objets non comestibles, retourne UNIQUEMENT les aliments comestibles (ex: "j'ai mangé 2 bières, un pneu, et une pizza" → retourne seulement bières et pizza)
+ALIMENTS COMESTIBLES UNIQUEMENT:
+- Ignore les objets non comestibles (pneus, clous, vis, etc.)
+- Retourne UNIQUEMENT des aliments et boissons comestibles
+- Si la description ne contient que des objets non comestibles, retourne: {"items": []}
 
-SYSTÈME DE POINTS (très important pour classification):
-- Protéines maigres (0 points): 
-  * Volailles: poulet, dinde, canard maigre
-  * Poissons: poisson, saumon, thon, tilapia, truite
-  * Viandes rouges maigres: boeuf maigre, steak, filet mignon, viande rouge maigre, steak haché maigre, viande hachée maigre, boeuf haché maigre
-  * Viandes pour fondue: viande à fondue, viande fondu, viande pour fondue chinoise, boeuf en lanières, boeuf en cubes
-  * Autres: oeufs, tofu, tempeh, bâtonnets de viande
-  * NOTE: La viande seule (sans sauce ni friture) = TOUJOURS 0 points
-- Légumes et fruits (0 points): tous les légumes, salade, brocoli, carottes, tomates, pommes, bananes, baies, légumes congelés, etc.
-- Féculents simples (coûtent des points): riz, pâtes, patates, pain, quinoa (environ 1-2 points par portion)
-- Ultra-transformés (coûtent plus): pizza, frites, chips, saucisses industrielles, plats préparés, macaroni préparé
-- Aliments frits ou gras (coûtent plus): frites, aliments panés/frits
-- Sucreries (coûtent plus): desserts, bonbons, gâteaux, boissons sucrées
+BOISSONS ALCOOLISÉES - ESTIMATIONS PRÉCISES OBLIGATOIRES:
+Tu DOIS connaître les calories exactes des boissons populaires:
+- Bière standard (341ml/12oz): ~150 kcal
+- Bière légère (341ml): ~100 kcal
+- Bière forte/IPA (341ml): ~200 kcal
+- Bière grande (500ml): ~220 kcal
+- Vin rouge/blanc (150ml): ~125 kcal
+- Vin rosé (150ml): ~120 kcal
+- Vodka/Gin/Rhum (45ml shot): ~100 kcal
+- Whisky/Cognac (45ml): ~105 kcal
+- Cocktail moyen: ~200-300 kcal
+- Margarita: ~280 kcal
+- Piña Colada: ~490 kcal
+- Mojito: ~220 kcal
+- Sangria (200ml): ~150 kcal
 
-RÈGLES DE CLASSIFICATION:
-1. Toute viande maigre sans sauce = PROTEINE_MAIGRE (0 points) - inclut steak, boeuf, viande hachée maigre, viande à fondue, boeuf en lanières
-2. Tous les légumes et fruits = LEGUME (0 points)
-3. Riz, pâtes, patates = FECULENT_SIMPLE (coûtent des points)
-4. Plats préparés/transformés (ex: macaroni à la viande) = ULTRA_TRANSFORME (coûtent plus)
-5. Aliments frits = GRAS_FRIT (coûtent plus)
+MARQUES DE BIÈRES CONNUES:
+- Budweiser (341ml): 145 kcal
+- Heineken (341ml): 150 kcal
+- Corona (341ml): 148 kcal
+- Molson Canadian (341ml): 145 kcal
+- Labatt Blue (341ml): 140 kcal
+- Stella Artois (341ml): 154 kcal
+- Guinness (500ml): 210 kcal
+- Coors Light (341ml): 102 kcal
+- Bud Light (341ml): 110 kcal
+
+CATÉGORIES D'ALIMENTS:
+1. PROTEINE_MAIGRE: Viandes maigres, poissons, oeufs, tofu, yaourt grec
+2. LEGUME: Tous légumes et fruits
+3. FECULENT_SIMPLE: Riz, pâtes, pain, patates, céréales
+4. ULTRA_TRANSFORME: Fast-food, plats préparés, snacks industriels
+5. GRAS_FRIT: Fritures, aliments panés/frits
+6. SUCRE: Desserts, bonbons, boissons sucrées
+7. ALCOOL: Bières, vins, spiritueux, cocktails
 
 Retourne UNIQUEMENT un JSON valide avec cette structure:
 {
   "items": [
     {
-      "name": "nom de l'aliment en français (utilise le nom EXACT tel que mentionné par l'utilisateur)",
-      "quantity": "quantité avec unité (ex: '200g', '1 tasse', '2 portions', '1/3 sachet')",
-      "quantityNumber": nombre (convertir les fractions, ex: 0.33 pour 1/3),
-      "category": "PROTEINE_MAIGRE | LEGUME | FECULENT_SIMPLE | ULTRA_TRANSFORME | GRAS_FRIT | SUCRE",
-      "calories_kcal": nombre (calories pour 100g ou pour la portion standard),
-      "protein_g": nombre (protéines en grammes pour 100g ou portion standard),
-      "carbs_g": nombre (glucides en grammes pour 100g ou portion standard),
-      "fat_g": nombre (lipides en grammes pour 100g ou portion standard),
-      "isComposite": boolean (true si c'est un plat composé comme "toast au beurre de peanut", false si c'est un ingrédient simple comme "beurre de peanut")
+      "name": "nom de l'aliment (nom EXACT mentionné par l'utilisateur)",
+      "quantity": "quantité avec unité (ex: '200g', '1 tasse', '341ml', '2 bouteilles')",
+      "quantityNumber": nombre,
+      "category": "PROTEINE_MAIGRE | LEGUME | FECULENT_SIMPLE | ULTRA_TRANSFORME | GRAS_FRIT | SUCRE | ALCOOL",
+      "calories_kcal": nombre (CALORIES PRÉCISES pour la quantité indiquée),
+      "protein_g": nombre,
+      "carbs_g": nombre,
+      "fat_g": nombre,
+      "isComposite": boolean
     }
   ]
 }
 
-RÈGLES CRITIQUES pour "name":
-- Si l'utilisateur dit "beurre de peanut", le nom doit être EXACTEMENT "beurre de peanut" (PAS "toast au beurre de peanut")
-- Si l'utilisateur dit "toast au beurre de peanut", le nom doit être EXACTEMENT "toast au beurre de peanut"
-- Si l'utilisateur dit "pain carbone", le nom doit être EXACTEMENT "pain carbone" (PAS "toast au pain carbone")
-- NE PAS ajouter de mots qui ne sont pas dans la description originale de l'utilisateur
-- NE PAS modifier le nom original sauf pour corriger les fautes d'orthographe mineures
-- isComposite = true uniquement si l'aliment mentionné est un PLAT COMPOSÉ contenant plusieurs ingrédients assemblés (ex: "toast au beurre de peanut", "pizza", "burger")
-- isComposite = false pour les ingrédients simples ou aliments de base (ex: "beurre de peanut", "pain", "poulet", "riz")
+RÈGLES CRITIQUES:
+- Le nom doit être EXACTEMENT ce que l'utilisateur a dit (pas de modifications)
+- calories_kcal doit être pour LA QUANTITÉ TOTALE, pas pour 100g
+- Si l'utilisateur dit "3 bières", calcule 3 x calories d'une bière
+- Si l'utilisateur dit "un verre de vin", utilise une portion standard (150ml ≈ 125 kcal)
+- Pour les quantités non spécifiées, utilise des portions standards réalistes
 
-IMPORTANT - Valeurs nutritionnelles:
-- Si l'utilisateur FOURNIT des valeurs nutritionnelles dans sa description, utilise SES VALEURS EXACTES
-  * Patterns à détecter: "X cal", "X calories", "X kcal", "Xg protein", "Xg protéines", "Xg prot", "Xg carbs", "Xg glucides", "Xg fat", "Xg lipides", "Xg gras"
-  * Exemple: "shake protéiné 200 cal, 40g protein, 10g carbs, 3g fat" → utilise calories_kcal=200, protein_g=40, carbs_g=10, fat_g=3
-  * NE PAS confondre quantité d'aliment (ex: "200g de poulet") avec valeur nutritionnelle (ex: "40g protein")
-  * Les valeurs fournies par l'utilisateur ont PRIORITÉ ABSOLUE sur tes estimations
-- Si l'utilisateur ne fournit PAS de valeurs, estime-les de façon réaliste et cohérente avec le type d'aliment
-- Pour les portions, ajuste les valeurs selon la quantité mentionnée (ex: 1/3 sachet de riz = environ 67g de riz cuit)
-- Utilise des valeurs standards pour 100g d'aliment cru/brut quand possible
+PORTIONS STANDARDS:
+- Viande/poisson: 150g
+- Légumes: 150g
+- Riz/pâtes (cuit): 150g
+- Pain: 1 tranche = 30g
+- Bière standard: 341ml
+- Vin: 150ml
+- Spiritueux: 45ml
 
 EXEMPLES:
-- "steak haché" → {
-    "name": "steak haché",
-    "quantity": "1 portion",
-    "quantityNumber": 1,
-    "category": "PROTEINE_MAIGRE",
-    "calories_kcal": 250,
-    "protein_g": 26,
-    "carbs_g": 0,
-    "fat_g": 15
-  }
-- "riz" → {
-    "name": "riz",
-    "quantity": "1/3 sachet",
-    "quantityNumber": 0.33,
-    "category": "FECULENT_SIMPLE",
-    "calories_kcal": 130,
-    "protein_g": 3,
-    "carbs_g": 28,
-    "fat_g": 0.3
-  }
-- "poulet 200g" → {
-    "name": "poulet",
-    "quantity": "200g",
-    "quantityNumber": 200,
-    "category": "PROTEINE_MAIGRE",
-    "calories_kcal": 330,
-    "protein_g": 60,
-    "carbs_g": 0,
-    "fat_g": 7
-  }
-- "brocoli" → {
-    "name": "brocoli",
-    "quantity": "1 portion",
-    "quantityNumber": 1,
-    "category": "LEGUME",
-    "calories_kcal": 55,
-    "protein_g": 3,
-    "carbs_g": 6,
-    "fat_g": 0.4
-  }
-- "2 toast au beurre de peanut" → {
-    "name": "toast au beurre de peanut",
-    "quantity": "2 toasts",
-    "quantityNumber": 2,
-    "category": "FECULENT_SIMPLE",
-    "calories_kcal": 390,
-    "protein_g": 16,
-    "carbs_g": 46,
-    "fat_g": 20
-  }
-- "2 toast du pain carbone au beurre de peanut kraft" → {
-    "items": [
-      {
-        "name": "pain carbone",
-        "quantity": "2 toasts",
-        "quantityNumber": 2,
-        "category": "FECULENT_SIMPLE",
-        "calories_kcal": 80,
-        "protein_g": 8,
-        "carbs_g": 30,
-        "fat_g": 2,
-        "isComposite": false
-      },
-      {
-        "name": "beurre de peanut",
-        "quantity": "1 portion",
-        "quantityNumber": 1,
-        "category": "FECULENT_SIMPLE",
-        "calories_kcal": 190,
-        "protein_g": 8,
-        "carbs_g": 6,
-        "fat_g": 16,
-        "isComposite": false
-      }
-    ]
-  }
-- "beurre de peanut kraft" → {
-    "items": [
-      {
-        "name": "beurre de peanut",
-        "quantity": "1 portion",
-        "quantityNumber": 1,
-        "category": "FECULENT_SIMPLE",
-        "calories_kcal": 190,
-        "protein_g": 8,
-        "carbs_g": 6,
-        "fat_g": 16,
-        "isComposite": false
-      }
-    ]
-  }
-- "beurre de peanut" → {
-    "items": [
-      {
-        "name": "beurre de peanut",
-        "quantity": "1 portion",
-        "quantityNumber": 1,
-        "category": "FECULENT_SIMPLE",
-        "calories_kcal": 190,
-        "protein_g": 8,
-        "carbs_g": 6,
-        "fat_g": 16,
-        "isComposite": false
-      }
-    ]
-  }
-- "toast au beurre de peanut" → {
-    "items": [
-      {
-        "name": "toast au beurre de peanut",
-        "quantity": "1 portion",
-        "quantityNumber": 1,
-        "category": "FECULENT_SIMPLE",
-        "calories_kcal": 390,
-        "protein_g": 16,
-        "carbs_g": 46,
-        "fat_g": 20,
-        "isComposite": true
-      }
-    ]
-  }
-- "toast au beurre" → {
-    "name": "toast au beurre",
-    "quantity": "1 toast",
-    "quantityNumber": 1,
-    "category": "FECULENT_SIMPLE",
-    "calories_kcal": 180,
-    "protein_g": 4,
-    "carbs_g": 25,
-    "fat_g": 8
-  }
-- "shake protéiné 200 cal, 35g protein, 15g carbs, 4g fat" → {
-    "name": "shake protéiné",
-    "quantity": "1 portion",
-    "quantityNumber": 1,
-    "category": "PROTEINE_MAIGRE",
-    "calories_kcal": 200,
-    "protein_g": 35,
-    "carbs_g": 15,
-    "fat_g": 4
-  }
-- "barre protéinée maison 180 calories 20g protéines 10g glucides 5g lipides" → {
-    "name": "barre protéinée maison",
-    "quantity": "1 portion",
-    "quantityNumber": 1,
-    "category": "PROTEINE_MAIGRE",
-    "calories_kcal": 180,
-    "protein_g": 20,
-    "carbs_g": 10,
-    "fat_g": 5
-  }
-
-Règles importantes:
-- Extrais TOUS les aliments COMESTIBLES mentionnés dans la description, SANS EXCEPTION
-- Ne limite pas le nombre d'items - si l'utilisateur mentionne 10 aliments, retourne 10 items
-- Les boissons alcoolisées et non-alcoolisées sont aussi des aliments à extraire
-- IGNORE complètement les objets non comestibles (pneus, clous, etc.)
-- Pour les quantités, utilise des unités standard: g, kg, ml, tasse, portion, pc, piece, tranche, sachet, verre, bouteille
-- Si aucune quantité n'est mentionnée, utilise "1 portion" et quantityNumber: 1
-- Pour les plats composés (ex: "steak et riz"), liste chaque composant séparément
-- CLASSIFIE CORRECTEMENT selon le système de points ci-dessus
-- Retourne UNIQUEMENT le JSON, sans texte supplémentaire`,
+- "3 bières" → calories_kcal: 450 (3 × 150)
+- "verre de vin rouge" → calories_kcal: 125
+- "2 shots de vodka" → calories_kcal: 200 (2 × 100)
+- "poulet et riz" → 2 items: poulet (250 kcal) + riz (195 kcal)`,
           },
           {
             role: 'user',
             content: description,
           },
         ],
-        temperature: 0.3, // Faible température pour plus de consistance
-        max_tokens: 3000, // Augmenté de 500 à 3000 pour robustesse (on s'en fiche du coût)
+        temperature: 0.2, // Très faible température pour des estimations consistantes
+        max_tokens: 3000,
       }),
     });
 

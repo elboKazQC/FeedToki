@@ -145,7 +145,7 @@ export default function AdminRequestsScreen() {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={styles.accessDeniedEmoji}>🔒</Text>
-        <Text style={[styles.accessDeniedText, { color: colors.text }]}>
+<Text style={[styles.accessDeniedText, { color: colors.text.primary }]}>
           Accès réservé aux administrateurs
         </Text>
         <TouchableOpacity style={styles.backButtonCentered} onPress={() => router.back()}>
@@ -168,7 +168,7 @@ export default function AdminRequestsScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, { color: colors.text }]}>📋 Demandes d&apos;aliments</Text>
+        <Text style={[styles.title, { color: colors.text.primary }]}>📋 Demandes d&apos;aliments</Text>
         <Text style={[styles.subtitle, { color: colors.icon }]}>
           {pendingRequests.length} demande{pendingRequests.length !== 1 ? 's' : ''} en attente
         </Text>

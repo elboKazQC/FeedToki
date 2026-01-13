@@ -1,6 +1,6 @@
 // Utilitaires pour la gestion des abonnements et beta users
 import { doc, getDoc, setDoc, collection, query, orderBy, getDocs, Timestamp } from 'firebase/firestore';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 import { UserSubscription, SubscriptionTier } from './types';
 
 const BETA_USER_LIMIT = 10; // Les 10 premiers utilisateurs sont beta gratuits
@@ -72,7 +72,7 @@ export async function getUserSubscription(userId: string): Promise<UserSubscript
   }
 
   try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
+    const userDoc = await getDoc(doc(getDb(), 'users', userId));
     if (!userDoc.exists()) {
       return null;
     }
@@ -167,7 +167,7 @@ export async function createSubscription(
     }
 
     // Mettre à jour le profil utilisateur avec la subscription
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(getDb(), 'users', userId);
     await setDoc(userRef, { subscription }, { merge: true });
 
     console.log(`[Subscription Utils] Subscription créée pour ${userId}: tier=${tier}, status=${status}`);
@@ -191,7 +191,7 @@ export async function updateSubscription(
   }
 
   try {
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(getDb(), 'users', userId);
     const currentDoc = await getDoc(userRef);
     
     if (!currentDoc.exists()) {

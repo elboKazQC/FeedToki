@@ -1,6 +1,6 @@
 // Script pour mettre à jour les objectifs nutritionnels de tous les utilisateurs existants
 
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { FIREBASE_ENABLED } from './firebase-config';
 import { calculateNutritionTargets } from './nutrition-calculator';
@@ -24,7 +24,7 @@ export async function updateAllUsersNutritionTargets(): Promise<{
 
   try {
     // Obtenir tous les utilisateurs
-    const usersRef = collection(db, 'users');
+    const usersRef = collection(getDb(), 'users');
     const usersSnapshot = await getDocs(usersRef);
 
     for (const userDoc of usersSnapshot.docs) {
@@ -32,7 +32,7 @@ export async function updateAllUsersNutritionTargets(): Promise<{
       
       try {
         // Charger le profil utilisateur
-        const profileDoc = await getDoc(doc(db, 'users', userId));
+        const profileDoc = await getDoc(doc(getDb(), 'users', userId));
         if (!profileDoc.exists()) continue;
 
         const profileData = profileDoc.data() as UserProfile;

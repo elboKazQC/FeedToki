@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WeightGoal, ActivityLevel, Gender } from '../lib/types';
-import { computeUserProfile, getGoalDescription, getDailyCalorieTarget, convertFeetInchesToCm } from '../lib/points-calculator';
+import { computeUserProfile, getGoalDescription, getDailyCalorieTarget, convertFeetInchesToCm } from '../lib/profile-utils';
 import { getCurrentLocalUser, updateLocalUserProfile } from '../lib/local-auth';
 import { FIREBASE_ENABLED } from '../lib/firebase-config';
 
@@ -470,7 +470,7 @@ export default function OnboardingScreen() {
   
   const previewProfile = computeUserProfile(
     goal,
-    previewWeightKg,
+    previewWeightKg ?? 0,
     activityLevel,
     gender || undefined,
     previewHeightCm
@@ -505,13 +505,13 @@ export default function OnboardingScreen() {
           <View style={[styles.summaryRow, styles.highlight]}>
             <Text style={styles.summaryLabel}>💰 Points par jour:</Text>
             <Text style={[styles.summaryValue, styles.bold]}>
-              {previewProfile.dailyPointsBudget} pts
+              {previewProfile.dailyPointsBudget ?? 0} pts
             </Text>
           </View>
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Cap maximum:</Text>
-            <Text style={styles.summaryValue}>{previewProfile.maxPointsCap} pts</Text>
+            <Text style={styles.summaryValue}>{previewProfile.maxPointsCap ?? 0} pts</Text>
           </View>
         </View>
 
@@ -530,7 +530,7 @@ export default function OnboardingScreen() {
 
         <View style={styles.explainBox}>
           <Text style={styles.explainText}>
-            💡 Avec <Text style={styles.bold}>{previewProfile.dailyPointsBudget} points/jour</Text>, 
+            💡 Avec <Text style={styles.bold}>{previewProfile.dailyPointsBudget ?? 0} points/jour</Text>, 
             tu peux manger sainement ET te permettre des petits plaisirs tout en atteignant ton objectif!
           </Text>
         </View>

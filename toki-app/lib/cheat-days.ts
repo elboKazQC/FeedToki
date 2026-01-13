@@ -3,7 +3,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
-import { db } from './firebase-config';
+import { db, getDb } from './firebase-config';
 
 const CHEAT_DAYS_KEY_PREFIX = 'feedtoki_cheat_days_';
 
@@ -38,7 +38,7 @@ export async function isCheatDay(userId: string, date: string): Promise<boolean>
     // Si pas dans AsyncStorage, essayer Firestore
     if (isFirebaseAvailable() && userId !== 'guest') {
       try {
-        const cheatDayRef = doc(db, 'users', userId, 'cheatDays', date);
+        const cheatDayRef = doc(getDb(), 'users', userId, 'cheatDays', date);
         const cheatDaySnap = await getDoc(cheatDayRef);
         
         if (cheatDaySnap.exists()) {
@@ -78,7 +78,7 @@ export async function setCheatDay(userId: string, date: string, isCheat: boolean
     // Synchroniser avec Firestore
     if (isFirebaseAvailable() && userId !== 'guest') {
       try {
-        const cheatDayRef = doc(db, 'users', userId, 'cheatDays', date);
+        const cheatDayRef = doc(getDb(), 'users', userId, 'cheatDays', date);
         
         if (isCheat) {
           await setDoc(cheatDayRef, {
@@ -122,7 +122,7 @@ export async function getCheatDays(userId: string): Promise<Record<string, boole
     // Si pas dans AsyncStorage, essayer Firestore
     if (isFirebaseAvailable() && userId !== 'guest') {
       try {
-        const cheatDaysRef = collection(db, 'users', userId, 'cheatDays');
+        const cheatDaysRef = collection(getDb(), 'users', userId, 'cheatDays');
         const snapshot = await getDocs(cheatDaysRef);
         
         const cheatDays: Record<string, boolean> = {};

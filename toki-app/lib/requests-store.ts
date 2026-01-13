@@ -19,8 +19,8 @@ export type StoredFoodRequest = {
 };
 
 const REQUESTS_KEY = 'feedtoki_food_requests_v1';
-const FILE_PATH = FileSystem.documentDirectory
-  ? FileSystem.documentDirectory + 'food-requests.json'
+const FILE_PATH = (FileSystem as any).documentDirectory
+  ? (FileSystem as any).documentDirectory + 'food-requests.json'
   : null;
 
 async function readFileRequests(): Promise<StoredFoodRequest[]> {
@@ -38,7 +38,8 @@ async function readFileRequests(): Promise<StoredFoodRequest[]> {
 async function writeFileRequests(requests: StoredFoodRequest[]): Promise<void> {
   if (!FILE_PATH) return;
   const data = JSON.stringify(requests, null, 2);
-  await FileSystem.writeAsStringAsync(FILE_PATH, data, { encoding: FileSystem.EncodingType.UTF8 });
+  // Encoding option may not exist in some expo-file-system typings; omit it or use any cast
+  await FileSystem.writeAsStringAsync(FILE_PATH, data as any);
 }
 
 export async function addFoodRequest(req: StoredFoodRequest): Promise<void> {

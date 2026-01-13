@@ -124,22 +124,30 @@ export async function parseMealDescription(
   userId?: string,
   userEmailVerified?: boolean
 ): Promise<ParsedMealResult> {
+  // 🔍 LOG: Mode de parsing utilisé
+  const hasOpenAIKey = !!process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  console.log('[AI Parser] 🔍 Mode:', hasOpenAIKey ? 'OpenAI disponible' : 'Fallback (règles)', { description, hasOpenAIKey });
+  
   // Essayer d'abord avec OpenAI si disponible
-  if (process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
+  if (hasOpenAIKey) {
     try {
+      console.log('[AI Parser] 🤖 Tentative avec OpenAI...');
       const { parseMealWithOpenAI } = await import('./openai-parser');
       const result = await parseMealWithOpenAI(description, userId, userEmailVerified);
       if (result.items.length > 0 && !result.error) {
+        console.log('[AI Parser] ✅ OpenAI succès:', result.items.length, 'items');
         return result; // Utiliser le résultat OpenAI si disponible
       }
+      console.log('[AI Parser] ⚠️ OpenAI sans résultats, fallback aux règles');
       // Si OpenAI échoue mais qu'il n'y a pas d'erreur critique, continuer avec le parser basique
     } catch (error) {
-      console.warn('[AI Parser] Erreur OpenAI, utilisation du parser basique:', error);
+      console.warn('[AI Parser] ❌ Erreur OpenAI, utilisation du parser basique:', error);
       // Continuer avec le parser basique en cas d'erreur
     }
   }
 
   // Parser basique (règles améliorées)
+  console.log('[AI Parser] 📋 Utilisation du parser basique (règles)');
   if (!description || description.trim().length === 0) {
     return {
       items: [],
@@ -164,6 +172,8 @@ export async function parseMealDescription(
       { keywords: ['tofu'], name: 'Tofu' },
       { keywords: ['yaourt', 'yogourt', 'yogurt'], name: 'Yogourt' },
       { keywords: ['fromage', 'cheese'], name: 'Fromage' },
+      { keywords: ['mayo', 'mayonnaise', 'mayonaise'], name: 'Mayonnaise' },
+      { keywords: ['sandwich', 'sandwiche', 'panini'], name: 'Sandwich' },
       
       // Féculents
       { keywords: ['riz', 'rice'], name: 'Riz' },
@@ -391,16 +401,91 @@ export async function parseMealDescription(
     // Convertir la map en array
     items.push(...Array.from(itemsMap.values()));
 
+    // === DÉCOMPOSITION DES PLATS COMPOSITES (ex: sandwich) ===
+    // Si "sandwich au X avec Y et Z" est détecté, remplacer par ingrédients
+    // IMPORTANT: Chercher dans la description ORIGINALE (avant segmentation) pour capturer tous les ingrédients
+    const decomposedItems: ParsedFoodItem[] = [];
+    const hasSandwich = items.some(item => item.name.toLowerCase().includes('sandwich'));
+    
+    if (hasSandwich) {
+      // Chercher les ingrédients mentionnés dans la description ORIGINALE (pas segmentée)
+      const sandwichIngredients = [
+        { pattern: /\b(oeuf|œuf|egg)s?\b/i, name: 'Oeufs' },
+        { pattern: /\b(mayo|mayonnaise)\b/i, name: 'Mayonnaise' },
+        { pattern: /\b(fromage|cheese)\b/i, name: 'Fromage' },
+        { pattern: /\b(tomate|tomato)s?\b/i, name: 'Tomates' },
+        { pattern: /\b(laitue|salade verte|lettuce)\b/i, name: 'Salade verte' },
+        { pattern: /\b(bacon)\b/i, name: 'Bacon' },
+        { pattern: /\b(poulet|chicken)\b/i, name: 'Poulet' },
+      ];
+      
+      const ingredientsList: ParsedFoodItem[] = [];
+      for (const { pattern, name } of sandwichIngredients) {
+        if (pattern.test(lowerDesc)) {
+          ingredientsList.push({
+            name,
+            confidence: 0.85,
+            isComposite: false,
+          });
+        }
+      }
+      
+      // Si des ingrédients ont été trouvés, les utiliser au lieu du sandwich
+      if (ingredientsList.length > 0) {
+        // Ajouter pain automatiquement (toujours dans un sandwich)
+        ingredientsList.push({
+          name: 'Toasts',
+          confidence: 0.8,
+          isComposite: false,
+        });
+        
+        // Remplacer tous les items "sandwich" par les ingrédients
+        for (const item of items) {
+          if (!item.name.toLowerCase().includes('sandwich')) {
+            // Garder les items non-sandwich (déjà détectés)
+            const normalized = normalizeForDeduplication(item.name);
+            const isDuplicate = ingredientsList.some(ing => 
+              normalizeForDeduplication(ing.name) === normalized
+            );
+            if (!isDuplicate) {
+              decomposedItems.push(item);
+            }
+          }
+        }
+        
+        // Ajouter les ingrédients du sandwich
+        decomposedItems.push(...ingredientsList);
+      } else {
+        // Pas d'ingrédients détectés, garder tous les items tels quels
+        decomposedItems.push(...items);
+      }
+    } else {
+      // Pas de sandwich, garder tous les items
+      decomposedItems.push(...items);
+    }
+
+    // Dédoublonnage (maintenant appliqué après décomposition)
+    const deduped: ParsedFoodItem[] = [];
+    const seen = new Set<string>();
+    for (const item of decomposedItems) {
+      const normalized = normalizeForDeduplication(item.name);
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        deduped.push(item);
+      }
+    }
+
     // Si aucun aliment détecté, retourner le texte complet comme un seul item
-    if (items.length === 0) {
-      items.push({
+    if (deduped.length === 0) {
+      deduped.push({
         name: originalDesc.trim(),
         confidence: 0.5,
       });
     }
 
     return {
-      items,
+      items: deduped,
+      rawResponse: `Parsed ${deduped.length} items using fallback parser (with sandwich decomposition)`,
     };
   } catch (error: any) {
     return {

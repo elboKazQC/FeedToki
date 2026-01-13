@@ -40,7 +40,7 @@ export default function AdminBetaUsersScreen() {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={styles.accessDeniedEmoji}>🔒</Text>
-        <Text style={[styles.accessDeniedText, { color: colors.text }]}>
+        <Text style={[styles.accessDeniedText, { color: colors.text.primary }]}>
           Accès réservé aux administrateurs
         </Text>
         <TouchableOpacity style={styles.backButtonCentered} onPress={() => router.back()}>
@@ -127,14 +127,14 @@ export default function AdminBetaUsersScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, { color: colors.text }]}>🔓 Débloquer Comptes Beta</Text>
+        <Text style={[styles.title, { color: colors.text.primary }]}>🔓 Débloquer Comptes Beta</Text>
         <Text style={[styles.subtitle, { color: colors.icon }]}>
           Débloquer manuellement les comptes des beta testers
         </Text>
 
         {/* Instructions */}
         <Card style={styles.instructionsCard}>
-          <Text style={[styles.instructionsTitle, { color: colors.text }]}>Instructions</Text>
+          <Text style={[styles.instructionsTitle, { color: colors.text.primary }]}>Instructions</Text>
           <Text style={[styles.instructionsText, { color: colors.textSecondary }]}>
             1. Allez dans Firebase Console {'>'} Authentication {'>'} Users{'\n'}
             2. Trouvez le userId du beta tester{'\n'}
@@ -163,7 +163,7 @@ export default function AdminBetaUsersScreen() {
           <TextInput
             style={[styles.input, { 
               backgroundColor: colors.background, 
-              color: colors.text,
+              color: colors.text.primary,
               borderColor: colors.border 
             }]}
             value={userId}

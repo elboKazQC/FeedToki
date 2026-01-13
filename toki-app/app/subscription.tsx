@@ -33,6 +33,7 @@ function ClientOnlySubscriptionScreen() {
   const { user, profile } = useAuth();
   const { activeTheme } = useTheme();
   const colors = Colors[activeTheme];
+  const colorValue = (c: any): string => (typeof c === 'string' ? c : (c && typeof c.primary === 'string' ? c.primary : String(c)) );
   
   // Lire les params depuis l'URL seulement côté client
   const [params, setParams] = useState<{ success?: string; canceled?: string }>({});
@@ -117,7 +118,7 @@ function ClientOnlySubscriptionScreen() {
       setPaymentTime(Date.now());
       
       const reloadAttempts = [2000, 5000, 10000, 15000];
-      const timeouts: NodeJS.Timeout[] = [];
+      const timeouts: ReturnType<typeof setTimeout>[] = [];
       
       reloadAttempts.forEach((delay, index) => {
         const timeoutId = setTimeout(async () => {
@@ -265,9 +266,9 @@ function ClientOnlySubscriptionScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+      <View style={[styles.container, { backgroundColor: colorValue(colors.background) }]}>
+        <ActivityIndicator size="large" color={colorValue(colors.primary)} />
+        <Text style={[styles.loadingText, { color: colorValue(colors.textSecondary) }]}>
           Chargement...
         </Text>
       </View>
@@ -277,12 +278,12 @@ function ClientOnlySubscriptionScreen() {
   const currentUserId = (user as any)?.uid;
   if (!currentUserId || currentUserId === 'guest') {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.container, { backgroundColor: colorValue(colors.background) }]}>
         <Card style={styles.card}>
-          <Text style={[styles.title, { color: colors.text }]}>
+          <Text style={[styles.title, { color: colorValue(colors.text) }]}>
             Connexion requise
           </Text>
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text style={[styles.message, { color: colorValue(colors.textSecondary) }]}>
             Veuillez vous connecter pour gérer votre abonnement.
           </Text>
           <Button
@@ -297,7 +298,7 @@ function ClientOnlySubscriptionScreen() {
 
   // Déterminer le statut
   let statusText = '';
-  let statusColor = colors.textSecondary;
+  let statusColor: string = String(colors.textSecondary);
   let actionButton: React.ReactNode = null;
 
   if (isBeta) {
@@ -359,16 +360,16 @@ function ClientOnlySubscriptionScreen() {
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[styles.container, { backgroundColor: colorValue(colors.background) }]}
       contentContainerStyle={styles.content}
     >
       <Card style={styles.card}>
-        <Text style={[styles.title, { color: colors.text }]}>
+        <Text style={[styles.title, { color: colorValue(colors.text) }]}>
           Mon Abonnement
         </Text>
 
         {showSuccessMessage && (
-          <View style={[styles.successMessage, { backgroundColor: colors.success || '#4CAF50', padding: spacing.md, borderRadius: 8, marginBottom: spacing.md }]}>
+          <View style={[styles.successMessage, { backgroundColor: colorValue(colors.success || colors.primary || '#4CAF50'), padding: spacing.md, borderRadius: 8, marginBottom: spacing.md }]}>
             <Text style={[styles.successText, { color: '#fff' }]}>
               ✅ Paiement réussi ! Votre abonnement est en cours d'activation...
             </Text>
@@ -376,8 +377,7 @@ function ClientOnlySubscriptionScreen() {
         )}
 
         <View style={styles.statusContainer}>
-          <Text style={[styles.statusLabel, { color: colors.textSecondary }]}>
-            Statut:
+          <Text style={[styles.statusLabel, { color: colorValue(colors.textSecondary) }]}>
           </Text>
           <Text style={[styles.statusText, { color: statusColor }]}>
             {statusText}
@@ -390,23 +390,23 @@ function ClientOnlySubscriptionScreen() {
         <View style={styles.divider} />
 
         <View style={styles.pricingSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>
             Tarification
           </Text>
           
           <View style={styles.priceBox}>
-            <Text style={[styles.price, { color: colors.text }]}>
+            <Text style={[styles.price, { color: colorValue(colors.text) }]}>
               $10 CAD/mois
             </Text>
-            <Text style={[styles.priceDescription, { color: colors.textSecondary }]}>
+            <Text style={[styles.priceDescription, { color: colorValue(colors.textSecondary) }]}>
               Abonnement mensuel
             </Text>
           </View>
 
           <View style={styles.featuresList}>
             <View style={styles.featureItem}>
-              <Text style={[styles.featureBullet, { color: colors.primary }]}>•</Text>
-              <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+              <Text style={[styles.featureBullet, { color: colorValue(colors.primary) }]}>•</Text>
+              <Text style={[styles.featureText, { color: colorValue(colors.textSecondary) }]}>
                 50 analyses IA par jour incluses
               </Text>
             </View>
@@ -440,24 +440,24 @@ function ClientOnlySubscriptionScreen() {
         <View style={styles.divider} />
 
         <View style={styles.faqSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>
             Questions fréquentes
           </Text>
 
           <View style={styles.faqItem}>
-            <Text style={[styles.faqQuestion, { color: colors.text }]}>
+            <Text style={[styles.faqQuestion, { color: colorValue(colors.text) }]}>
               Pourquoi pas de mois gratuit?
             </Text>
-            <Text style={[styles.faqAnswer, { color: colors.textSecondary }]}>
+            <Text style={[styles.faqAnswer, { color: colorValue(colors.textSecondary) }]}>
               Chaque analyse IA génère des coûts. Pour offrir ce service de manière durable, nous demandons un abonnement qui permet de couvrir ces frais dès le début.
             </Text>
           </View>
 
           <View style={styles.faqItem}>
-            <Text style={[styles.faqQuestion, { color: colors.text }]}>
+            <Text style={[styles.faqQuestion, { color: colorValue(colors.text) }]}>
               Que se passe-t-il si j'annule?
             </Text>
-            <Text style={[styles.faqAnswer, { color: colors.textSecondary }]}>
+            <Text style={[styles.faqAnswer, { color: colorValue(colors.textSecondary) }]}>
               Vous conservez l'accès jusqu'à la fin de la période payée. Après cela, vous pourrez toujours utiliser l'application en mode manuel (sans IA).
             </Text>
           </View>
@@ -467,7 +467,7 @@ function ClientOnlySubscriptionScreen() {
           <>
             <View style={styles.divider} />
             <View style={styles.adminSection}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>
                 Outils Admin
               </Text>
               <Button
@@ -476,7 +476,7 @@ function ClientOnlySubscriptionScreen() {
                 variant="secondary"
                 style={styles.button}
               />
-              <Text style={[styles.adminNote, { color: colors.textSecondary }]}>
+              <Text style={[styles.adminNote, { color: colorValue(colors.textSecondary) }]}>
                 Calcule et ajoute le userRank pour tous les utilisateurs existants
               </Text>
             </View>

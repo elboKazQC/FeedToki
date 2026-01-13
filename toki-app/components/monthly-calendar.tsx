@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 type MonthlyCalendarProps = {
@@ -12,8 +12,18 @@ type DayData = {
   isCheat: boolean;
 };
 
+// Date par défaut pour éviter les erreurs d'hydratation SSR (sera mise à jour côté client)
+const DEFAULT_DATE = new Date('2026-01-01T00:00:00.000Z');
+
 export function MonthlyCalendar({ entries, cheatDays = {} }: MonthlyCalendarProps) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(DEFAULT_DATE);
+  const [isClient, setIsClient] = useState(false);
+  
+  // Mettre à jour avec la vraie date côté client
+  useEffect(() => {
+    setCurrentMonth(new Date());
+    setIsClient(true);
+  }, []);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   // Créer un map des dates avec repas pour lookup rapide
@@ -255,7 +265,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   dayCell: {
-    width: 'calc((100% - 18px) / 7)', // 7 colonnes avec 6 gaps de 3px
+    width: '14%', // approx 100% / 7
     aspectRatio: 1,
     borderRadius: 4,
     alignItems: 'center',

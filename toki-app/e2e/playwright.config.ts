@@ -14,9 +14,7 @@ dotenv.config({ path: path.join(__dirname, '.env.test') });
  * - Android (émulation Chrome Mobile)
  */
 export default defineConfig({
-  // URL de base de l'application
-  baseURL: process.env.E2E_BASE_URL || 'http://localhost:8081',
-  
+
   // Timeout par défaut pour chaque test
   timeout: parseInt(process.env.E2E_TIMEOUT || '60000', 10),
   

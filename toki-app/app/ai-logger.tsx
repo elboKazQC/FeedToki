@@ -23,13 +23,12 @@ import { validateMealDescription } from '../lib/validation';
 import { FoodItem, FOOD_DB } from '../lib/food-db';
 import { FoodItemRef } from '../lib/stats';
 import { getPortionsForItem, getDefaultPortion } from '../lib/portions';
-import { computeFoodPoints } from '../lib/points-utils';
 import { useAuth } from '../lib/auth-context';
 import { addCustomFood, loadCustomFoods, mergeFoodsWithCustom } from '../lib/custom-foods';
 import { MealEntry } from '../lib/stats';
 import { classifyMealByItems } from '../lib/classifier';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { syncMealEntryToFirestore, syncPointsToFirestore } from '../lib/data-sync';
+import { syncMealEntryToFirestore } from '../lib/data-sync';
 import { trackAIParserUsed, trackMealLogged } from '../lib/analytics';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -148,11 +147,25 @@ function convertQuantityToMultiplier(
       quantityLower.includes('piece') ||
       quantityLower.includes('tranche')) {
     // Le quantityNumber représente déjà le nombre de portions
-    return quantityNumber;
+    // ⚠️ CAPPER à 3.0 max pour éviter des multipliers absurdes (ex: "2.5 portions" → capped à 2.0)
+    const portionMultiplier = Math.min(quantityNumber, 3.0);
+    
+    // Si c'est un nombre décimal non-sens (ex: 2.5), arrondir à l'entier le plus proche
+    if (!Number.isInteger(quantityNumber) && quantityNumber > 1.5) {
+      // Probabilité: l'IA a mal estimé, arrondir à 1 ou 2
+      console.warn(`[Multiplier] ⚠️ Portion décimale détectée: ${quantityNumber}, arrondissement`, {
+        original: quantityNumber,
+        rounded: Math.round(quantityNumber),
+      });
+      return Math.round(quantityNumber); // 2.5 → 2 ou 3 selon arrondi
+    }
+    
+    return portionMultiplier;
   }
   
-  // Par défaut, utiliser quantityNumber comme multiplier direct
-  return quantityNumber;
+  // Par défaut, utiliser quantityNumber comme multiplier direct (avec cap)
+  // Capper à 5.0 max pour éviter des erreurs dramatiques
+  return Math.min(quantityNumber, 5.0);
 }
 
 type DetectedItem = {
@@ -162,7 +175,6 @@ type DetectedItem = {
   offItem?: FoodItem;
   portion: ReturnType<typeof getDefaultPortion>;
   itemRef: FoodItemRef;
-  pointsCost: number;
   source: ItemSource;
   quantity?: string; // Quantité prédite par l'IA (ex: "200g", "2 portions")
   quantityNumber?: number; // Nombre extrait (ex: 200 pour "200g", 2 pour "2 portions")
@@ -175,6 +187,25 @@ export default function AILoggerScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [error, setError] = useState<string>('');
+  
+  // États pour diagnostic (visible sans console)
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnosticInfo, setDiagnosticInfo] = useState<{
+    parserMode: 'OpenAI' | 'Fallback' | null;
+    platform: string;
+    itemsResolved: Array<{
+      input: string;
+      matched: string;
+      source: ItemSource;
+      baseCalories: number;
+      multiplier: number;
+      finalCalories: number;
+    }>;
+  }>({
+    parserMode: null,
+    platform: Platform.OS,
+    itemsResolved: [],
+  });
   
   // États pour la modification de quantité
   const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
@@ -271,6 +302,14 @@ export default function AILoggerScreen() {
 
       // 2. Parser la description avec IA
       const parseResult = await parseMealDescription(description, currentUserId, isEmailVerified);
+      
+      // Capturer le mode de parsing pour diagnostic
+      const hasOpenAIKey = !!process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+      setDiagnosticInfo(prev => ({
+        ...prev,
+        parserMode: hasOpenAIKey ? 'OpenAI' : 'Fallback',
+        itemsResolved: [], // Reset avant de résoudre les items
+      }));
 
       if (!parseResult || parseResult.error || parseResult.items.length === 0) {
         // Tracker échec du parser
@@ -424,8 +463,30 @@ export default function AILoggerScreen() {
           // Calculer le multiplier depuis la quantité prédite par l'IA
           let finalPortion = portion;
           if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
+            // 🔍 VALIDATION: Vérifier si la quantité estimée par l'IA a du sens
+            // Si c'est > 2.0 ET la description original dit "gros", "grande", etc. (pas de grammes/ml)
+            // alors c'est probablement une mauvaise estimation, utiliser 1.0 à la place
+            let validatedQuantity = parsedItem.quantityNumber;
+            const quantityLower = (parsedItem.quantity || '').toLowerCase();
+            
+            // Si pas d'unité précise (g, ml, etc) mais quantité > 2.0, c'est suspect
+            const hasExactUnit = quantityLower.includes('g') || quantityLower.includes('ml') || 
+                                quantityLower.includes('l') || quantityLower.includes('kg');
+            
+            if (validatedQuantity > 2.0 && !hasExactUnit && description.includes('gros')) {
+              console.warn(`[AI Parser] ⚠️ Quantité suspecte détectée: "${parsedItem.quantity}" (${validatedQuantity}) pour "${parsedItem.name}"`, {
+                originalQuantity: parsedItem.quantity,
+                parsed: validatedQuantity,
+                hasExactUnit,
+                description,
+              });
+              // Utiliser la portion par défaut (1.0x) au lieu de la quantité suspecte
+              validatedQuantity = 1.0;
+              console.log('[AI Parser] 🔧 Utilisation de portion standard (1.0x) à la place');
+            }
+            
             const calculatedMultiplier = convertQuantityToMultiplier(
-              parsedItem.quantityNumber,
+              validatedQuantity,
               parsedItem.quantity,
               foodItem!,
               portion
@@ -444,9 +505,35 @@ export default function AILoggerScreen() {
 
           // Créer le FoodItemRef avec la portion ajustée
           const itemRef = createFoodItemRef(foodItem!, finalPortion);
-
-          // Calculer le coût en points
-          const pointsCost = computeFoodPoints(foodItem!) * Math.sqrt(finalPortion.multiplier);
+          // Ajouter la source nutritionnelle au FoodItemRef
+          itemRef.nutritionSource = source;
+          
+          // 🔍 LOG DÉTAILLÉ pour diagnostic des divergences calories mobile/PC
+          const diagnosticData = {
+            input: parsedItem.name,
+            matched: foodItem!.name,
+            foodId: foodItem!.id,
+            source: source,
+            quantity: parsedItem.quantity,
+            quantityNumber: parsedItem.quantityNumber,
+            multiplier: finalPortion.multiplier,
+            baseCalories: foodItem!.calories_kcal,
+            finalCalories: Math.round(foodItem!.calories_kcal * finalPortion.multiplier),
+          };
+          logger.info('[AI Logger] ✅ Item résolu:', diagnosticData);
+          
+          // Ajouter aux diagnostics visibles
+          setDiagnosticInfo(prev => ({
+            ...prev,
+            itemsResolved: [...prev.itemsResolved, {
+              input: parsedItem.name,
+              matched: foodItem!.name,
+              source: source,
+              baseCalories: foodItem!.calories_kcal,
+              multiplier: finalPortion.multiplier,
+              finalCalories: Math.round(foodItem!.calories_kcal * finalPortion.multiplier),
+            }],
+          }));
 
           items.push({
             originalName: parsedItem.name || 'Aliment inconnu',
@@ -455,7 +542,6 @@ export default function AILoggerScreen() {
             offItem: offItem || undefined,
             portion: finalPortion,
             itemRef,
-            pointsCost: Math.round(pointsCost),
             source,
             quantity: parsedItem.quantity,
             quantityNumber: parsedItem.quantityNumber,
@@ -530,8 +616,6 @@ export default function AILoggerScreen() {
             tags: existingFood.tags.length > 0 ? existingFood.tags : foodToSave.tags,
             // Garder le meilleur baseScore
             baseScore: Math.max(existingFood.baseScore || 0, foodToSave.baseScore || 0),
-            // Garder le meilleur points
-            points: Math.max(existingFood.points || 0, foodToSave.points || 0),
           };
           await addCustomFood(updatedFood, currentUserId !== 'guest' ? currentUserId : undefined);
           foodsUpdated++;
@@ -587,19 +671,8 @@ export default function AILoggerScreen() {
         console.log('[AI Logger] ⚠️ Mode guest, pas de synchronisation Firestore');
       }
 
-      // 5. Recharger les custom foods (incluant ceux qu'on vient de sauvegarder) et recalculer les points
+      // 5. Recharger les custom foods (incluant ceux qu'on vient de sauvegarder)
       const customFoods = await loadCustomFoods(currentUserId !== 'guest' ? currentUserId : undefined);
-      const allFoods = mergeFoodsWithCustom(FOOD_DB, customFoods);
-      
-      // Recalculer les points avec les custom foods à jour
-      const totalPoints = items.reduce((sum, itemRef) => {
-        const fi = allFoods.find(f => f.id === itemRef.foodId);
-        if (!fi) return sum;
-        const multiplier = itemRef.multiplier || 1.0;
-        const baseCost = computeFoodPoints(fi);
-        const cost = Math.round(baseCost * Math.sqrt(multiplier));
-        return sum + cost;
-      }, 0);
       
       // Tracker le repas logué avec IA
       trackMealLogged({
@@ -607,58 +680,21 @@ export default function AILoggerScreen() {
         category: classification.category,
         itemsCount: items.length,
         score: classification.score,
-        pointsCost: totalPoints,
         hasAiParser: true,
       });
       
-      if (totalPoints > 0) {
-        const pointsKey = `feedtoki_points_${currentUserId}_v2`;
-        const pointsRaw = await AsyncStorage.getItem(pointsKey);
-        const pointsData = pointsRaw ? JSON.parse(pointsRaw) : { balance: 0, lastClaimDate: '' };
-        const newBalance = Math.max(0, pointsData.balance - totalPoints);
-        await AsyncStorage.setItem(pointsKey, JSON.stringify({
-          ...pointsData,
-          balance: newBalance,
-        }));
-        
-        // Synchroniser les points avec Firestore
-        if (currentUserId !== 'guest') {
-          const totalPointsKey = `feedtoki_total_points_${currentUserId}_v1`;
-          const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
-          const totalPointsEarned = totalPointsRaw ? JSON.parse(totalPointsRaw) : 0;
-          console.log('[AI Logger] 🔄 Synchronisation des points vers Firestore...', {
-            newBalance,
-            lastClaimDate: pointsData.lastClaimDate,
-            totalPointsEarned,
-          });
-          await syncPointsToFirestore(currentUserId, newBalance, pointsData.lastClaimDate, totalPointsEarned);
-          console.log('[AI Logger] ✅ Points synchronisés vers Firestore');
-        }
-        
-        // Logger l'événement
-        const { userLogger } = await import('../lib/user-logger');
-        await userLogger.info(
-          currentUserId,
-          `Repas enregistré via AI: ${detectedItems.length} item(s), -${totalPoints} pts`,
-          'ai-logger',
-          { itemsCount: detectedItems.length, pointsDeducted: totalPoints, newBalance }
-        );
-      } else {
-        const { userLogger } = await import('../lib/user-logger');
-        await userLogger.warn(
-          currentUserId,
-          `Repas enregistré via AI mais aucun point déduit`,
-          'ai-logger',
-          { itemsCount: detectedItems.length, items: items.map(i => i.foodId) }
-        );
-      }
+      // Logger l'événement
+      const { userLogger } = await import('../lib/user-logger');
+      await userLogger.info(
+        currentUserId,
+        `Repas enregistré via AI: ${detectedItems.length} item(s)`,
+        'ai-logger',
+        { itemsCount: detectedItems.length }
+      );
 
       // 6. Retourner à l'écran principal avec succès
       // Construire le message avec les informations sur les aliments sauvegardés
       let successMessage = `✅ Repas enregistré!\n${detectedItems.length} aliment(s) enregistré(s).`;
-      if (totalPoints > 0) {
-        successMessage += `\n-${totalPoints} points`;
-      }
       if (foodsAdded > 0 || foodsUpdated > 0) {
         const foodsInfo = [];
         if (foodsAdded > 0) {
@@ -939,9 +975,11 @@ export default function AILoggerScreen() {
         originalName: parsedItem.name || foodName,
         matchedItem: match || null,
         estimatedItem: match ? undefined : foodItem,
+        offItem: undefined,
         portion: finalPortion,
         itemRef: finalItemRef,
         pointsCost: finalPointsCost,
+        source: match ? 'db' : 'estimated',
         quantity: parsedItem.quantity,
         quantityNumber: parsedItem.quantityNumber,
       };
@@ -1016,8 +1054,66 @@ export default function AILoggerScreen() {
             </Text>
           )}
         </TouchableOpacity>
+        
+        {/* Bouton de diagnostic pour mobile */}
+        <TouchableOpacity
+          style={styles.diagnosticButton}
+          onPress={() => setShowDiagnostics(!showDiagnostics)}
+        >
+          <Text style={styles.diagnosticButtonText}>
+            {showDiagnostics ? '🔧 Cacher diagnostic' : '🔧 Afficher diagnostic'}
+          </Text>
+        </TouchableOpacity>
 
       </View>
+
+      {/* Panneau de diagnostic visible (sans console) */}
+      {showDiagnostics && (
+        <Card variant="outlined" style={{ marginBottom: spacing.md, backgroundColor: '#1e293b' }}>
+          <Text style={styles.diagnosticTitle}>🔧 Diagnostic Système</Text>
+          
+          <View style={styles.diagnosticSection}>
+            <Text style={styles.diagnosticLabel}>📱 Plateforme:</Text>
+            <Text style={styles.diagnosticValue}>{diagnosticInfo.platform}</Text>
+          </View>
+          
+          <View style={styles.diagnosticSection}>
+            <Text style={styles.diagnosticLabel}>🤖 Mode de parsing:</Text>
+            <Text style={styles.diagnosticValue}>
+              {diagnosticInfo.parserMode || 'Pas encore analysé'}
+              {diagnosticInfo.parserMode === 'Fallback' && ' ⚠️ (règles basiques)'}
+            </Text>
+          </View>
+          
+          {diagnosticInfo.itemsResolved.length > 0 && (
+            <>
+              <Text style={styles.diagnosticSubtitle}>📊 Détails de résolution:</Text>
+              {diagnosticInfo.itemsResolved.map((item, idx) => (
+                <View key={idx} style={styles.diagnosticItemBox}>
+                  <Text style={styles.diagnosticItemText}>
+                    <Text style={{ fontWeight: 'bold' }}>Input:</Text> {item.input}
+                  </Text>
+                  <Text style={styles.diagnosticItemText}>
+                    <Text style={{ fontWeight: 'bold' }}>Matched:</Text> {item.matched}
+                  </Text>
+                  <Text style={styles.diagnosticItemText}>
+                    <Text style={{ fontWeight: 'bold' }}>Source:</Text> {item.source.toUpperCase()}
+                  </Text>
+                  <Text style={styles.diagnosticItemText}>
+                    <Text style={{ fontWeight: 'bold' }}>Base calories:</Text> {item.baseCalories} kcal
+                  </Text>
+                  <Text style={styles.diagnosticItemText}>
+                    <Text style={{ fontWeight: 'bold' }}>Multiplier:</Text> {item.multiplier.toFixed(2)}x
+                  </Text>
+                  <Text style={[styles.diagnosticItemText, { color: '#22c55e', fontWeight: 'bold' }]}>
+                    Final: {item.finalCalories} kcal
+                  </Text>
+                </View>
+              ))}
+            </>
+          )}
+        </Card>
+      )}
 
       {detectedItems.length > 0 && (
         <View style={styles.resultsContainer}>
@@ -1035,7 +1131,24 @@ export default function AILoggerScreen() {
               {detectedItems.map((item, index) => (
                 <Card key={index} variant="outlined" style={{ marginBottom: spacing.md }}>
                   <View style={styles.itemHeader}>
-                    <Text style={styles.itemName}>{item.originalName}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemName}>{item.originalName}</Text>
+                      {/* Badge source nutritionnelle */}
+                      <View style={[
+                        styles.sourceBadge, 
+                        item.source === 'db' && styles.sourceBadgeDb,
+                        item.source === 'off' && styles.sourceBadgeOff,
+                        item.source === 'estimated' && styles.sourceBadgeEstimated,
+                        item.source === 'custom' && styles.sourceBadgeCustom,
+                      ]}>
+                        <Text style={styles.sourceBadgeText}>
+                          {item.source === 'db' && '📊 Base de données'}
+                          {item.source === 'off' && '🌐 Open Food Facts'}
+                          {item.source === 'estimated' && '⚠️ Estimation IA'}
+                          {item.source === 'custom' && '👤 Personnalisé'}
+                        </Text>
+                      </View>
+                    </View>
                     <Text style={styles.itemPoints}>{item.pointsCost} pts</Text>
                   </View>
 
@@ -1046,11 +1159,11 @@ export default function AILoggerScreen() {
                       </Text>
                       {item.quantity && (
                         <Text style={styles.itemQuantity}>
-                          📏 Quantité: {item.quantity}
+                          📏 Quantité: {item.quantity}{item.portion.multiplier !== 1.0 ? ` (×${item.portion.multiplier.toFixed(1)})` : ''}
                         </Text>
                       )}
                       <Text style={styles.itemDetails}>
-                        🔥 {Math.round((item.offItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.offItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.offItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.offItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
+                        🔥 {Math.round((item.offItem.calories_kcal || 0) * item.portion.multiplier)} cal {item.portion.multiplier !== 1.0 ? `(${Math.round(item.offItem.calories_kcal || 0)}×${item.portion.multiplier.toFixed(1)})` : ''} · 💪 {Math.round((item.offItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.offItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.offItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : item.source === 'db' && item.matchedItem ? (
@@ -1060,11 +1173,11 @@ export default function AILoggerScreen() {
                       </Text>
                       {item.quantity && (
                         <Text style={styles.itemQuantity}>
-                          📏 Quantité: {item.quantity}
+                          📏 Quantité: {item.quantity}{item.portion.multiplier !== 1.0 ? ` (×${item.portion.multiplier.toFixed(1)})` : ''}
                         </Text>
                       )}
                       <Text style={styles.itemDetails}>
-                        🔥 {Math.round((item.matchedItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.matchedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.matchedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.matchedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
+                        🔥 {Math.round((item.matchedItem.calories_kcal || 0) * item.portion.multiplier)} cal {item.portion.multiplier !== 1.0 ? `(${Math.round(item.matchedItem.calories_kcal || 0)}×${item.portion.multiplier.toFixed(1)})` : ''} · 💪 {Math.round((item.matchedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.matchedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.matchedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : item.source === 'estimated' && item.estimatedItem ? (
@@ -1074,11 +1187,11 @@ export default function AILoggerScreen() {
                       </Text>
                       {item.quantity && (
                         <Text style={styles.itemQuantity}>
-                          📏 Quantité: {item.quantity}
+                          📏 Quantité: {item.quantity}{item.portion.multiplier !== 1.0 ? ` (×${item.portion.multiplier.toFixed(1)})` : ''}
                         </Text>
                       )}
                       <Text style={styles.itemDetails}>
-                        🔥 {Math.round((item.estimatedItem.calories_kcal || 0) * item.portion.multiplier)} cal · 💪 {Math.round((item.estimatedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.estimatedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.estimatedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
+                        🔥 {Math.round((item.estimatedItem.calories_kcal || 0) * item.portion.multiplier)} cal {item.portion.multiplier !== 1.0 ? `(${Math.round(item.estimatedItem.calories_kcal || 0)}×${item.portion.multiplier.toFixed(1)})` : ''} · 💪 {Math.round((item.estimatedItem.protein_g || 0) * item.portion.multiplier * 10) / 10}g prot · 🍞 {Math.round((item.estimatedItem.carbs_g || 0) * item.portion.multiplier * 10) / 10}g gluc · 🧈 {Math.round((item.estimatedItem.fat_g || 0) * item.portion.multiplier * 10) / 10}g lipides
                       </Text>
                     </View>
                   ) : null}
@@ -1266,6 +1379,58 @@ const styles = StyleSheet.create({
     color: '#022c22',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  diagnosticButton: {
+    backgroundColor: '#475569',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#64748b',
+  },
+  diagnosticButtonText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  diagnosticTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fbbf24',
+    marginBottom: 12,
+  },
+  diagnosticSubtitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#60a5fa',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  diagnosticSection: {
+    marginBottom: 8,
+  },
+  diagnosticLabel: {
+    fontSize: 14,
+    color: '#94a3b8',
+    fontWeight: '600',
+  },
+  diagnosticValue: {
+    fontSize: 15,
+    color: '#e2e8f0',
+    marginTop: 2,
+  },
+  diagnosticItemBox: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  diagnosticItemText: {
+    fontSize: 13,
+    color: '#cbd5e1',
+    marginBottom: 4,
   },
   scanButton: {
     backgroundColor: '#3b82f6',
@@ -1455,6 +1620,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
     marginBottom: 4,
+  },
+  sourceBadge: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  sourceBadgeDb: {
+    backgroundColor: '#065f46',
+  },
+  sourceBadgeOff: {
+    backgroundColor: '#1e3a8a',
+  },
+  sourceBadgeEstimated: {
+    backgroundColor: '#78350f',
+  },
+  sourceBadgeCustom: {
+    backgroundColor: '#581c87',
+  },
+  sourceBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,

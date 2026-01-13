@@ -2,7 +2,7 @@
 // Une session se termine après 30 minutes d'inactivité
 
 import { collection, addDoc, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { db, FIREBASE_ENABLED } from './firebase-config';
+import { db, FIREBASE_ENABLED, getDb } from './firebase-config';
 import { normalizeDate } from './stats';
 
 export const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes en millisecondes
@@ -41,7 +41,7 @@ export async function startSession(userId: string): Promise<string | null> {
       date,
     };
 
-    const sessionsRef = collection(db, 'user_sessions');
+    const sessionsRef = collection(getDb(), 'user_sessions');
     const docRef = await addDoc(sessionsRef, sessionData);
     
     console.log('[Session Tracker] Nouvelle session démarrée:', {
@@ -76,7 +76,7 @@ export async function endSession(sessionId: string | null): Promise<void> {
   try {
     // Récupérer la session directement par son ID
     const { doc, getDoc, updateDoc } = await import('firebase/firestore');
-    const sessionRef = doc(db, 'user_sessions', sessionId);
+    const sessionRef = doc(getDb(), 'user_sessions', sessionId);
     const sessionSnap = await getDoc(sessionRef);
     
     if (!sessionSnap.exists()) {
@@ -130,7 +130,7 @@ export async function getUserSessions(
   }
 
   try {
-    const sessionsRef = collection(db, 'user_sessions');
+    const sessionsRef = collection(getDb(), 'user_sessions');
     let q = query(
       sessionsRef,
       where('userId', '==', userId),

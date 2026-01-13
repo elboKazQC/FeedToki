@@ -1043,7 +1043,7 @@ async function tryDecodeWithZXingStrategy(
 
   const reader = new BrowserMultiFormatReader(hints);
   
-  const zxingPromise = reader.decodeFromCanvas(canvas).then((result) => {
+  const zxingPromise = (reader as any).decodeFromCanvas(canvas).then((result: any) => {
     if (result && result.getText()) {
       return normalizeBarcode(result.getText());
     }

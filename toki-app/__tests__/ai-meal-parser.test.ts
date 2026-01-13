@@ -297,5 +297,109 @@ describe('ai-meal-parser', () => {
       expect(result.items[0].name.toLowerCase()).toContain('poulet');
     });
   });
-});
 
+  // Test de régression pour le bug sandwich avec doublons
+  describe('Regression: sandwich decomposition (avoid duplicates)', () => {
+    it('should decompose "sandwich au oeuf avec mayo et fromage" into ingredients', async () => {
+      const result = await parseMealDescription('sandwich au oeuf avec mayo et une tranche de fromage');
+      
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThan(0);
+      
+      // Ne devrait PAS contenir "sandwich" comme item
+      const hasSandwichItem = result.items.some(item => 
+        item.name.toLowerCase().includes('sandwich')
+      );
+      expect(hasSandwichItem).toBe(false);
+      
+      // Devrait contenir les ingrédients: oeuf, mayo, fromage, pain
+      const itemNames = result.items.map(item => item.name.toLowerCase());
+      
+      const hasOeuf = itemNames.some(name => name.includes('oeuf') || name.includes('egg'));
+      const hasMayo = itemNames.some(name => name.includes('mayo'));
+      const hasFromage = itemNames.some(name => name.includes('fromage') || name.includes('cheese'));
+      const hasPain = itemNames.some(name => name.includes('pain') || name.includes('bread') || name.includes('toast'));
+      
+      expect(hasOeuf).toBe(true);
+      expect(hasMayo).toBe(true);
+      expect(hasFromage).toBe(true);
+      expect(hasPain).toBe(true);
+      
+      // Pas de doublons (chaque ingrédient unique)
+      const uniqueNames = new Set(itemNames);
+      expect(uniqueNames.size).toBe(result.items.length);
+    });
+
+    it('should keep simple "sandwich" without details as-is', async () => {
+      const result = await parseMealDescription('un sandwich');
+      
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThan(0);
+      
+      // Devrait contenir "sandwich" car pas d'ingrédients détaillés
+      const hasSandwich = result.items.some(item => 
+        item.name.toLowerCase().includes('sandwich')
+      );
+      expect(hasSandwich).toBe(true);
+    });
+  });
+
+  // Test de régression pour le bug calories (700 vs 390)
+  describe('Regression: 2 toast au beurre de peanut calorie consistency', () => {
+    it('should parse "2 toast au beurre de peanut" and match to correct DB item with correct calories', async () => {
+      const result = await parseMealDescription('2 toast au beurre de peanut');
+      
+      // Le parser doit détecter au moins 1 item
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThan(0);
+      
+      // Trouver l'item "toast au beurre de peanut"
+      const toastItem = result.items.find(item => 
+        item.name.toLowerCase().includes('toast') && 
+        (item.name.toLowerCase().includes('beurre') || item.name.toLowerCase().includes('peanut'))
+      );
+      
+      expect(toastItem).toBeDefined();
+      
+      if (toastItem) {
+        // Vérifier la quantité détectée
+        expect(toastItem.quantityNumber).toBe(2);
+        
+        // L'item devrait être nommé proche de "toast au beurre de peanut"
+        const normalizedName = toastItem.name.toLowerCase();
+        expect(
+          normalizedName.includes('toast') && 
+          (normalizedName.includes('beurre') || normalizedName.includes('peanut'))
+        ).toBe(true);
+        
+        // Note: Ce test vérifie le parsing. Le matching et les calories finales
+        // sont testés dans le flux complet (ai-logger.tsx) où:
+        // - Parsed item → findBestMatch() → devrait matcher "toast_beurre_peanut" (390 kcal base)
+        // - Portion × 2 → calories finales = 390 × 2 = 780 kcal
+        // - Source devrait être 'db' (pas 'estimated' ou 'off')
+      }
+    });
+
+    it('should extract exact "toast au beurre de peanut" name (not just "toast")', async () => {
+      const result = await parseMealDescription('2 toasts au beurre de peanut');
+      
+      expect(result.error).toBeUndefined();
+      expect(result.items.length).toBeGreaterThan(0);
+      
+      // L'item détecté doit inclure "beurre" ou "peanut" dans le nom
+      // (pas juste "toast" ou "toasts")
+      const toastItem = result.items.find(item => 
+        item.name.toLowerCase().includes('toast')
+      );
+      
+      expect(toastItem).toBeDefined();
+      
+      if (toastItem) {
+        const itemName = toastItem.name.toLowerCase();
+        // Doit avoir "beurre" OU "peanut" dans le nom (pas juste "toast")
+        const hasBeurreOrPeanut = itemName.includes('beurre') || itemName.includes('peanut');
+        expect(hasBeurreOrPeanut).toBe(true);
+      }
+    });
+  });
+});

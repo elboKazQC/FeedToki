@@ -11,7 +11,7 @@ import {
   reload
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebase-config';
+import { auth, db, getDb } from './firebase-config';
 import { UserProfile } from './types';
 
 export type AuthUser = User;
@@ -139,7 +139,7 @@ export async function signUp(email: string, password: string, displayName: strin
       onboardingCompleted: false,
     };
     
-    await setDoc(doc(db, 'users', userCredential.user.uid), defaultProfile);
+    await setDoc(doc(getDb(), 'users', userCredential.user.uid), defaultProfile);
     
     // Calculer le rank de l'utilisateur et créer la subscription
     try {
@@ -159,7 +159,7 @@ export async function signUp(email: string, password: string, displayName: strin
       }
       
       // Sauvegarder le rank dans le profil
-      await setDoc(doc(db, 'users', userCredential.user.uid), { userRank }, { merge: true });
+      await setDoc(doc(getDb(), 'users', userCredential.user.uid), { userRank }, { merge: true });
     } catch (error) {
       console.error('[Firebase Auth] Erreur création subscription:', error);
       // Ne pas bloquer la création du compte si la subscription échoue
@@ -298,7 +298,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   }
 
   try {
-    const docRef = doc(db, 'users', userId);
+    const docRef = doc(getDb(), 'users', userId);
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
@@ -330,7 +330,7 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     // S'assurer que userId est toujours défini
     cleanUpdates.userId = userId;
 
-    const docRef = doc(db, 'users', userId);
+    const docRef = doc(getDb(), 'users', userId);
     await setDoc(docRef, cleanUpdates, { merge: true });
   } catch (error) {
     console.error('Error updating user profile:', error);

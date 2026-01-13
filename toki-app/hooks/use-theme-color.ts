@@ -16,6 +16,11 @@ export function useThemeColor(
   if (colorFromProps) {
     return colorFromProps;
   } else {
-    return Colors[theme][colorName];
+    const token = Colors[theme][colorName] as any;
+    // Support legacy nested text object (text.primary) — return primary if present
+    if (token && typeof token === 'object' && typeof token.primary === 'string') {
+      return token.primary;
+    }
+    return token;
   }
 }

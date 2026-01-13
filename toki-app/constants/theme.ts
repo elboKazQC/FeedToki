@@ -11,7 +11,10 @@ const tintColorDark = '#fff';
 
 export const Colors = {
   light: {
-    text: lightTheme.text.primary,
+    // Keep nested text tokens for compatibility (text.primary, text.secondary, ...)
+    text: lightTheme.text,
+    textSecondary: lightTheme.text.secondary,
+    textTertiary: lightTheme.text.tertiary,
     background: lightTheme.background,
     tint: lightTheme.primary,
     icon: lightTheme.text.secondary,
@@ -19,6 +22,7 @@ export const Colors = {
     tabIconSelected: lightTheme.primary,
     // Extended colors from design tokens
     surface: lightTheme.surface,
+    card: lightTheme.surface, // alias used in components
     surfaceElevated: lightTheme.surfaceElevated,
     border: lightTheme.border,
     success: lightTheme.success,
@@ -28,7 +32,10 @@ export const Colors = {
     secondary: lightTheme.secondary,
   },
   dark: {
-    text: darkTheme.text.primary,
+    // Keep nested text tokens for compatibility (text.primary, text.secondary, ...)
+    text: darkTheme.text,
+    textSecondary: darkTheme.text.secondary,
+    textTertiary: darkTheme.text.tertiary,
     background: darkTheme.background,
     tint: darkTheme.primary,
     icon: darkTheme.text.secondary,
@@ -36,6 +43,7 @@ export const Colors = {
     tabIconSelected: darkTheme.primary,
     // Extended colors from design tokens
     surface: darkTheme.surface,
+    card: darkTheme.surface, // alias used in components
     surfaceElevated: darkTheme.surfaceElevated,
     border: darkTheme.border,
     success: darkTheme.success,

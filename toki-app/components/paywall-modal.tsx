@@ -80,22 +80,22 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
       <View style={[styles.overlay, { backgroundColor: 'rgba(0, 0, 0, 0.7)' }]} pointerEvents="box-none">
         <View pointerEvents="auto">
           <Card style={[styles.modal, { backgroundColor: colors.background }]}>
-          <Text style={[styles.title, { color: colors.text }]}>
+          <Text style={[styles.title, { color: colors.text.primary }]}>
             Débloque ton Coach IA 🧠
           </Text>
           
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text style={[styles.message, { color: colors.secondary }]}>
             💙 Fait au Québec par un passionné. Ton abonnement permet d'ajouter de nouvelles features et de rivaliser avec les géants US.
           </Text>
           
           <View style={styles.explanation}>
-            <Text style={[styles.explanationText, { color: colors.textSecondary }]}>
+            <Text style={[styles.explanationText, { color: colors.secondary }]}>
               Votre abonnement me permet de continuer à améliorer l'application, d'ajouter de nouvelles fonctionnalités et de compétitionner avec les grandes applications internationales. Ensemble, construisons une alternative québécoise!
             </Text>
           </View>
 
           <View style={styles.features}>
-            <Text style={[styles.featureTitle, { color: colors.text }]}>
+            <Text style={[styles.featureTitle, { color: colors.text.primary }]}>
               Ce que tu débloques:
             </Text>
             <View style={styles.featureItem}>
@@ -142,7 +142,7 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
             </View>
             <View style={styles.featureItem}>
               <Text style={[styles.featureBullet, { color: colors.primary }]}>❌</Text>
-              <Text style={[styles.featureText, { color: colors.text.secondary }]}> 
+              <Text style={[styles.featureText, { color: colors.secondary }]}> 
                 Annule quand tu veux
               </Text>
             </View>
@@ -167,7 +167,7 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
               }}
               style={styles.cancelButton}
             >
-              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>
+              <Text style={[styles.cancelText, { color: colors.secondary }]}>
                 Annuler
               </Text>
             </TouchableOpacity>

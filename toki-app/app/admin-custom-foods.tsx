@@ -51,7 +51,7 @@ export default function AdminCustomFoodsScreen() {
           
           // Charger l'email de l'utilisateur depuis son profil
           try {
-            const userProfileDoc = await getDoc(doc(db, 'users', userId));
+            const userProfileDoc = await getDoc(doc(getDb(), 'users', userId));
             if (userProfileDoc.exists()) {
               const profileData = userProfileDoc.data();
               userEmailMap[userId] = profileData.email || userId;
@@ -120,7 +120,7 @@ Créé par: ${food.userEmail || food.userId}`;
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={styles.accessDeniedEmoji}>🔒</Text>
-        <Text style={[styles.accessDeniedText, { color: colors.text }]}>
+        <Text style={[styles.accessDeniedText, { color: colors.text.primary }]}>
           Accès réservé aux administrateurs
         </Text>
         <TouchableOpacity style={styles.backButtonCentered} onPress={() => router.back()}>
@@ -137,7 +137,7 @@ Créé par: ${food.userEmail || food.userId}`;
           <Text style={[styles.backButtonText, { color: colors.primary }]}>← Retour</Text>
         </TouchableOpacity>
 
-        <Text style={[styles.title, { color: colors.text }]}>
+        <Text style={[styles.title, { color: colors.text.primary }]}>
           🍽️ Aliments Personnalisés
         </Text>
         <Text style={[styles.subtitle, { color: colors.icon }]}>
@@ -162,7 +162,7 @@ Créé par: ${food.userEmail || food.userId}`;
                 onPress={() => setSelectedFood(food)}
               >
                 <View style={styles.foodHeader}>
-                  <Text style={[styles.foodName, { color: colors.text }]}>{food.name}</Text>
+                  <Text style={[styles.foodName, { color: colors.text.primary }]}>{food.name}</Text>
                 </View>
                 <View style={styles.foodDetails}>
                   <Text style={[styles.foodDetail, { color: colors.icon }]}>

@@ -37,8 +37,6 @@ export type UserProfile = {
   // Calculated values
   tdeeEstimate?: number; // Total Daily Energy Expenditure in kcal/day
   weeklyCalorieTarget: number; // Weekly calorie budget
-  dailyPointsBudget: number; // Points earned per day
-  maxPointsCap?: number; // Maximum accumulated points
   
   // Metadata
   onboardingCompleted: boolean;
@@ -84,14 +82,14 @@ export type UserDetailedStats = {
   longestStreak: number;
   lastActivityDate?: string; // Date du dernier repas
   
-  // Points stats
-  currentPointsBalance: number;
-  totalPointsEarned: number;
-  lastClaimDate?: string;
-  
   // Usage stats
   customFoodsCount: number;
   aiLogsCount: number; // Nombre de logs avec context 'ai-logger'
+
+  // Points system (legacy - kept optional for compatibility)
+  currentPointsBalance?: number;
+  totalPointsEarned?: number;
+  lastClaimDate?: string;
   
   // Calculated metrics
   mealsPerDay: number; // Moyenne de repas par jour actif
@@ -130,9 +128,11 @@ export type GlobalKPIs = {
   betaUsers: number; // tier === 'beta' ou userRank <= 10
   mrr: number; // Monthly Recurring Revenue (en dollars)
   conversionRate: number; // % utilisateurs avec abonnement payant
+
+  // Legacy points metrics (optional)
+  averagePointsBalance?: number;
   
   // Usage metrics
-  averagePointsBalance: number;
   totalCustomFoods: number;
   totalAiLogs: number;
   

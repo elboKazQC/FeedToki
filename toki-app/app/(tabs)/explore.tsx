@@ -125,15 +125,15 @@ export default function TabTwoScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, { color: colors.text }]}>⚙️ Paramètres</Text>
+        <Text style={[styles.title, { color: colors.text.primary }]}>⚙️ Paramètres</Text>
 
         {/* Section Apparence */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Apparence</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>Apparence</Text>
           <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
             <View style={styles.row}>
               <View style={styles.labelContainer}>
-                <Text style={[styles.label, { color: colors.text }]}>
+                <Text style={[styles.label, { color: colors.text.primary }]}>
                   {isDarkMode ? '🌙' : '☀️'} Mode sombre
                 </Text>
                 <Text style={[styles.labelHint, { color: colors.icon }]}>
@@ -152,33 +152,33 @@ export default function TabTwoScreen() {
 
         {/* Section Compte */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mon compte</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>Mon compte</Text>
           <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
             <Text style={[styles.label, { color: colors.icon }]}>Email</Text>
-            <Text style={[styles.value, { color: colors.text }]}>{displayEmail}</Text>
+            <Text style={[styles.value, { color: colors.text.primary }]}>{displayEmail}</Text>
           </View>
           <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
             <Text style={[styles.label, { color: colors.icon }]}>Nom</Text>
-            <Text style={[styles.value, { color: colors.text }]}>{displayName}</Text>
+            <Text style={[styles.value, { color: colors.text.primary }]}>{displayName}</Text>
           </View>
         </View>
 
         {/* Section Objectifs */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mes objectifs</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>Mes objectifs</Text>
           {profile && (
             <>
               <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
                 <Text style={[styles.label, { color: colors.icon }]}>Objectif calorique hebdomadaire</Text>
-                <Text style={[styles.value, { color: colors.text }]}>{profile.weeklyCalorieTarget?.toLocaleString()} cal</Text>
+                <Text style={[styles.value, { color: colors.text.primary }]}>{profile.weeklyCalorieTarget?.toLocaleString()} cal</Text>
               </View>
               <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
                 <Text style={[styles.label, { color: colors.icon }]}>Points quotidiens</Text>
-                <Text style={[styles.value, { color: colors.text }]}>{profile.dailyPointsBudget} pts</Text>
+                <Text style={[styles.value, { color: colors.text.primary }]}>{profile.dailyPointsBudget} pts</Text>
               </View>
               <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
                 <Text style={[styles.label, { color: colors.icon }]}>Cap maximum</Text>
-                <Text style={[styles.value, { color: colors.text }]}>{profile.maxPointsCap} pts</Text>
+                <Text style={[styles.value, { color: colors.text.primary }]}>{profile.maxPointsCap} pts</Text>
               </View>
             </>
           )}

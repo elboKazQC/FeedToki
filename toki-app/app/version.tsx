@@ -21,7 +21,7 @@ import { BUILD_DATE, BUILD_VERSION } from '../lib/build-version';
 import { bustWebCache, getCacheStatus, forceUpdate } from '../lib/web-cache-buster';
 import { useTheme } from '../lib/theme-context';
 import { useAuth } from '../lib/auth-context';
-import { fullRepair, syncMissingCustomFoods, repairPoints } from '../lib/sync-repair';
+import { fullRepair, syncMissingCustomFoods } from '../lib/sync-repair';
 
 export default function VersionScreen() {
   const { colors, isDark } = useTheme();
@@ -38,7 +38,7 @@ export default function VersionScreen() {
   const [isRepairing, setIsRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<{
     success: boolean;
-    points?: { oldBalance: number; newBalance: number; totalSpent: number };
+    points?: { oldBalance: number; newBalance: number; totalSpent?: number };
     customFoods?: { localToFirestore: number; firestoreToLocal: number };
     meals?: { entriesFixed: number; itemsRemoved: number; itemsAdded?: number; mealsWithItemsAdded?: number; syncedFromFirestore?: number; syncedToFirestore?: number };
     errors: string[];
@@ -104,9 +104,8 @@ export default function VersionScreen() {
     Alert.alert(
       '🔧 Réparation de Synchronisation',
       'Cette action va :\n\n' +
-      '1. Recalculer les points à partir des repas\n' +
-      '2. Synchroniser les custom foods manquants\n' +
-      '3. Réparer les repas avec items invalides\n\n' +
+      '1. Synchroniser les custom foods manquants\n' +
+      '2. Réparer les repas avec items invalides\n\n' +
       'Cela peut prendre quelques secondes...',
       [
         {
@@ -119,10 +118,7 @@ export default function VersionScreen() {
             setIsRepairing(true);
             setRepairResult(null);
             try {
-              const dailyPointsBudget = profile.dailyPointsBudget || 6;
-              const maxPointsCap = profile.maxPointsCap || 12;
-              
-              const result = await fullRepair(currentUserId, dailyPointsBudget, maxPointsCap);
+              const result = await fullRepair(currentUserId);
               setRepairResult(result);
               
               if (result.success) {
@@ -136,7 +132,6 @@ export default function VersionScreen() {
                 
                 Alert.alert(
                   '✅ Réparation terminée',
-                  `Points: ${result.points.oldBalance} → ${result.points.newBalance} pts\n` +
                   `Custom foods: ${result.customFoods.localToFirestore} envoyés, ${result.customFoods.firestoreToLocal} reçus\n` +
                   `Repas: ${mealsInfo}`,
                   [{ text: 'OK' }]
