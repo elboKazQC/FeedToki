@@ -1,6 +1,7 @@
 import { DailyNutritionTotals, NutritionTargets } from './nutrition';
 import { SmartRecommendation, getSmartRecommendationsByTaste } from './smart-recommendations';
 import { FoodItem, FoodTag } from './food-db';
+import { computeFoodPoints } from './points-utils';
 import { getDefaultPortion } from './portions';
 
 export type AiSuggestionInput = {
@@ -180,15 +181,20 @@ FORMAT DE RÉPONSE: JSON uniquement
       fat_g: Number.isFinite(s.fat_g) ? s.fat_g : 0,
     };
 
+    const suggestedGrams = Number.isFinite(s.grams) ? s.grams : portion.grams;
+    const gramRatio = portion.grams && portion.grams > 0 ? suggestedGrams / portion.grams : 1;
+    const basePoints = computeFoodPoints(item);
+    const pointsCost = Math.max(0, Math.round(basePoints * Math.sqrt(gramRatio)));
+
     return {
       item,
       reason: s.reason || 'Suggestion personnalisée IA',
       priority: 5 - idx,
-      suggestedGrams: Number.isFinite(s.grams) ? s.grams : portion.grams,
+      suggestedGrams,
       suggestedVisualRef: s.portion || portion.visualRef,
       portion,
       aiTaste: s.taste, // Conserver le goût suggéré par l'IA pour validation
-      pointsCost: 0, // Placeholder until points system is migrated/removed
+      pointsCost,
     } as SmartRecommendation;
   });
 

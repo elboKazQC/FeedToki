@@ -47,12 +47,7 @@ service cloud.firestore {
         allow write: if isOwner(userId);
       }
       
-      // Sous-collection: points (points quotidiens)
-      // Les admins peuvent lire tous les points pour les statistiques
-      match /points/{document=**} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow write: if isOwner(userId);
-      }
+      // (points system removed)
       
       // Sous-collection: targets (objectifs nutritionnels)
       match /targets/{document=**} {

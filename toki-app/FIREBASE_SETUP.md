@@ -71,9 +71,10 @@ Stocke les profils utilisateurs:
   - displayName: string
   - email: string
   - weeklyCalorieTarget: number
-  - dailyPointsBudget: number
   - onboardingCompleted: boolean
   - createdAt: timestamp
+
+> Note: Le système de points a été retiré. Le champ `dailyPointsBudget` n'est plus utilisé.
 ```
 
 ### Sous-collection `meals`

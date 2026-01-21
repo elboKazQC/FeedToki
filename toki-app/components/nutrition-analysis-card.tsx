@@ -418,19 +418,40 @@ export function NutritionAnalysisCard({
     );
   }
 
+  // Journal alimentaire simple, sans score ni analyse IA immédiate
+  // On affiche les repas par jour, du plus récent au plus ancien, sur la période sélectionnée
+  // Prépare la structure pour une future analyse IA
+  // Sélection de la période (7, 14, 30 jours) conservée
+  // On affiche un message d'encouragement si pas de repas
+
+  // Générer la liste des dates à afficher (du plus récent au plus ancien)
+  const today = new Date();
+  const dates: string[] = [];
+  for (let i = selectedPeriod; i >= 1; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+
+  // Regrouper les repas par date
+  const mealsByDate: Record<string, MealEntry[]> = {};
+  for (const date of dates) {
+    mealsByDate[date] = entries.filter(e => e.createdAt.split('T')[0] === date);
+  }
+
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface }]}>
+    <View style={[styles.card, { backgroundColor: colors.surface }]}> 
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colorValue(colors.text) }]}>🧠 Coach Nutrition IA</Text>
-        <Text style={[styles.subtitle, { color: colors.icon }]}>
-          Analyse personnalisée de tes {selectedPeriod} derniers jours
+        <Text style={[styles.title, { color: colorValue(colors.text) }]}>🍽️ Journal alimentaire</Text>
+        <Text style={[styles.subtitle, { color: colors.icon }]}> 
+          Saisis tes repas chaque jour pour un meilleur suivi. L’analyse IA détaillée arrive bientôt !
         </Text>
       </View>
 
-      {/* Period Selector */}
+      {/* Sélecteur de période */}
       <View style={styles.periodSelector}>
         <TouchableOpacity
-          style={[
+          style={[ 
             styles.periodButton,
             { borderColor: colors.border },
             selectedPeriod === 7 && { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -440,7 +461,7 @@ export function NutritionAnalysisCard({
           disabled={!canAnalyze7}
         >
           <Text
-            style={[
+            style={[ 
               styles.periodButtonText,
               { color: colors.text.primary },
               selectedPeriod === 7 && { color: '#fff', fontWeight: '600' },
@@ -452,7 +473,7 @@ export function NutritionAnalysisCard({
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
+          style={[ 
             styles.periodButton,
             { borderColor: colors.border },
             selectedPeriod === 14 && { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -462,7 +483,7 @@ export function NutritionAnalysisCard({
           disabled={!canAnalyze14}
         >
           <Text
-            style={[
+            style={[ 
               styles.periodButtonText,
               { color: colors.text.primary },
               selectedPeriod === 14 && { color: '#fff', fontWeight: '600' },
@@ -474,7 +495,7 @@ export function NutritionAnalysisCard({
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
+          style={[ 
             styles.periodButton,
             { borderColor: colors.border },
             selectedPeriod === 30 && { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -484,7 +505,7 @@ export function NutritionAnalysisCard({
           disabled={!canAnalyze30}
         >
           <Text
-            style={[
+            style={[ 
               styles.periodButtonText,
               { color: colors.text.primary },
               selectedPeriod === 30 && { color: '#fff', fontWeight: '600' },
@@ -496,157 +517,44 @@ export function NutritionAnalysisCard({
         </TouchableOpacity>
       </View>
 
-      {!canAnalyze7 && (
-        <Text style={[styles.warningText, { color: colors.error }]}>
-          ⚠️ Besoin de {7 - availableDays} jours de plus pour analyser
+      <ScrollView style={styles.results}>
+        {dates.map(date => (
+          <View key={date} style={{ marginBottom: spacing.md }}>
+            <Text style={{ color: colorValue(colors.text), fontWeight: '600', fontSize: 16, marginBottom: 4 }}>
+              {new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit', year: '2-digit' })}
+            </Text>
+            {mealsByDate[date] && mealsByDate[date].length > 0 ? (
+              mealsByDate[date].map((meal, idx) => (
+                <View key={meal.id || idx} style={{ marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: colors.background }}>
+                  <Text style={{ color: colors.icon, fontWeight: '500', marginBottom: 2 }}>
+                    {meal.type ? meal.type : 'Repas'}{meal.time ? ` à ${meal.time}` : ''}
+                  </Text>
+                  {meal.items && meal.items.length > 0 ? (
+                    meal.items.map((item, i) => (
+                      <Text key={i} style={{ color: colorValue(colors.text), fontSize: 14 }}>
+                        • {item.name} {item.quantity ? `(${item.quantity})` : ''} {item.calories ? `- ${item.calories} kcal` : ''}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={{ color: colors.icon, fontSize: 13 }}>Aucun aliment renseigné</Text>
+                  )}
+                </View>
+              ))
+            ) : (
+              <Text style={{ color: colors.icon, fontSize: 13, fontStyle: 'italic' }}>Aucun repas enregistré</Text>
+            )}
+          </View>
+        ))}
+        <Text style={{ color: colors.icon, fontSize: 13, textAlign: 'center', marginTop: spacing.lg }}>
+          Continue à enregistrer tes repas pour une analyse IA personnalisée bientôt disponible !
         </Text>
-      )}
-
-      {/* Analyze Button */}
-      {!analysis && (
-        <Button
-          label={isAnalyzing ? 'Analyse en cours...' : '🎯 Analyser mon alimentation'}
-          onPress={handleAnalyze}
-          loading={isAnalyzing}
-          disabled={isAnalyzing || !canAnalyze7}
-          style={styles.analyzeButton}
-        />
-      )}
-
-      {error && (
-        <View style={[styles.errorBox, { backgroundColor: colors.warning + '20' }]}>
-          <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
-        </View>
-      )}
-
-      {/* Analysis Results */}
-      {analysis && !isAnalyzing && (
-        <ScrollView style={styles.results}>
-          {/* Overall Score */}
-          <View style={[styles.scoreCard, { backgroundColor: colors.background }]}>
-            <Text style={[styles.scoreLabel, { color: colors.icon }]}>Score Global</Text>
-            <Text style={[styles.scoreValue, { color: getScoreColor(analysis.overallScore) }]}>
-              {analysis.overallScore}/100
-            </Text>
-            <Text style={[styles.scoreSubtext, { color: colors.icon }]}>
-              {getScoreLabel(analysis.overallScore)}
-            </Text>
-          </View>
-
-          {/* Averages */}
-          <View style={[styles.averagesCard, { backgroundColor: colors.background }]}>
-            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>📊 Moyennes quotidiennes</Text>
-            <View style={styles.averageRow}>
-              <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Calories: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.calories} kcal</Text>
-              </Text>
-              <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Protéines: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.protein_g}g</Text>
-              </Text>
-            </View>
-            <View style={styles.averageRow}>
-              <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Glucides: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.carbs_g}g</Text>
-              </Text>
-              <Text style={[styles.averageLabel, { color: colors.icon }]}>
-                Lipides: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.fat_g}g</Text>
-              </Text>
-            </View>
-            <Text style={[styles.averageLabel, { color: colors.icon }]}>
-              Consistance: <Text style={{ color: colorValue(colors.text), fontWeight: '600' }}>{analysis.averages.consistency}%</Text>
-            </Text>
-          </View>
-
-          {/* Insights */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>💡 Insights</Text>
-            {analysis.insights.map((insight, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.insightCard,
-                  { backgroundColor: colors.background, borderLeftColor: getInsightColor(insight.type) },
-                ]}
-              >
-                <Text style={styles.insightIcon}>{insight.icon}</Text>
-                <View style={styles.insightContent}>
-                  <Text style={[styles.insightTitle, { color: colorValue(colors.text) }]}>{insight.title}</Text>
-                  <Text style={[styles.insightMessage, { color: colors.icon }]}>
-                    {insight.message}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Recommendations */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>🎯 Recommandations</Text>
-            {analysis.recommendations.map((rec, idx) => (
-              <View
-                key={idx}
-                style={[styles.recommendationCard, { backgroundColor: colors.background }]}
-              >
-                <View style={styles.recHeader}>
-                  <Text style={styles.recIcon}>{rec.icon}</Text>
-                  <View
-                    style={[
-                      styles.priorityBadge,
-                      { backgroundColor: getPriorityColor(rec.priority) },
-                    ]}
-                  >
-                    <Text style={styles.priorityText}>Priorité {rec.priority}</Text>
-                  </View>
-                </View>
-                <Text style={[styles.recAction, { color: colorValue(colors.text) }]}>{rec.action}</Text>
-                <Text style={[styles.recReason, { color: colors.icon }]}>{rec.reason}</Text>
-                {rec.impact && (
-                  <Text style={[styles.recImpact, { color: colors.primary }]}>
-                    💪 {rec.impact}
-                  </Text>
-                )}
-              </View>
-            ))}
-          </View>
-
-          <Button
-            label="🔄 Nouvelle analyse"
-            onPress={() => {
-              setAnalysis(null);
-              setError(null);
-            }}
-            style={styles.newAnalysisButton}
-          />
-        </ScrollView>
-      )}
+      </ScrollView>
     </View>
   );
 }
 
-function getScoreColor(score: number): string {
-  if (score >= 80) return '#4ade80'; // green
-  if (score >= 60) return '#facc15'; // yellow
-  return '#f87171'; // red
-}
 
-function getScoreLabel(score: number): string {
-  if (score >= 80) return 'Excellent! 🎉';
-  if (score >= 60) return 'Bon travail 👍';
-  if (score >= 40) return 'En progression 💪';
-  return 'On commence! 🌱';
-}
-
-function getInsightColor(type: string): string {
-  if (type === 'positive') return '#4ade80';
-  if (type === 'challenge') return '#f87171';
-  return '#60a5fa';
-}
-
-function getPriorityColor(priority: number): string {
-  if (priority === 1) return '#ef4444';
-  if (priority === 2) return '#f59e0b';
-  return '#3b82f6';
-}
+// Suppression des fonctions de gamification : score, badge, insight, priorité
 
 const styles = StyleSheet.create({
   card: {
@@ -704,112 +612,7 @@ const styles = StyleSheet.create({
   results: {
     marginTop: spacing.md,
   },
-  scoreCard: {
-    padding: spacing.lg,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  scoreLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: spacing.xs,
-  },
-  scoreValue: {
-    fontSize: 48,
-    fontWeight: '800',
-    marginBottom: spacing.xs,
-  },
-  scoreSubtext: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  averagesCard: {
-    padding: spacing.md,
-    borderRadius: 12,
-    marginBottom: spacing.md,
-  },
-  averageRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.xs,
-  },
-  averageLabel: {
-    fontSize: 14,
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: spacing.md,
-  },
-  insightCard: {
-    flexDirection: 'row',
-    padding: spacing.md,
-    borderRadius: 8,
-    marginBottom: spacing.sm,
-    borderLeftWidth: 4,
-  },
-  insightIcon: {
-    fontSize: 24,
-    marginRight: spacing.md,
-  },
-  insightContent: {
-    flex: 1,
-  },
-  insightTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  insightMessage: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  recommendationCard: {
-    padding: spacing.md,
-    borderRadius: 12,
-    marginBottom: spacing.md,
-  },
-  recHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  recIcon: {
-    fontSize: 24,
-    marginRight: spacing.sm,
-  },
-  priorityBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  priorityText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  recAction: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  recReason: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: spacing.xs,
-  },
-  recImpact: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  newAnalysisButton: {
-    marginTop: spacing.md,
-    marginBottom: spacing.xl,
-  },
+  // Suppression des styles liés à la gamification, score, badge, insight, recommandations
   lockedOverlay: {
     alignItems: 'center',
     paddingVertical: spacing.xl,

@@ -35,7 +35,7 @@ export type NutritionAnalysisResult = {
   dailySummaries: DailySummary[];
   insights: NutritionInsight[];
   recommendations: NutritionRecommendation[];
-  overallScore: number; // 0-100
+
   averages: {
     calories: number;
     protein_g: number;
@@ -54,7 +54,7 @@ export type UserProfileData = {
   gender?: Gender; // 'male', 'female'
   heightCm?: number;
   tdeeEstimate?: number; // Dépense calorique quotidienne estimée
-  dailyPointsBudget?: number; // Budget points quotidien
+
 };
 
 // Données de poids pour analyse de tendance
@@ -131,7 +131,7 @@ export type AnalyzeNutritionInput = {
 /**
  * Analyzes nutrition patterns over a multi-day period using AI coaching
  * @param input - Daily summaries, targets, period configuration, and personalization data
- * @returns AI-generated insights, recommendations, and overall nutrition score
+ * @returns AI-generated insights and recommendations
  */
 export async function analyzeNutritionPeriod({
   dailySummaries,
@@ -337,14 +337,12 @@ FORMAT DE RÉPONSE: JSON strict
       "impact": "Impact estimé quantifié (ex: -200 cal/jour, atteindre objectif X semaines plus tôt)"
     }
   ],
-  "overallScore": 0-100
 }
 
 RÈGLES IMPÉRATIVES:
 - Génère 3-5 insights (mélange de positifs, défis, patterns, et SWAPS alimentaires)
 - Génère 2-4 recommandations PRIORISÉES (priority 1 = action #1 à faire)
 - AU MOINS UNE recommandation doit être un FOOD SWAP basé sur les aliments fréquents
-- overallScore basé sur: consistance (30%), équilibre macros (30%), atteinte objectifs (30%), progression poids (10%)
 - Utilise des emojis pertinents et motivants
 - Mentionne TOUJOURS des CHIFFRES précis issus des données de CET utilisateur
 - Si consistance <70%, c'est le défi #1 à adresser
@@ -556,10 +554,6 @@ RÈGLES IMPÉRATIVES:
         .sort((a: NutritionRecommendation, b: NutritionRecommendation) => a.priority - b.priority)
     : [];
 
-  const overallScore = typeof parsed.overallScore === 'number' && parsed.overallScore >= 0 && parsed.overallScore <= 100
-    ? Math.round(parsed.overallScore)
-    : Math.round((consistency * 0.3) + ((avgCalories / targets.calories_kcal) * 100 * 0.4) + 30); // Fallback calculation
-
   const periodStart = dailySummaries.length > 0 ? dailySummaries[0].date : new Date().toISOString().split('T')[0];
   const periodEnd = dailySummaries.length > 0 
     ? dailySummaries[dailySummaries.length - 1].date 
@@ -572,7 +566,6 @@ RÈGLES IMPÉRATIVES:
     dailySummaries,
     insights,
     recommendations,
-    overallScore,
     averages: {
       calories: Math.round(avgCalories),
       protein_g: Math.round(avgProtein),

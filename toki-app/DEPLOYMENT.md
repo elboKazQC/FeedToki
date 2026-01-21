@@ -35,9 +35,7 @@ service cloud.firestore {
       match /meals/{mealId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
-      match /points/{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
+      // (points system removed)
       match /targets/{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
