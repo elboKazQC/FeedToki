@@ -1,5 +1,5 @@
 /**
- * Badge Component - Badge pour afficher stats, points, labels
+ * Badge Component - Badge pour afficher stats, labels
  */
 
 import React from 'react';

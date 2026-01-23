@@ -53,6 +53,7 @@ import { checkDragonDeath, calculateResurrectCost, resurrectDragon, resetDragon 
 import { purchaseProduct, PRODUCTS } from '../../lib/purchases';
 import { computeFoodPoints } from '../../lib/points-utils';
 import { syncAllToFirestore, syncMealEntryToFirestore, syncPointsToFirestore } from '../../lib/data-sync';
+import { arePointsEnabled } from '../../lib/points-toggle';
 import { loadCustomFoods, mergeFoodsWithCustom, migrateLocalFoodsToGlobal } from '../../lib/custom-foods';
 import { userLogger, logError, flushLogsNow } from '../../lib/user-logger';
 import { isCheatDay, setCheatDay } from '../../lib/cheat-days';
@@ -694,6 +695,10 @@ export default function App() {
   // Points: charger et créditer quotidiennement (utiliser le profil si disponible)
   useEffect(() => {
     const loadPoints = async () => {
+      if (!arePointsEnabled()) {
+        if (__DEV__) console.log('[Index] ℹ️ Points disabled by feature toggle - skipping loadPoints');
+        return;
+      }
       if (!userProfile || authLoading || !currentUserId) {
         if (__DEV__) console.log('[Index] loadPoints waiting - userProfile:', !!userProfile, 'currentUserId:', currentUserId);
         return;
@@ -775,6 +780,10 @@ export default function App() {
 
   // Recalculer les points après chargement des entrées (pour corriger les incohérences)
   useEffect(() => {
+    if (!arePointsEnabled()) {
+      if (__DEV__) console.log('[Recalc] ℹ️ Points disabled by feature toggle - skipping recalculation useEffect');
+      return;
+    }
     const recalculatePointsFromEntries = async () => {
       if (__DEV__) console.log('[Recalc] Déclenchement recalcul - Conditions:', { 
         userProfile: !!userProfile, 
@@ -1004,7 +1013,10 @@ export default function App() {
 
       // Recalculer les points si nécessaire
       if (userProfile && currentUserId !== 'guest') {
-        setTimeout(async () => {
+        if (!arePointsEnabled()) {
+          if (__DEV__) console.log('[Index] ℹ️ Points disabled - skipping points recalculation after reload');
+        } else {
+          setTimeout(async () => {
           try {
             const today = getTodayLocal();
             const dailyPointsFromProfile = userProfile.dailyPointsBudget || DAILY_POINTS;
@@ -1083,7 +1095,8 @@ export default function App() {
           } catch (recalcError) {
             console.error('[Index] ❌ Erreur recalcul points après rechargement:', recalcError);
           }
-        }, 500);
+          }, 500);
+        }
       }
     } catch (error) {
       console.error('[Index] ❌ Erreur rechargement repas:', error);
@@ -2312,8 +2325,8 @@ function HomeScreen({
         }}
       />
       
-      {/* Budget Points Personnalisé */}
-      {userProfile && (
+      {/* Budget Points Personnalisé (masqué si points désactivés) */}
+      {userProfile && arePointsEnabled() && (
         <View style={styles.budgetBox}>
           <Text style={styles.budgetTitle}>💰 Ton Budget Points</Text>
           {weeklyCalTarget && (
@@ -2470,9 +2483,7 @@ function HomeScreen({
             <Text style={styles.todaySummaryText}>
               • {todayTotals.fat_g.toFixed(0)} / {targets.fat_g.toFixed(0)}g lipides ({((todayTotals.fat_g / targets.fat_g) * 100).toFixed(0)}%)
             </Text>
-            <Text style={styles.todaySummaryText}>
-              • Points restants : {points} pts
-            </Text>
+            {/* Points restants removed from summary */}
           </View>
           
           {/* Analyse de la faim avec contexte temporel */}
@@ -2541,7 +2552,7 @@ function HomeScreen({
                     <Text style={styles.smartRecName}>
                       {idx + 1}. {rec.item.name}
                     </Text>
-                    <Text style={styles.smartRecCost}>{rec.pointsCost} pts</Text>
+                    {/* Points cost removed from smart recommendations */}
                   </View>
                   <Text style={styles.smartRecReason}>💡 {rec.reason}</Text>
                   <Text style={styles.smartRecNutrition}>
@@ -2761,16 +2772,7 @@ function HomeScreen({
                       🧈 {Math.round(entryNutrition.fat)}g lipides
                     </Text>
                   </View>
-                  {entryCost > 0 && !item.isCheatMeal && (
-                    <Text style={styles.historyItemCost}>
-                      -{entryCost} pts
-                    </Text>
-                  )}
-                  {item.isCheatMeal && (
-                    <Text style={styles.historyItemCostCheat}>
-                      🎉 Repas cheat (0 pts)
-                    </Text>
-                  )}
+                  {/* Points display removed: no points shown for entries */}
                   
                   {/* Items détaillés (si expanded et aujourd'hui) */}
                   {isToday && isExpanded && item.items && item.items.length > 0 && (
@@ -3289,7 +3291,7 @@ function AddEntryScreen({
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.pointsHelper}>Points restants : {Math.max(0, points - pendingCost)} (coûts dynamiques selon l&apos;aliment)</Text>
+      {/* Points restants helper removed from add entry screen */}
       
       {/* Bouton Journée Cheat - Toujours visible */}
       {hasSubscriptionAccess !== null && (
@@ -3442,7 +3444,7 @@ function AddEntryScreen({
               }}
             >
               <Text style={[styles.quickMealText, (!affordable || overTargets) && styles.quickChipTextDisabled]}>
-                {qm.name} · {totalCost} pts
+                {qm.name}
               </Text>
             </TouchableOpacity>
           );

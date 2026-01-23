@@ -113,7 +113,7 @@ export function PaywallModal({ onSubscribe, onClose, visible = true }: PaywallMo
             <View style={styles.featureItem}>
               <Text style={[styles.featureBullet, { color: colors.primary }]}>🎯</Text>
               <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                Choix intelligents adaptés à ton budget points
+                Choix intelligents adaptés à ton budget
               </Text>
             </View>
             <View style={styles.featureItem}>

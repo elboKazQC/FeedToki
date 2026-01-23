@@ -13,6 +13,7 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db, getDb } from './firebase-config';
 import { UserProfile } from './types';
+import { arePointsEnabled } from './points-toggle';
 
 export type AuthUser = User;
 
@@ -133,11 +134,14 @@ export async function signUp(email: string, password: string, displayName: strin
       displayName,
       email: userCredential.user.email || email,
       weeklyCalorieTarget: defaultWeeklyTarget,
-      dailyPointsBudget: defaultDailyPoints,
-      maxPointsCap: Math.min(defaultDailyPoints * 4, 12),
+      // Only include points fields when the feature is enabled
+      ...(arePointsEnabled() ? {
+        dailyPointsBudget: defaultDailyPoints,
+        maxPointsCap: Math.min(defaultDailyPoints * 4, 12),
+      } : {}),
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
-    };
+    } as UserProfile;
     
     await setDoc(doc(getDb(), 'users', userCredential.user.uid), defaultProfile);
     

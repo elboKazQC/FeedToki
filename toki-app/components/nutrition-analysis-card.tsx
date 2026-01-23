@@ -554,7 +554,7 @@ export function NutritionAnalysisCard({
 }
 
 
-// Suppression des fonctions de gamification : score, badge, insight, priorité
+// Gamification, points, badge, score, and recommendation UI fully removed. Only food journal and nutrition tracking remain.
 
 const styles = StyleSheet.create({
   card: {

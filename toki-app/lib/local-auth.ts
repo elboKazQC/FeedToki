@@ -46,13 +46,12 @@ export async function localSignUp(email: string, password: string, displayName: 
     await AsyncStorage.setItem(USERS_KEY, JSON.stringify(users));
 
     // Créer le profil par défaut
+    // Default profile WITHOUT gamification/points fields
     const defaultProfile: UserProfile = {
       userId: newUser.id,
       displayName,
       email,
       weeklyCalorieTarget: 10500,
-      dailyPointsBudget: 6, // Calculé: (10500 * 0.30 / 7) / 80 ≈ 6 pts
-      maxPointsCap: 12,
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     };

@@ -6,6 +6,7 @@ import { Colors } from '../../constants/theme';
 import { checkIsAdmin, setAdminFlag } from '../../lib/admin-utils';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { arePointsEnabled } from '../../lib/points-toggle';
 
 export default function TabTwoScreen() {
   const { user, profile, signOut } = useAuth();
@@ -172,14 +173,18 @@ export default function TabTwoScreen() {
                 <Text style={[styles.label, { color: colors.icon }]}>Objectif calorique hebdomadaire</Text>
                 <Text style={[styles.value, { color: colors.text.primary }]}>{profile.weeklyCalorieTarget?.toLocaleString()} cal</Text>
               </View>
-              <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
-                <Text style={[styles.label, { color: colors.icon }]}>Points quotidiens</Text>
-                <Text style={[styles.value, { color: colors.text.primary }]}>{profile.dailyPointsBudget} pts</Text>
-              </View>
-              <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
-                <Text style={[styles.label, { color: colors.icon }]}>Cap maximum</Text>
-                <Text style={[styles.value, { color: colors.text.primary }]}>{profile.maxPointsCap} pts</Text>
-              </View>
+              {arePointsEnabled() && (
+                <>
+                  <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+                    <Text style={[styles.label, { color: colors.icon }]}>Points quotidiens</Text>
+                    <Text style={[styles.value, { color: colors.text.primary }]}>{profile.dailyPointsBudget} pts</Text>
+                  </View>
+                  <View style={[styles.card, { backgroundColor: activeTheme === 'dark' ? '#1f2937' : '#fff' }]}>
+                    <Text style={[styles.label, { color: colors.icon }]}>Cap maximum</Text>
+                    <Text style={[styles.value, { color: colors.text.primary }]}>{profile.maxPointsCap} pts</Text>
+                  </View>
+                </>
+              )}
             </>
           )}
         </View>

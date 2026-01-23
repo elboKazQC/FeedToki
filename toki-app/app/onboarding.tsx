@@ -10,6 +10,7 @@ import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { useAuth } from '../lib/auth-context';
 import { updateUserProfile } from '../lib/firebase-auth';
 import { trackOnboardingCompleted } from '../lib/analytics';
+import { arePointsEnabled } from '../lib/points-toggle';
 
 const PROFILE_KEY = 'toki_user_profile_v1';
 
@@ -207,24 +208,29 @@ export default function OnboardingScreen() {
           <Text style={styles.emoji}>🐉</Text>
           <Text style={styles.title}>Bienvenue sur Toki!</Text>
           <Text style={styles.subtitle}>
-            Toki est ton ami dragon qui t&apos;aide à mieux manger via un système de{' '}
-            <Text style={styles.bold}>points-budget</Text>.
+            {arePointsEnabled() ? (
+              <>Toki est ton ami dragon qui t&apos;aide à mieux manger via un système de <Text style={styles.bold}>points-budget</Text>.</>
+            ) : (
+              <>Toki est ton ami dragon qui t&apos;aide à mieux suivre tes repas et tes objectifs nutritionnels.</>
+            )}
           </Text>
           
           <View style={styles.explainBox}>
             <Text style={styles.explainTitle}>💡 Comment ça marche?</Text>
-            <Text style={styles.explainText}>
-              • Tu as un <Text style={styles.bold}>budget de points</Text> par jour
-            </Text>
-            <Text style={styles.explainText}>
-              • Les aliments sains coûtent <Text style={styles.bold}>0-1 point</Text> 🥗
-            </Text>
-            <Text style={styles.explainText}>
-              • Les cheats coûtent <Text style={styles.bold}>plus cher</Text> 🍕
-            </Text>
-            <Text style={styles.explainText}>
-              • <Text style={styles.bold}>Rien n&apos;est interdit</Text>, tu gères ton budget!
-            </Text>
+            {arePointsEnabled() ? (
+              <>
+                <Text style={styles.explainText}>• Tu as un <Text style={styles.bold}>budget de points</Text> par jour</Text>
+                <Text style={styles.explainText}>• Les aliments sains coûtent <Text style={styles.bold}>0-1 point</Text> 🥗</Text>
+                <Text style={styles.explainText}>• Les cheats coûtent <Text style={styles.bold}>plus cher</Text> 🍕</Text>
+                <Text style={styles.explainText}>• <Text style={styles.bold}>Rien n&apos;est interdit</Text>, tu gères ton budget!</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.explainText}>• Enregistre tes repas pour suivre tes calories et macros</Text>
+                <Text style={styles.explainText}>• L&apos;analyse IA t&apos;aidera à identifier des améliorations simples</Text>
+                <Text style={styles.explainText}>• Rien n&apos;est interdit — garde le suivi pour progresser</Text>
+              </>
+            )}
           </View>
 
           <Pressable style={styles.buttonPrimary} onPress={() => setStep(2)}>
@@ -241,7 +247,7 @@ export default function OnboardingScreen() {
         <View style={styles.content}>
           <Text style={styles.title}>Quel est ton objectif?</Text>
           <Text style={styles.subtitle}>
-            Ceci déterminera ton budget calorique et tes points quotidiens.
+            {arePointsEnabled() ? 'Ceci déterminera ton budget calorique et tes points quotidiens.' : 'Ceci déterminera ton budget calorique.'}
           </Text>
 
           <View style={styles.optionsContainer}>
