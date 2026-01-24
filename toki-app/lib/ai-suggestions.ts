@@ -1,19 +1,16 @@
 import { DailyNutritionTotals, NutritionTargets } from './nutrition';
-import { SmartRecommendation, getSmartRecommendationsByTaste } from './smart-recommendations';
+import { SmartRecommendation } from './smart-recommendations';
 import { FoodItem, FoodTag } from './food-db';
-import { computeFoodPoints } from './points-utils';
 import { getDefaultPortion } from './portions';
 
 export type AiSuggestionInput = {
   totals: DailyNutritionTotals;
   targets: NutritionTargets;
-  availablePoints: number;
   tastePreference: 'sweet' | 'salty';
   timeOfDay: 'morning' | 'afternoon' | 'evening';
   consumedItems?: string[];
   caloriesRemaining?: number;
   caloriesPct?: number;
-  pointsRemaining?: number;
   signal?: AbortSignal;
 };
 
@@ -39,13 +36,11 @@ function mapCategoryToTags(category?: string): FoodTag[] {
 export async function fetchSmartMealSuggestions({
   totals,
   targets,
-  availablePoints,
   tastePreference,
   timeOfDay,
   consumedItems = [],
   caloriesRemaining,
   caloriesPct,
-  pointsRemaining,
   signal,
 }: AiSuggestionInput): Promise<SmartRecommendation[]> {
   const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -53,37 +48,39 @@ export async function fetchSmartMealSuggestions({
     throw new Error('OpenAI API key non configurée');
   }
 
-  const system = `Tu es un coach nutrition enthousiaste et créatif. Tu proposes 5 à 8 suggestions VARIÉES et SAVOUREUSES qui rendent l'alimentation saine AGRÉABLE.
+  const system = `Tu es un coach nutrition enthousiaste et creatif. Tu proposes 5 a 8 suggestions variees et savoureuses qui rendent l'alimentation saine agreable.
 
 OBJECTIFS:
-- Proposer des options à DIFFÉRENTS niveaux de points (0pt, 1-2pts, 3-5pts) pour donner du choix
-- Inclure des RECETTES et COMBINAISONS créatives, pas juste des aliments isolés
-- Rendre la nourriture EXCITANTE et APPÉTISSANTE, pas une punition
-- Équilibrer santé ET plaisir
+- Proposer des options a differents niveaux de calories (leger, moyen, plus complet) pour donner du choix
+- Inclure des recettes et combinaisons creatives, pas juste des aliments isoles
+- Rendre la nourriture excitante et appetissante, pas une punition
+- Equilibrer sante ET plaisir
 
-RÈGLES:
-1. Propose 5-8 suggestions DIVERSES (pas toutes des légumes!)
+REGLES:
+1. Propose 5-8 suggestions diverses (pas toutes des legumes!)
 2. Inclus AU MOINS:
-   - 1-2 options à 0 points (légumes, fruits, protéines maigres)
-   - 2-3 options protéinées savoureuses (poulet grillé, poisson, tofu mariné, shakes)
+   - 1-2 options legeres (legumes, fruits, proteines maigres)
+   - 2-3 options proteinees savoureuses (poulet grille, poisson, tofu marine, shakes)
    - 1-2 options glucides sains (quinoa, patate douce, avoine, riz brun)
-   - 1 dessert/collation santé si le moment s'y prête
-3. Pour chaque suggestion, propose une PORTION RÉALISTE et APPÉTISSANTE
-4. Si shake protéiné déjà consommé, ne pas en reproposer
-5. Si calories >=100%, suggère eau/thé/boissons zéro calorie seulement
-6. Respecte préférence goût (sucré/salé) et moment de la journée (matin/midi/soir)
-7. Reste dans le budget de points disponible
+   - 1 dessert/collation sante si le moment s'y prete
+3. Pour chaque suggestion, propose une PORTION realiste et appetissante
+4. Si shake proteine deja consomme, ne pas en reproposer
+5. Si calories >=100%, suggere eau/the/boissons zero calorie seulement
+6. Respecte preference gout (sucre/sale) et moment de la journee (matin/midi/soir)
+7. Reste dans le budget calorique disponible
 
-EXEMPLES DE SUGGESTIONS CRÉATIVES:
-- "Poulet grillé épicé cajun avec brocoli rôti à l'ail" (0pts, 280 cal)
-- "Bol Buddha arc-en-ciel: quinoa + édamame + carottes + vinaigrette citron" (2pts, 420 cal)
-- "Smoothie protéiné mangue-ananas avec graines de chia" (0pts, 200 cal)
-- "Omelette aux légumes colorés avec fromage léger" (1pt, 220 cal)
-- "Patate douce rôtie au four avec cannelle et un filet de miel" (2pts, 180 cal)
+EXEMPLES DE SUGGESTIONS CREATIVES:
+- "Poulet grille epice cajun avec brocoli roti a l'ail" (280 cal)
+- "Bol Buddha arc-en-ciel: quinoa + edamame + carottes + vinaigrette citron" (420 cal)
+- "Smoothie proteine mangue-ananas avec graines de chia" (200 cal)
+- "Omelette aux legumes colores avec fromage leger" (220 cal)
+- "Patate douce rotie au four avec cannelle et un filet de miel" (180 cal)
 
-FORMAT DE RÉPONSE: JSON uniquement
-{"suggestions":[{"name":"Nom appétissant","reason":"Pourquoi c'est délicieux ET nutritif","type":"meal|snack","taste":"sweet|salty","calories":250,"protein_g":30,"carbs_g":20,"fat_g":5,"points":0,"category":"protein|veggie|carb|dessert","portion":"Description visuelle","grams":150}]}
+FORMAT DE REPONSE: JSON uniquement
+{"suggestions":[{"name":"Nom appetissant","reason":"Pourquoi c'est delicieux ET nutritif","type":"meal|snack","taste":"sweet|salty","calories":250,"protein_g":30,"carbs_g":20,"fat_g":5,"category":"protein|veggie|carb|dessert","portion":"Description visuelle","grams":150}]}
 `;
+
+
 
   const user = {
     calories: totals.calories_kcal,
@@ -93,7 +90,6 @@ FORMAT DE RÉPONSE: JSON uniquement
     targets,
     caloriesRemaining: caloriesRemaining ?? Math.max(0, targets.calories_kcal - totals.calories_kcal),
     caloriesPct: caloriesPct ?? (targets.calories_kcal > 0 ? totals.calories_kcal / targets.calories_kcal : 0),
-    pointsRemaining: pointsRemaining ?? availablePoints,
     tastePreference,
     timeOfDay,
     consumedItems,
@@ -182,9 +178,6 @@ FORMAT DE RÉPONSE: JSON uniquement
     };
 
     const suggestedGrams = Number.isFinite(s.grams) ? s.grams : portion.grams;
-    const gramRatio = portion.grams && portion.grams > 0 ? suggestedGrams / portion.grams : 1;
-    const basePoints = computeFoodPoints(item);
-    const pointsCost = Math.max(0, Math.round(basePoints * Math.sqrt(gramRatio)));
 
     return {
       item,
@@ -194,7 +187,6 @@ FORMAT DE RÉPONSE: JSON uniquement
       suggestedVisualRef: s.portion || portion.visualRef,
       portion,
       aiTaste: s.taste, // Conserver le goût suggéré par l'IA pour validation
-      pointsCost,
     } as SmartRecommendation;
   });
 
@@ -225,29 +217,6 @@ FORMAT DE RÉPONSE: JSON uniquement
     }
     return aiTaste === tastePreference;
   });
-
-  // CORRECTION 3: Garantir au moins 1 option à 0 point
-  const hasZeroPoint = filteredByTaste.some((rec: SmartRecommendation) => rec.pointsCost === 0);
-  
-  if (!hasZeroPoint) {
-    console.log('⚠️ Aucune option à 0 point dans suggestions IA, ajout depuis fallback...');
-    // Obtenir des suggestions locales avec le goût approprié
-    const fallbackRecs = getSmartRecommendationsByTaste(
-      totals,
-      targets,
-      availablePoints,
-      tastePreference,
-      timeOfDay
-    );
-    
-    // Trouver les options à 0 point dans le fallback
-    const zeroPointOptions = fallbackRecs.filter(rec => rec.pointsCost === 0).slice(0, 2);
-    
-    // Ajouter les options 0 point au début de la liste
-    if (zeroPointOptions.length > 0) {
-      return [...zeroPointOptions, ...filteredByTaste].slice(0, 8);
-    }
-  }
 
   return filteredByTaste;
 }

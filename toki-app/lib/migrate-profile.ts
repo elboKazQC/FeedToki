@@ -51,29 +51,18 @@ export async function migrateIncorrectWeights(): Promise<void> {
         const deficit = goalDeficits[profile.weightGoal || 'lose-1lb'] || 0;
         const weeklyCalorieTarget = tdee * 7 - deficit;
 
-        // Calculer les points
-        const INDULGENCE_RATIO = 0.30;
-        const AVG_CALORIES_PER_POINT = 80;
-        const weeklyIndulgence = weeklyCalorieTarget * INDULGENCE_RATIO;
-        const dailyIndulgence = weeklyIndulgence / 7;
-        const dailyPoints = Math.max(3, Math.round(dailyIndulgence / AVG_CALORIES_PER_POINT));
-        const maxCap = Math.min(dailyPoints * 4, 12);
-
         // Mettre à jour le profil
         const updatedProfile: UserProfile = {
           ...profile,
           currentWeight: correctWeightKg,
           tdeeEstimate: tdee,
           weeklyCalorieTarget,
-          dailyPointsBudget: dailyPoints,
-          maxPointsCap: maxCap,
         };
 
         await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
 
         console.log(`✅ Profil migré: ${profile.currentWeight.toFixed(0)} kg → ${correctWeightKg.toFixed(1)} kg`);
         console.log(`   Calories/jour: ${Math.round(weeklyCalorieTarget / 7)} cal`);
-        console.log(`   Points/jour: ${dailyPoints} pts`);
       }
     }
   } catch (error) {

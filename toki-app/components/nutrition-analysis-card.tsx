@@ -1,30 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+﻿import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { router } from 'expo-router';
 import { Button } from './ui/Button';
-// No changes required
-import { useTheme } from '../lib/theme-context';
-import { Colors } from '../constants/theme';
 import { spacing } from '../constants/design-tokens';
-import { MealEntry, StreakStats, computeStreak } from '../lib/stats';
 import { FoodItem, FOOD_DB } from '../lib/food-db';
-import { computeDailyTotals, NutritionTargets } from '../lib/nutrition';
-import {
-  analyzeNutritionPeriod,
-  NutritionPeriodDays,
-  NutritionAnalysisResult,
-  DailySummary,
-  UserProfileData,
-  WeightTrendData,
-  StreakData,
-  CheatDayData,
-  WeekPatternData,
-  MealTimingData,
-  FrequentFoodsData,
-  FrequentFoodItem,
-} from '../lib/ai-nutrition-coach';
+import { NutritionTargets } from '../lib/nutrition';
+import { MealEntry, MIN_CALORIES_FOR_COMPLETE_DAY, normalizeDate, StreakStats } from '../lib/stats';
 import { PaywallModal } from './paywall-modal';
 import { UserProfile } from '../lib/types';
 import { WeightEntry } from '../lib/weight';
+
+type JournalPeriodDays = 7 | 14 | 30;
 
 type NutritionAnalysisCardProps = {
   entries: MealEntry[];
@@ -32,25 +18,39 @@ type NutritionAnalysisCardProps = {
   targets: NutritionTargets;
   userId: string;
   hasSubscription: boolean;
-  // Nouvelles props pour personnalisation
   profile?: UserProfile | null;
   weights?: WeightEntry[];
   streak?: StreakStats;
   cheatDays?: Record<string, boolean>;
 };
 
+type DayTotals = {
+  date: string;
+  mealsCount: number;
+  itemsCount: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  missingFoodItems: number;
+};
+
+type MealTotals = {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  missingFoodItems: number;
+};
+
+const PERIOD_OPTIONS: JournalPeriodDays[] = [7, 14, 30];
+
 export function NutritionAnalysisCard({
   entries,
   customFoods,
-  targets,
-  userId,
   hasSubscription,
-  profile,
-  weights = [],
-  streak,
   cheatDays = {},
 }: NutritionAnalysisCardProps) {
-  // Force dark theme colors for consistency with stats page
   const darkColors = {
     surface: '#1f2937',
     background: '#111827',
@@ -65,352 +65,194 @@ export function NutritionAnalysisCard({
     warning: '#f59e0b',
     success: '#22c55e',
     error: '#ef4444',
-    border: '#374151', // Added for period selector buttons
+    border: '#374151',
   };
   const colors = darkColors;
-  const colorValue = (c: any): string => (typeof c === 'string' ? c : (c && typeof c.primary === 'string' ? c.primary : String(c)) );
+  const colorValue = (c: any): string => (
+    typeof c === 'string' ? c : c && typeof c.primary === 'string' ? c.primary : String(c)
+  );
 
-  console.log('[NutritionAnalysisCard] Rendering with:', { 
-    entriesCount: entries.length,
-    hasSubscription,
-    userId,
-    hasProfile: !!profile,
-    weightsCount: weights.length,
-  });
-
-  const [selectedPeriod, setSelectedPeriod] = useState<NutritionPeriodDays>(7);
-  const [analysis, setAnalysis] = useState<NutritionAnalysisResult | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<JournalPeriodDays>(7);
   const [showPaywall, setShowPaywall] = useState(false);
 
-  // Calculate available days of data
-  const uniqueDates = new Set(entries.map((e) => e.createdAt.split('T')[0]));
-  const availableDays = uniqueDates.size;
+  const availableDays = useMemo(() => {
+    const uniqueDates = new Set(entries.map((e) => normalizeDate(e.createdAt)));
+    return uniqueDates.size;
+  }, [entries]);
 
-  // Check which periods are available
-  const canAnalyze7 = availableDays >= 7;
-  const canAnalyze14 = availableDays >= 14;
-  const canAnalyze30 = availableDays >= 30;
-
-  // Adjust selected period if data insufficient
-  useEffect(() => {
-    if (selectedPeriod === 30 && !canAnalyze30) {
-      setSelectedPeriod(canAnalyze14 ? 14 : 7);
-    } else if (selectedPeriod === 14 && !canAnalyze14) {
-      setSelectedPeriod(7);
+  const foodIndex = useMemo(() => {
+    const index: Record<string, FoodItem> = {};
+    for (const food of FOOD_DB) {
+      index[food.id] = food;
     }
-  }, [selectedPeriod, canAnalyze7, canAnalyze14, canAnalyze30]);
-
-  // If no data at all, show waiting message
-  if (availableDays === 0) {
-    return (
-      <View style={[styles.card, { backgroundColor: colors.surface }]}>
-        <View style={styles.waitingOverlay}>
-          <Text style={[styles.waitingIcon]}>📊</Text>
-          <Text style={[styles.waitingTitle, { color: colorValue(colors.text) }]}>Coach Nutrition IA</Text>
-          <Text style={[styles.waitingSubtitle, { color: colors.icon }]}>
-            En attente de données...
-          </Text>
-          <Text style={[styles.waitingDescription, { color: colors.icon }]}>
-            Commence à logger tes repas pour débloquer l&apos;analyse IA.{'\n\n'}
-            ⏳ Besoin de 7 jours de données pour démarrer
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  const handleAnalyze = async () => {
-    if (!hasSubscription) {
-      setShowPaywall(true);
-      return;
+    for (const food of customFoods) {
+      index[food.id] = food;
     }
+    return index;
+  }, [customFoods]);
 
-    if (availableDays < selectedPeriod) {
-      setError(`Besoin de ${selectedPeriod} jours de données. Tu en as ${availableDays}.`);
-      return;
+  const periodDates = useMemo(() => {
+    const today = normalizeDate(new Date().toISOString());
+    const base = new Date(`${today}T12:00:00`);
+    const dates: string[] = [];
+    for (let i = selectedPeriod - 1; i >= 0; i--) {
+      const d = new Date(base);
+      d.setDate(d.getDate() - i);
+      dates.push(normalizeDate(d.toISOString()));
+    }
+    return dates;
+  }, [selectedPeriod]);
+
+  const completeDaysOverall = useMemo(() => {
+    const caloriesByDate: Record<string, number> = {};
+    for (const entry of entries) {
+      const dateKey = normalizeDate(entry.createdAt);
+      const items = entry.items || [];
+      let mealCalories = 0;
+
+      for (const ref of items) {
+        const food = foodIndex[ref.foodId];
+        if (!food) continue;
+        const multiplier = ref.multiplier || 1;
+        mealCalories += (food.calories_kcal || 0) * multiplier;
+      }
+
+      caloriesByDate[dateKey] = (caloriesByDate[dateKey] || 0) + mealCalories;
     }
 
-    setIsAnalyzing(true);
-    setError(null);
+    return Object.values(caloriesByDate).filter((cal) => cal >= MIN_CALORIES_FOR_COMPLETE_DAY).length;
+  }, [entries, foodIndex]);
 
-    try {
-      // Get the last N days EXCLUDING today (today is incomplete)
-      const today = new Date();
-      const dates: string[] = [];
-      for (let i = selectedPeriod; i >= 1; i--) {
-        const d = new Date(today);
-        d.setDate(d.getDate() - i);
-        dates.push(d.toISOString().split('T')[0]);
-      }
+  const periodData = useMemo(() => {
+    const datesSet = new Set(periodDates);
+    const entriesByDate: Record<string, MealEntry[]> = {};
+    const dayTotals: Record<string, DayTotals> = {};
+    const mealTotalsById: Record<string, MealTotals> = {};
 
-      // Compute daily summaries with cheat day info
-      const dailySummaries: DailySummary[] = dates.map((date) => {
-        const totals = computeDailyTotals(entries, date, customFoods);
-        const dayEntries = entries.filter((e) => e.createdAt.split('T')[0] === date);
-        return {
-          date,
-          calories: totals.calories_kcal,
-          protein_g: totals.protein_g,
-          carbs_g: totals.carbs_g,
-          fat_g: totals.fat_g,
-          mealsCount: dayEntries.length,
-          isCheatDay: cheatDays[date] === true,
-        };
-      });
+    for (const date of periodDates) {
+      entriesByDate[date] = [];
+      dayTotals[date] = {
+        date,
+        mealsCount: 0,
+        itemsCount: 0,
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        missingFoodItems: 0,
+      };
+    }
 
-      // === CALCUL DES DONNÉES PERSONNALISÉES ===
+    for (const entry of entries) {
+      const dateKey = normalizeDate(entry.createdAt);
+      if (!datesSet.has(dateKey)) continue;
 
-      // 1. User Profile Data
-      const userProfileData: UserProfileData | undefined = profile ? {
-        weightGoal: profile.weightGoal,
-        currentWeight: profile.currentWeight,
-        activityLevel: profile.activityLevel,
-        gender: profile.gender,
-        heightCm: profile.heightCm,
-        tdeeEstimate: profile.tdeeEstimate,
-      } : undefined;
+      entriesByDate[dateKey].push(entry);
 
-      // 2. Weight Trend Data (analyser les poids sur la période)
-      let weightTrendData: WeightTrendData | undefined;
-      if (weights.length >= 2) {
-        const periodStart = dates[0];
-        const periodEnd = dates[dates.length - 1];
-        
-        // Filtrer les poids dans la période (ou prendre les plus proches)
-        const weightsInPeriod = weights.filter(w => w.date >= periodStart && w.date <= periodEnd);
-        const sortedWeights = [...weights].sort((a, b) => a.date.localeCompare(b.date));
-        
-        // Poids de départ (le premier dans la période ou le plus récent avant)
-        const startWeight = weightsInPeriod.length > 0 
-          ? weightsInPeriod[0].weightKg
-          : sortedWeights.filter(w => w.date < periodStart).pop()?.weightKg;
-        
-        // Poids actuel (le dernier enregistré)
-        const currentWeight = sortedWeights[sortedWeights.length - 1]?.weightKg;
-        
-        if (startWeight && currentWeight) {
-          const change = currentWeight - startWeight;
-          const weeks = selectedPeriod / 7;
-          const weeklyRate = change / weeks;
-          
-          weightTrendData = {
-            startWeight,
-            currentWeight,
-            weightChange: change,
-            trend: Math.abs(change) < 0.3 ? 'stable' : change < 0 ? 'down' : 'up',
-            weeklyRate,
-          };
-        } else {
-          weightTrendData = { trend: 'unknown' };
-        }
-      }
+      const items = entry.items || [];
+      const day = dayTotals[dateKey];
+      day.mealsCount += 1;
+      day.itemsCount += items.length;
 
-      // 3. Streak Data
-      const streakData: StreakData | undefined = streak ? {
-        currentStreak: streak.currentStreakDays,
-        longestStreak: streak.longestStreakDays,
-        totalFedDays: streak.totalFedDays,
-      } : undefined;
-
-      // 4. Cheat Day Analysis
-      let cheatDayAnalysis: CheatDayData | undefined;
-      const cheatDaysInPeriod = dates.filter(d => cheatDays[d] === true);
-      if (cheatDaysInPeriod.length > 0) {
-        const cheatDaySummaries = dailySummaries.filter(d => d.isCheatDay && d.mealsCount > 0);
-        const normalDaySummaries = dailySummaries.filter(d => !d.isCheatDay && d.mealsCount > 0);
-        
-        const avgCheatCal = cheatDaySummaries.length > 0
-          ? cheatDaySummaries.reduce((sum, d) => sum + d.calories, 0) / cheatDaySummaries.length
-          : 0;
-        const avgNormalCal = normalDaySummaries.length > 0
-          ? normalDaySummaries.reduce((sum, d) => sum + d.calories, 0) / normalDaySummaries.length
-          : 0;
-        
-        cheatDayAnalysis = {
-          totalCheatDays: cheatDaysInPeriod.length,
-          cheatDayDates: cheatDaysInPeriod,
-          avgCaloriesOnCheatDays: avgCheatCal,
-          avgCaloriesOnNormalDays: avgNormalCal,
-        };
-      }
-
-      // 5. Weekend vs Weekday Pattern
-      const weekdays: DailySummary[] = [];
-      const weekends: DailySummary[] = [];
-      for (const summary of dailySummaries) {
-        const dayOfWeek = new Date(summary.date + 'T12:00:00').getDay();
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-          weekends.push(summary);
-        } else {
-          weekdays.push(summary);
-        }
-      }
-      
-      const weekdaysWithData = weekdays.filter(d => d.mealsCount > 0);
-      const weekendsWithData = weekends.filter(d => d.mealsCount > 0);
-      
-      let weekPatternData: WeekPatternData | undefined;
-      if (weekdaysWithData.length > 0 && weekendsWithData.length > 0) {
-        const avgWeekdays = weekdaysWithData.reduce((sum, d) => sum + d.calories, 0) / weekdaysWithData.length;
-        const avgWeekends = weekendsWithData.reduce((sum, d) => sum + d.calories, 0) / weekendsWithData.length;
-        
-        weekPatternData = {
-          avgCaloriesWeekdays: avgWeekdays,
-          avgCaloriesWeekends: avgWeekends,
-          consistencyWeekdays: (weekdaysWithData.length / weekdays.length) * 100,
-          consistencyWeekends: (weekendsWithData.length / weekends.length) * 100,
-          weekendCalorieDiff: avgWeekdays > 0 ? ((avgWeekends - avgWeekdays) / avgWeekdays) * 100 : 0,
-        };
-      }
-
-      // 6. Meal Timing Data
-      const daysWithSingleMeal = dailySummaries.filter(d => d.mealsCount === 1).length;
-      const daysWithManyMeals = dailySummaries.filter(d => d.mealsCount >= 4).length;
-      const totalMeals = dailySummaries.reduce((sum, d) => sum + d.mealsCount, 0);
-      
-      const mealTimingData: MealTimingData = {
-        avgMealsPerDay: dailySummaries.length > 0 ? totalMeals / dailySummaries.length : 0,
-        daysWithSingleMeal,
-        daysWithManyMeals,
+      const mealTotals: MealTotals = {
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        missingFoodItems: 0,
       };
 
-      // 7. Analyse des aliments fréquents pour FOOD SWAPS 🔄
-      // Filtrer les entrées de la période sélectionnée
-      const periodEntries = entries.filter(e => {
-        const entryDate = e.createdAt.split('T')[0];
-        return dates.includes(entryDate);
-      });
-      
-      // Compter la fréquence de chaque aliment
-      const foodCounts: Record<string, { 
-        count: number; 
-        totalCal: number; 
-        totalProt: number;
-        name: string;
-      }> = {};
-      
-      // Créer un index des foods pour lookup rapide
-      const allFoods = [...FOOD_DB, ...customFoods];
-      const foodIndex: Record<string, FoodItem> = {};
-      for (const food of allFoods) {
-        foodIndex[food.id] = food;
-      }
-      
-      for (const entry of periodEntries) {
-        if (entry.items && entry.items.length > 0) {
-          for (const item of entry.items) {
-            const food = foodIndex[item.foodId];
-            if (food) {
-              const multiplier = item.multiplier || 1;
-              const calories = (food.calories_kcal || 0) * multiplier;
-              const protein = (food.protein_g || 0) * multiplier;
-              
-              if (!foodCounts[food.id]) {
-                foodCounts[food.id] = {
-                  count: 0,
-                  totalCal: 0,
-                  totalProt: 0,
-                  name: food.name,
-                };
-              }
-              
-              foodCounts[food.id].count += 1;
-              foodCounts[food.id].totalCal += calories;
-              foodCounts[food.id].totalProt += protein;
-            }
-          }
+      for (const ref of items) {
+        const food = foodIndex[ref.foodId];
+        if (!food) {
+          mealTotals.missingFoodItems += 1;
+          day.missingFoodItems += 1;
+          continue;
         }
-      }
-      
-      // Convertir en array et trier
-      const foodArray = Object.entries(foodCounts)
-        .map(([id, data]) => ({
-          name: data.name,
-          count: data.count,
-          totalCalories: data.totalCal,
-          avgCaloriesPerServing: data.count > 0 ? data.totalCal / data.count : 0,
-          avgProteinPerServing: data.count > 0 ? data.totalProt / data.count : 0,
-          // Catégoriser par ratio protéines/calories (plus sain = plus de protéines par calorie)
-          category: data.totalProt / data.totalCal > 0.1 ? 'healthy' as const : 
-                   data.totalProt / data.totalCal > 0.05 ? 'moderate' as const : 'indulgent' as const,
-        }));
-      
-      // Top aliments par fréquence
-      const topFoods = [...foodArray]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 15);
-      
-      // Aliments à haute calorie (gros contributeurs)
-      const highCalorieFoods = [...foodArray]
-        .filter(f => f.count >= 2) // Au moins 2 fois pour être significatif
-        .sort((a, b) => b.totalCalories - a.totalCalories)
-        .slice(0, 5);
-      
-      // Aliments à optimiser: haute calorie, faible protéine (ratio cal/prot élevé)
-      const lowProteinHighCalorie = [...foodArray]
-        .filter(f => f.count >= 2 && f.avgCaloriesPerServing > 100)
-        .map(f => ({
-          ...f,
-          calProtRatio: f.avgProteinPerServing > 0 ? f.avgCaloriesPerServing / f.avgProteinPerServing : 999,
-        }))
-        .sort((a, b) => b.calProtRatio - a.calProtRatio)
-        .slice(0, 5);
-      
-      let frequentFoodsData: FrequentFoodsData | undefined;
-      if (topFoods.length > 0) {
-        frequentFoodsData = {
-          topFoods,
-          highCalorieFoods,
-          lowProteinHighCalorie,
-        };
+
+        const multiplier = ref.multiplier || 1;
+        const calories = (food.calories_kcal || 0) * multiplier;
+        const protein = (food.protein_g || 0) * multiplier;
+        const carbs = (food.carbs_g || 0) * multiplier;
+        const fat = (food.fat_g || 0) * multiplier;
+
+        mealTotals.calories += calories;
+        mealTotals.protein += protein;
+        mealTotals.carbs += carbs;
+        mealTotals.fat += fat;
+
+        day.calories += calories;
+        day.protein += protein;
+        day.carbs += carbs;
+        day.fat += fat;
       }
 
-      // === APPEL À L'IA AVEC TOUTES LES DONNÉES ===
-      const result = await analyzeNutritionPeriod({
-        dailySummaries,
-        targets,
-        periodDays: selectedPeriod,
-        userProfile: userProfileData,
-        weightTrend: weightTrendData,
-        streakData,
-        cheatDayData: cheatDayAnalysis,
-        weekPattern: weekPatternData,
-        mealTiming: mealTimingData,
-        frequentFoods: frequentFoodsData,
-      });
-
-      setAnalysis(result);
-    } catch (err) {
-      console.error('[NutritionAnalysis] Error:', err);
-      setError(err instanceof Error ? err.message : 'Erreur lors de l\'analyse');
-    } finally {
-      setIsAnalyzing(false);
+      mealTotalsById[entry.id] = mealTotals;
     }
-  };
 
-  if (!hasSubscription) {
+    for (const date of periodDates) {
+      entriesByDate[date].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }
+
+    const completeDates = periodDates.filter(
+      (date) => dayTotals[date].calories >= MIN_CALORIES_FOR_COMPLETE_DAY
+    );
+    const daysComplete = completeDates.length;
+
+    let completeMeals = 0;
+    let completeMealsWithItems = 0;
+    let completeMissingFoodItems = 0;
+    let completeCalories = 0;
+    let completeProtein = 0;
+
+    for (const date of completeDates) {
+      const dayEntries = entriesByDate[date] || [];
+      completeMeals += dayEntries.length;
+      completeMealsWithItems += dayEntries.filter((entry) => (entry.items || []).length > 0).length;
+      completeMissingFoodItems += dayTotals[date].missingFoodItems;
+      completeCalories += dayTotals[date].calories;
+      completeProtein += dayTotals[date].protein;
+    }
+
+    return {
+      entriesByDate,
+      dayTotals,
+      mealTotalsById,
+      completeDates,
+      summary: {
+        daysInPeriod: periodDates.length,
+        daysComplete,
+        totalMeals: completeMeals,
+        mealsWithItems: completeMealsWithItems,
+        missingFoodItems: completeMissingFoodItems,
+        avgCalories: daysComplete > 0 ? completeCalories / daysComplete : 0,
+        avgProtein: daysComplete > 0 ? completeProtein / daysComplete : 0,
+        avgMealsPerDay: daysComplete > 0 ? completeMeals / daysComplete : 0,
+      },
+    };
+  }, [entries, foodIndex, periodDates]);
+
+  if (availableDays === 0) {
     return (
       <>
         <View style={[styles.card, { backgroundColor: colors.surface }]}>
-          <View style={styles.lockedOverlay}>
-            <Text style={[styles.lockedIcon]}>🔒</Text>
-            <Text style={[styles.lockedTitle, { color: colorValue(colors.text) }]}>Coach Nutrition IA</Text>
-            <Text style={[styles.lockedSubtitle, { color: colors.icon }]}>
-              Analyse personnalisée de tes habitudes alimentaires
-            </Text>
-            <Text style={[styles.lockedDescription, { color: colors.icon }]}>
-              • Identifie où couper les calories facilement{'\n'}
-              • Conseils d&apos;expert en nutrition{'\n'}
-              • Analyse sur 7, 14 ou 30 jours{'\n'}
-              • La nutrition = 80% du succès fitness
-            </Text>
-            <Button
-              label="🚀 Débloquer le Coach IA"
-              onPress={() => setShowPaywall(true)}
-              style={styles.unlockButton}
-            />
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>🍽️</Text>
+            <Text style={[styles.emptyTitle, { color: colorValue(colors.text) }]}>Journal alimentaire</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.icon }]}>Commence à enregistrer tes repas.</Text>
+            <Text style={[styles.emptyDescription, { color: colors.icon }]}>Chaque repas alimente ta future analyse IA.</Text>
+            <View style={styles.emptyActions}>
+              <Button label="Ajouter un repas" onPress={() => router.push('/(tabs)')} fullWidth />
+              {!hasSubscription && (
+                <Button
+                  label="Débloquer l'analyse IA"
+                  onPress={() => setShowPaywall(true)}
+                  variant="secondary"
+                  fullWidth
+                  style={styles.secondaryButton}
+                />
+              )}
+            </View>
           </View>
         </View>
         <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
@@ -418,151 +260,282 @@ export function NutritionAnalysisCard({
     );
   }
 
-  // Journal alimentaire simple, sans score ni analyse IA immédiate
-  // On affiche les repas par jour, du plus récent au plus ancien, sur la période sélectionnée
-  // Prépare la structure pour une future analyse IA
-  // Sélection de la période (7, 14, 30 jours) conservée
-  // On affiche un message d'encouragement si pas de repas
-
-  // Générer la liste des dates à afficher (du plus récent au plus ancien)
-  const today = new Date();
-  const dates: string[] = [];
-  for (let i = selectedPeriod; i >= 1; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().split('T')[0]);
-  }
-
-  // Regrouper les repas par date
-  const mealsByDate: Record<string, MealEntry[]> = {};
-  for (const date of dates) {
-    mealsByDate[date] = entries.filter(e => e.createdAt.split('T')[0] === date);
-  }
+  const progressTo7 = Math.min(completeDaysOverall / 7, 1);
+  const progressTo14 = Math.min(completeDaysOverall / 14, 1);
+  const progressTo30 = Math.min(completeDaysOverall / 30, 1);
+  const remainingFor7 = Math.max(0, 7 - completeDaysOverall);
+  const progressHint =
+    completeDaysOverall >= 7
+      ? 'Analyse 7 jours disponible.'
+      : `Encore ${remainingFor7} jours complets pour débloquer l'analyse 7j.`;
+  const displayDates = periodData.completeDates;
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface }]}> 
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colorValue(colors.text) }]}>🍽️ Journal alimentaire</Text>
-        <Text style={[styles.subtitle, { color: colors.icon }]}> 
-          Saisis tes repas chaque jour pour un meilleur suivi. L’analyse IA détaillée arrive bientôt !
-        </Text>
+    <View style={[styles.card, { backgroundColor: colors.surface }]}>
+      <View style={styles.headerRow}>
+        <View style={styles.headerText}>
+          <Text style={[styles.title, { color: colorValue(colors.text) }]}>Journal alimentaire</Text>
+          <Text style={[styles.subtitle, { color: colors.icon }]}>Collecte des données simples et fiables.</Text>
+        </View>
+        <Button
+          label="Ajouter un repas"
+          onPress={() => router.push('/(tabs)')}
+          variant="secondary"
+          size="small"
+        />
       </View>
 
-      {/* Sélecteur de période */}
-      <View style={styles.periodSelector}>
-        <TouchableOpacity
-          style={[ 
-            styles.periodButton,
-            { borderColor: colors.border },
-            selectedPeriod === 7 && { backgroundColor: colors.primary, borderColor: colors.primary },
-            !canAnalyze7 && styles.periodButtonDisabled,
-          ]}
-          onPress={() => canAnalyze7 && setSelectedPeriod(7)}
-          disabled={!canAnalyze7}
-        >
-          <Text
-            style={[ 
-              styles.periodButtonText,
-              { color: colors.text.primary },
-              selectedPeriod === 7 && { color: '#fff', fontWeight: '600' },
-            !canAnalyze7 && { color: colors.icon },
-            ]}
-          >
-            7 jours
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[ 
-            styles.periodButton,
-            { borderColor: colors.border },
-            selectedPeriod === 14 && { backgroundColor: colors.primary, borderColor: colors.primary },
-            !canAnalyze14 && styles.periodButtonDisabled,
-          ]}
-          onPress={() => canAnalyze14 && setSelectedPeriod(14)}
-          disabled={!canAnalyze14}
-        >
-          <Text
-            style={[ 
-              styles.periodButtonText,
-              { color: colors.text.primary },
-              selectedPeriod === 14 && { color: '#fff', fontWeight: '600' },
-            !canAnalyze14 && { color: colors.icon },
-            ]}
-          >
-            14 jours
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[ 
-            styles.periodButton,
-            { borderColor: colors.border },
-            selectedPeriod === 30 && { backgroundColor: colors.primary, borderColor: colors.primary },
-            !canAnalyze30 && styles.periodButtonDisabled,
-          ]}
-          onPress={() => canAnalyze30 && setSelectedPeriod(30)}
-          disabled={!canAnalyze30}
-        >
-          <Text
-            style={[ 
-              styles.periodButtonText,
-              { color: colors.text.primary },
-              selectedPeriod === 30 && { color: '#fff', fontWeight: '600' },
-            !canAnalyze30 && { color: colors.icon },
-            ]}
-          >
-            30 jours
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.results}>
-        {dates.map(date => (
-          <View key={date} style={{ marginBottom: spacing.md }}>
-            <Text style={{ color: colorValue(colors.text), fontWeight: '600', fontSize: 16, marginBottom: 4 }}>
-              {new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit', year: '2-digit' })}
+      <View style={[styles.summaryCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>Résumé de la période</Text>
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryLabel, { color: colors.icon }]}>Jours complets</Text>
+            <Text style={[styles.summaryValue, { color: colorValue(colors.text) }]}>
+              {periodData.summary.daysComplete}/{periodData.summary.daysInPeriod}
             </Text>
-            {mealsByDate[date] && mealsByDate[date].length > 0 ? (
-              mealsByDate[date].map((meal, idx) => (
-                <View key={meal.id || idx} style={{ marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: colors.background }}>
-                  <Text style={{ color: colors.icon, fontWeight: '500', marginBottom: 2 }}>
-                    {meal.type ? meal.type : 'Repas'}{meal.time ? ` à ${meal.time}` : ''}
-                  </Text>
-                  {meal.items && meal.items.length > 0 ? (
-                    meal.items.map((item, i) => (
-                      <Text key={i} style={{ color: colorValue(colors.text), fontSize: 14 }}>
-                        • {item.name} {item.quantity ? `(${item.quantity})` : ''} {item.calories ? `- ${item.calories} kcal` : ''}
-                      </Text>
-                    ))
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryLabel, { color: colors.icon }]}>Repas (jours complets)</Text>
+            <Text style={[styles.summaryValue, { color: colorValue(colors.text) }]}>
+              {periodData.summary.totalMeals}
+            </Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryLabel, { color: colors.icon }]}>Moy kcal / jour (complet)</Text>
+            <Text style={[styles.summaryValue, { color: colorValue(colors.text) }]}>
+              {Math.round(periodData.summary.avgCalories)}
+            </Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryLabel, { color: colors.icon }]}>Moy prot / jour (complet)</Text>
+            <Text style={[styles.summaryValue, { color: colorValue(colors.text) }]}>
+              {Math.round(periodData.summary.avgProtein)} g
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.summaryMeta, { color: colors.icon }]}>
+          Repas avec aliments (jours complets): {periodData.summary.mealsWithItems}/{periodData.summary.totalMeals || 0}
+        </Text>
+        <Text style={[styles.summaryMeta, { color: colors.icon }]}>
+          Jours complets (global): {completeDaysOverall}/{availableDays}
+        </Text>
+        <Text style={[styles.summaryMeta, { color: colors.icon }]}>
+          Repas moyen par jour (complet): {periodData.summary.avgMealsPerDay.toFixed(1)}
+        </Text>
+        {periodData.summary.missingFoodItems > 0 && (
+          <Text style={[styles.summaryWarning, { color: colors.warning }]}>
+            Aliments inconnus (jours complets): {periodData.summary.missingFoodItems}
+          </Text>
+        )}
+      </View>
+
+      <View style={[styles.progressCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>Progression IA</Text>
+        <Text style={[styles.progressHint, { color: colors.icon }]}>{progressHint}</Text>
+
+        <View style={styles.progressItem}>
+          <View style={styles.progressHeader}>
+            <Text style={[styles.progressLabel, { color: colors.icon }]}>7 jours</Text>
+            <Text style={[styles.progressValue, { color: colors.icon }]}>{Math.min(completeDaysOverall, 7)}/7</Text>
+          </View>
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View style={[styles.progressFill, { width: `${Math.round(progressTo7 * 100)}%`, backgroundColor: colors.primary }]} />
+          </View>
+        </View>
+
+        <View style={styles.progressItem}>
+          <View style={styles.progressHeader}>
+            <Text style={[styles.progressLabel, { color: colors.icon }]}>14 jours</Text>
+            <Text style={[styles.progressValue, { color: colors.icon }]}>{Math.min(completeDaysOverall, 14)}/14</Text>
+          </View>
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View style={[styles.progressFill, { width: `${Math.round(progressTo14 * 100)}%`, backgroundColor: colors.primary }]} />
+          </View>
+        </View>
+
+        <View style={styles.progressItem}>
+          <View style={styles.progressHeader}>
+            <Text style={[styles.progressLabel, { color: colors.icon }]}>30 jours</Text>
+            <Text style={[styles.progressValue, { color: colors.icon }]}>{Math.min(completeDaysOverall, 30)}/30</Text>
+          </View>
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View style={[styles.progressFill, { width: `${Math.round(progressTo30 * 100)}%`, backgroundColor: colors.primary }]} />
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.periodSelector}>
+        {PERIOD_OPTIONS.map((period) => (
+          <TouchableOpacity
+            key={period}
+            style={[
+              styles.periodButton,
+              { borderColor: colors.border },
+              selectedPeriod === period && { backgroundColor: colors.primary, borderColor: colors.primary },
+            ]}
+            onPress={() => setSelectedPeriod(period)}
+          >
+            <Text
+              style={[
+                styles.periodButtonText,
+                { color: colors.text.primary },
+                selectedPeriod === period && { color: '#fff', fontWeight: '600' },
+              ]}
+            >
+              {period} jours
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={[styles.aiCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colorValue(colors.text) }]}>Analyse IA</Text>
+        <Text style={[styles.aiDescription, { color: colors.icon }]}>
+          L'analyse arrive quand tu as assez de données fiables.
+        </Text>
+        {!hasSubscription ? (
+          <Button label="Débloquer l'analyse IA" onPress={() => setShowPaywall(true)} variant="secondary" />
+        ) : (
+          <Text style={[styles.aiStatus, { color: colors.success }]}>
+            Abonnement actif. Analyse IA disponible après 7 jours complets.
+          </Text>
+        )}
+      </View>
+      <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
+
+      <ScrollView style={styles.results} showsVerticalScrollIndicator={false}>
+        {displayDates.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.icon }]}>
+            Aucun jour complet sur la période sélectionnée.
+          </Text>
+        ) : (
+          displayDates.map((date) => {
+          const dayEntries = periodData.entriesByDate[date] || [];
+          const dayTotals = periodData.dayTotals[date];
+          const dayCalories = Math.round(dayTotals.calories);
+          const dayProtein = Math.round(dayTotals.protein);
+          const isComplete = dayTotals.calories >= MIN_CALORIES_FOR_COMPLETE_DAY;
+
+          return (
+            <View key={date} style={[styles.dayBlock, { backgroundColor: colors.background, borderColor: colors.border }]}
+            >
+              <View style={styles.dayHeader}>
+                <Text style={[styles.dayTitle, { color: colorValue(colors.text) }]}>
+                  {new Date(`${date}T12:00:00`).toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: '2-digit',
+                  })}
+                </Text>
+                <View style={styles.badgesRow}>
+                  {cheatDays[date] && (
+                    <View style={[styles.badge, { backgroundColor: colors.warning }]}>
+                      <Text style={styles.badgeText}>Cheat</Text>
+                    </View>
+                  )}
+                  {dayTotals.mealsCount === 0 ? (
+                    <View style={[styles.badge, { backgroundColor: colors.border }]}>
+                      <Text style={styles.badgeText}>Vide</Text>
+                    </View>
+                  ) : isComplete ? (
+                    <View style={[styles.badge, { backgroundColor: colors.success }]}>
+                      <Text style={styles.badgeText}>Complet</Text>
+                    </View>
                   ) : (
-                    <Text style={{ color: colors.icon, fontSize: 13 }}>Aucun aliment renseigné</Text>
+                    <View style={[styles.badge, { backgroundColor: colors.warning }]}>
+                      <Text style={styles.badgeText}>Partiel</Text>
+                    </View>
                   )}
                 </View>
-              ))
-            ) : (
-              <Text style={{ color: colors.icon, fontSize: 13, fontStyle: 'italic' }}>Aucun repas enregistré</Text>
-            )}
-          </View>
-        ))}
-        <Text style={{ color: colors.icon, fontSize: 13, textAlign: 'center', marginTop: spacing.lg }}>
-          Continue à enregistrer tes repas pour une analyse IA personnalisée bientôt disponible !
-        </Text>
+              </View>
+              <Text style={[styles.dayMeta, { color: colors.icon }]}>
+                {dayTotals.mealsCount} repas · {dayCalories} kcal · {dayProtein} g protéines
+              </Text>
+              {dayTotals.missingFoodItems > 0 && (
+                <Text style={[styles.dayMetaWarning, { color: colors.warning }]}>
+                  {dayTotals.missingFoodItems} aliments inconnus
+                </Text>
+              )}
+
+              {dayEntries.length > 0 ? (
+                dayEntries.map((meal, idx) => {
+                  const mealTotals = periodData.mealTotalsById[meal.id] || {
+                    calories: 0,
+                    protein: 0,
+                    carbs: 0,
+                    fat: 0,
+                    missingFoodItems: 0,
+                  };
+                  const mealTime = new Date(meal.createdAt);
+                  const mealTimeLabel = Number.isNaN(mealTime.getTime())
+                    ? ''
+                    : mealTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+                  return (
+                    <View key={meal.id || idx} style={[styles.mealCard, { borderColor: colors.border }]}
+                    >
+                      <View style={styles.mealHeader}>
+                        <Text style={[styles.mealTitle, { color: colorValue(colors.text) }]}>
+                          {meal.label || 'Repas'}
+                        </Text>
+                        <Text style={[styles.mealTime, { color: colors.icon }]}>{mealTimeLabel}</Text>
+                      </View>
+                      <Text style={[styles.mealTotals, { color: colors.icon }]}>
+                        {Math.round(mealTotals.calories)} kcal · {Math.round(mealTotals.protein)} g prot · {Math.round(mealTotals.carbs)} g gluc · {Math.round(mealTotals.fat)} g lip
+                      </Text>
+                      {meal.items && meal.items.length > 0 ? (
+                        meal.items.map((item, itemIndex) => {
+                          const food = foodIndex[item.foodId];
+                          const multiplier = item.multiplier || 1;
+                          const calories = food ? Math.round((food.calories_kcal || 0) * multiplier) : null;
+                          const portionLabel = item.portionGrams
+                            ? `${Math.round(item.portionGrams)} g`
+                            : item.quantityHint || '';
+                          const multiplierLabel = multiplier !== 1 ? `x${multiplier.toFixed(1)}` : '';
+
+                          return (
+                            <Text key={itemIndex} style={[styles.itemText, { color: colorValue(colors.text) }]}>
+                              • {food?.name || 'Aliment inconnu'}
+                              {portionLabel ? ` (${portionLabel})` : ''}
+                              {multiplierLabel ? ` ${multiplierLabel}` : ''}
+                              {calories !== null ? ` - ${calories} kcal` : ''}
+                            </Text>
+                          );
+                        })
+                      ) : (
+                        <Text style={[styles.emptyText, { color: colors.icon }]}>Aucun aliment renseigné</Text>
+                      )}
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={[styles.emptyText, { color: colors.icon }]}>Aucun repas enregistré</Text>
+              )}
+            </View>
+          );
+        })
+        )}
+        <Text style={[styles.footerHint, { color: colors.icon }]}>Continue à enregistrer pour débloquer les analyses IA.</Text>
       </ScrollView>
     </View>
   );
 }
-
-
-// Gamification, points, badge, score, and recommendation UI fully removed. Only food journal and nutrition tracking remain.
 
 const styles = StyleSheet.create({
   card: {
     padding: spacing.lg,
     marginBottom: spacing.lg,
   },
-  header: {
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
     marginBottom: spacing.md,
+  },
+  headerText: {
+    flex: 1,
   },
   title: {
     fontSize: 20,
@@ -571,6 +544,75 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: spacing.sm,
+  },
+  summaryCard: {
+    borderRadius: 12,
+    padding: spacing.md,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  summaryItem: {
+    width: '48%',
+  },
+  summaryLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  summaryMeta: {
+    fontSize: 12,
+    marginTop: spacing.xs,
+  },
+  summaryWarning: {
+    fontSize: 12,
+    marginTop: spacing.xs,
+    fontWeight: '600',
+  },
+  progressCard: {
+    borderRadius: 12,
+    padding: spacing.md,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+  },
+  progressHint: {
+    fontSize: 12,
+    marginBottom: spacing.sm,
+  },
+  progressItem: {
+    marginBottom: spacing.sm,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressLabel: {
+    fontSize: 12,
+  },
+  progressValue: {
+    fontSize: 12,
+  },
+  progressBar: {
+    height: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   periodSelector: {
     flexDirection: 'row',
@@ -585,83 +627,133 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
   },
-  periodButtonDisabled: {
-    opacity: 0.4,
-  },
   periodButtonText: {
     fontSize: 14,
     fontWeight: '500',
   },
-  analyzeButton: {
-    marginTop: spacing.sm,
+  aiCard: {
+    borderRadius: 12,
+    padding: spacing.md,
+    borderWidth: 1,
+    marginBottom: spacing.md,
   },
-  warningText: {
+  aiDescription: {
     fontSize: 13,
-    textAlign: 'center',
     marginBottom: spacing.sm,
   },
-  errorBox: {
-    padding: spacing.md,
-    borderRadius: 8,
-    marginTop: spacing.md,
-  },
-  errorText: {
-    fontSize: 14,
-    textAlign: 'center',
+  aiStatus: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   results: {
     marginTop: spacing.md,
   },
-  // Suppression des styles liés à la gamification, score, badge, insight, recommandations
-  lockedOverlay: {
+  dayBlock: {
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  dayTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  badge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  dayMeta: {
+    fontSize: 12,
+    marginBottom: spacing.sm,
+  },
+  dayMetaWarning: {
+    fontSize: 12,
+    marginBottom: spacing.sm,
+    fontWeight: '600',
+  },
+  mealCard: {
+    padding: spacing.sm,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: spacing.sm,
+  },
+  mealHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  mealTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: spacing.xs,
+  },
+  mealTime: {
+    fontSize: 12,
+  },
+  mealTotals: {
+    fontSize: 12,
+    marginBottom: spacing.xs,
+  },
+  itemText: {
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  emptyText: {
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  footerHint: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+  },
+  emptyState: {
     alignItems: 'center',
     paddingVertical: spacing.xl,
   },
-  lockedIcon: {
+  emptyIcon: {
     fontSize: 48,
     marginBottom: spacing.md,
   },
-  lockedTitle: {
+  emptyTitle: {
     fontSize: 24,
     fontWeight: '700',
     marginBottom: spacing.xs,
   },
-  lockedSubtitle: {
+  emptySubtitle: {
     fontSize: 16,
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  lockedDescription: {
-    fontSize: 14,
-    lineHeight: 24,
-    marginBottom: spacing.lg,
-    textAlign: 'center',
-  },
-  unlockButton: {
-    minWidth: 250,
-  },
-  waitingOverlay: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
-  waitingIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  waitingTitle: {
-    fontSize: 24,
-    fontWeight: '700',
     marginBottom: spacing.xs,
-  },
-  waitingSubtitle: {
-    fontSize: 16,
-    marginBottom: spacing.md,
     textAlign: 'center',
   },
-  waitingDescription: {
+  emptyDescription: {
     fontSize: 14,
-    lineHeight: 24,
+    lineHeight: 20,
     marginBottom: spacing.lg,
     textAlign: 'center',
+  },
+  emptyActions: {
+    width: '100%',
+    gap: spacing.sm,
+  },
+  secondaryButton: {
+    marginTop: spacing.xs,
   },
 });

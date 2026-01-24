@@ -38,7 +38,6 @@ export default function VersionScreen() {
   const [isRepairing, setIsRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<{
     success: boolean;
-    points?: { oldBalance: number; newBalance: number; totalSpent?: number };
     customFoods?: { localToFirestore: number; firestoreToLocal: number };
     meals?: { entriesFixed: number; itemsRemoved: number; itemsAdded?: number; mealsWithItemsAdded?: number; syncedFromFirestore?: number; syncedToFirestore?: number };
     errors: string[];
@@ -431,7 +430,7 @@ export default function VersionScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>🔧 Réparation de Synchronisation</Text>
             <Text style={styles.warningText}>
-              Si tu as des incohérences entre ton PC et ton téléphone (points différents, aliments manquants),
+              Si tu as des incoherences entre ton PC et ton telephone (aliments manquants, repas differents),
               utilise ce bouton pour réparer automatiquement.
             </Text>
             
@@ -440,12 +439,6 @@ export default function VersionScreen() {
                 <Text style={styles.repairResultTitle}>
                   {repairResult.success ? '✅ Réparation réussie' : '⚠️ Réparation partielle'}
                 </Text>
-                {repairResult.points && (
-                  <Text style={styles.repairResultText}>
-                    Points: {repairResult.points.oldBalance} → {repairResult.points.newBalance} pts
-                    {repairResult.points.totalSpent > 0 && ` (${repairResult.points.totalSpent} dépensés)`}
-                  </Text>
-                )}
                 {repairResult.customFoods && (
                   <Text style={styles.repairResultText}>
                     Custom foods: {repairResult.customFoods.localToFirestore} envoyés, {repairResult.customFoods.firestoreToLocal} reçus

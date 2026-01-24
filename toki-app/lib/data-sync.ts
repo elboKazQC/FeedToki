@@ -421,9 +421,7 @@ export function validateAndFixMealEntries(
   }
 
   return validatedEntries;
-}
-
-/**
+}/**
  * Fonction factice pour compatibilité (système de points supprimé)
  */
 export async function syncPointsToFirestore(

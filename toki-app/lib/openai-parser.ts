@@ -264,6 +264,18 @@ EXTRACTION EXHAUSTIVE - RÈGLE CRITIQUE:
 - Les boissons (bières, vins, cocktails, jus, sodas, etc.) sont aussi des aliments à extraire avec leurs calories exactes
 - Ne saute AUCUN aliment, même s'il est mentionné de manière implicite
 
+ALIMENTS COMPOSÉS / GARNITURES:
+- Si un aliment est décrit avec "avec", "au", "à la", "tartiné de", sépare les composants en items distincts
+- Exemple: "2 toast à la confiture de fraise" → 2 items: "toast" + "confiture de fraise"
+- Exemple: "pain beurre" → 2 items: "pain" + "beurre"
+- Ne regroupe pas "toast à la confiture" en un seul item
+- isComposite = true seulement si l'item est un plat composé (ex: sandwich, burger, poutine), pas pour les composants
+- Si un nombre est donné pour la base, applique-le à la base; pour la garniture sans quantité, utilise une portion standard réaliste (ex: 1 c. à soupe par toast)
+
+NEGATIONS:
+- Si l'utilisateur dit "sans X", "pas de X", "no X", n'inclus pas X
+
+
 ALIMENTS COMESTIBLES UNIQUEMENT:
 - Ignore les objets non comestibles (pneus, clous, vis, etc.)
 - Retourne UNIQUEMENT des aliments et boissons comestibles
@@ -323,7 +335,7 @@ Retourne UNIQUEMENT un JSON valide avec cette structure:
 }
 
 RÈGLES CRITIQUES:
-- Le nom doit être EXACTEMENT ce que l'utilisateur a dit (pas de modifications)
+- Le nom doit être EXACTEMENT ce que l'utilisateur a dit (pour les composants: réutilise les mots exacts présents, ex: "toast", "confiture de fraise")
 - calories_kcal doit être pour LA QUANTITÉ TOTALE, pas pour 100g
 - Si l'utilisateur dit "3 bières", calcule 3 x calories d'une bière
 - Si l'utilisateur dit "un verre de vin", utilise une portion standard (150ml ≈ 125 kcal)
@@ -342,7 +354,8 @@ EXEMPLES:
 - "3 bières" → calories_kcal: 450 (3 × 150)
 - "verre de vin rouge" → calories_kcal: 125
 - "2 shots de vodka" → calories_kcal: 200 (2 × 100)
-- "poulet et riz" → 2 items: poulet (250 kcal) + riz (195 kcal)`,
+- "poulet et riz" → 2 items: poulet (250 kcal) + riz (195 kcal)
+- "2 toast à la confiture de fraise" → 2 items: toast (2 toasts) + confiture de fraise (1-2 c. à soupe)`,
           },
           {
             role: 'user',

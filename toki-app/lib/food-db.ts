@@ -9,6 +9,7 @@ export type FoodTag =
   | 'sucre'
   | 'alcool'
   | 'gras_frit'
+  | 'condiment'
   | 'dessert_sante';
 
 export type FoodItem = {
@@ -38,7 +39,8 @@ export const FOOD_DB: FoodItem[] = [
   { id: 'tofu', name: 'Tofu', tags: ['proteine_maigre'], baseScore: 80, protein_g: 20, carbs_g: 4, fat_g: 11, calories_kcal: 180 },
   { id: 'yaourt', name: 'Yogourt', tags: ['proteine_maigre'], baseScore: 70, protein_g: 10, carbs_g: 8, fat_g: 5, calories_kcal: 120 },
   { id: 'fromage', name: 'Fromage', tags: ['proteine_maigre'], baseScore: 55, protein_g: 7, carbs_g: 1, fat_g: 9, calories_kcal: 110 },
-  { id: 'mayonnaise', name: 'Mayonnaise', tags: ['gras_frit', 'ultra_transforme'], baseScore: 25, protein_g: 0.2, carbs_g: 0.6, fat_g: 11, calories_kcal: 100 },
+  { id: 'mayonnaise', name: 'Mayonnaise', tags: ['gras_frit', 'ultra_transforme', 'condiment'], baseScore: 25, protein_g: 0.2, carbs_g: 0.6, fat_g: 10, calories_kcal: 90 },
+  { id: 'mayo', name: 'Mayo', tags: ['gras_frit', 'ultra_transforme', 'condiment'], baseScore: 25, protein_g: 0.2, carbs_g: 0.6, fat_g: 10, calories_kcal: 90 },
   { id: 'legumes', name: 'Légumes', tags: ['legume'], baseScore: 90, protein_g: 3, carbs_g: 10, fat_g: 0.5, calories_kcal: 60 },
   { id: 'salade', name: 'Salade verte', tags: ['legume'], baseScore: 90, protein_g: 2, carbs_g: 5, fat_g: 0.2, calories_kcal: 30 },
   { id: 'brocoli', name: 'Brocoli', tags: ['legume'], baseScore: 95, protein_g: 3, carbs_g: 6, fat_g: 0.4, calories_kcal: 55 },

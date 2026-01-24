@@ -35,7 +35,7 @@ export default function PrivacyPolicyScreen() {
           <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>2. Données Collectées</Text>
           <Text style={[styles.subsectionTitle, { color: colors.text.primary }]}>2.1 Données Personnelles</Text>
           <Text style={[styles.text, { color: colors.text.secondary }]}>
-            Nous collectons : email, nom d'affichage (optionnel), poids, objectifs, niveau d'activité, repas consommés, aliments, quantités, valeurs nutritionnelles, points quotidiens, streaks, évolution du dragon, données techniques (type d'appareil, OS, navigateur).
+            Nous collectons : email, nom d'affichage (optionnel), poids, objectifs, niveau d'activite, repas consommes, aliments, quantites, valeurs nutritionnelles, streaks, evolution du dragon, donnees techniques (type d'appareil, OS, navigateur).
           </Text>
           <Text style={[styles.subsectionTitle, { color: colors.text.primary }]}>2.2 Données Non Collectées</Text>
           <Text style={[styles.text, { color: colors.text.secondary }]}>
@@ -46,7 +46,7 @@ export default function PrivacyPolicyScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>3. Utilisation des Données</Text>
           <Text style={[styles.text, { color: colors.text.secondary }]}>
-            Nous utilisons vos données pour : calculer vos besoins nutritionnels, suivre vos repas et points, afficher vos statistiques, synchroniser entre appareils, améliorer l'application, analyser l'utilisation (anonymisé), corriger les bugs, développer de nouvelles fonctionnalités, et vous informer des mises à jour importantes.
+            Nous utilisons vos donnees pour : calculer vos besoins nutritionnels, suivre vos repas, afficher vos statistiques, synchroniser entre appareils, ameliorer l'application, analyser l'utilisation (anonymise), corriger les bugs, developper de nouvelles fonctionnalites, et vous informer des mises a jour importantes.
           </Text>
         </View>
 

@@ -13,11 +13,6 @@ import { router } from 'expo-router';
 
 const FAQ_ITEMS = [
   {
-    id: 'points',
-    question: 'Comment fonctionne le système de points?',
-    answer: 'Tu reçois un budget de points chaque jour (généralement 3-12 points selon ton objectif). Les aliments sains (protéines maigres, légumes) coûtent 0-1 point, tandis que les aliments indulgents (poutine, pizza, frites) coûtent plus cher (4-10 points). Rien n\'est interdit - tu gères ton budget comme de l\'argent!',
-  },
-  {
     id: 'dragon',
     question: 'Comment fonctionne l\'évolution du dragon?',
     answer: 'Toki évolue tous les 30 jours de streak continu. Il y a 12 niveaux au total. Chaque évolution débloque de nouveaux visuels. Plus tu nourris Toki régulièrement, plus il évolue!',
@@ -35,7 +30,7 @@ const FAQ_ITEMS = [
   {
     id: 'logging-manual',
     question: 'Comment logger un repas manuellement?',
-    answer: '1. Clique sur "Partager avec Toki"\n2. Tape ou sélectionne les aliments que tu as mangés\n3. Choisis les portions\n4. Confirme - les points sont déduits automatiquement',
+    answer: '1. Clique sur "Partager avec Toki"\n2. Tape ou sélectionne les aliments que tu as mangés\n3. Choisis les portions\n4. Confirme - le repas est enregistré',
   },
   {
     id: 'logging-ai',
@@ -242,4 +237,3 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
-

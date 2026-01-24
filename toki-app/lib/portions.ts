@@ -43,10 +43,19 @@ export const SNACK_PORTIONS: PortionReference[] = [
   { size: 'large', label: 'Grande', grams: 150, visualRef: '🙌 Grande poignée', multiplier: 1.5 },
 ];
 
+export const CONDIMENT_PORTIONS: PortionReference[] = [
+  { size: 'small', label: 'Petite', grams: 10, visualRef: '2 c. a the', multiplier: 0.67 },
+  { size: 'medium', label: 'Moyenne', grams: 15, visualRef: '1 c. a soupe', multiplier: 1.0 },
+  { size: 'large', label: 'Grande', grams: 30, visualRef: '2 c. a soupe', multiplier: 2.0 },
+];
+
 /**
  * Get appropriate portions for a food item based on its tags
  */
 export function getPortionsForItem(tags: string[]): PortionReference[] {
+  if (tags.includes('condiment')) {
+    return CONDIMENT_PORTIONS;
+  }
   if (tags.includes('proteine_maigre')) {
     return PROTEIN_PORTIONS;
   }

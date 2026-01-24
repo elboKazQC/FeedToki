@@ -22,6 +22,9 @@ export const DEFAULT_TARGETS: NutritionTargets = {
   fat_g: 65,
 };
 
+const resolveMacro = (override: number | undefined, base: number): number =>
+  typeof override === 'number' && Number.isFinite(override) ? override : base;
+
 export function computeDailyTotals(entries: MealEntry[], dateIso: string, customFoods: FoodItem[] = []): DailyNutritionTotals {
   const dayKey = normalizeDate(dateIso);
   
@@ -77,10 +80,10 @@ export function computeDailyTotals(entries: MealEntry[], dateIso: string, custom
       // Appliquer le multiplicateur de portion (par défaut 1.0)
       const multiplier = ref.multiplier || 1.0;
       
-      protein += (f.protein_g || 0) * multiplier;
-      carbs += (f.carbs_g || 0) * multiplier;
-      calories += (f.calories_kcal || 0) * multiplier;
-      fat += (f.fat_g || 0) * multiplier;
+      protein += resolveMacro(ref.protein_g, (f.protein_g || 0) * multiplier);
+      carbs += resolveMacro(ref.carbs_g, (f.carbs_g || 0) * multiplier);
+      calories += resolveMacro(ref.calories_kcal, (f.calories_kcal || 0) * multiplier);
+      fat += resolveMacro(ref.fat_g, (f.fat_g || 0) * multiplier);
     }
   }
   
@@ -153,10 +156,10 @@ export function computeMealTotals(meal: MealEntry, customFoods: FoodItem[] = [])
     // Appliquer le multiplicateur de portion (par défaut 1.0)
     const multiplier = ref.multiplier || 1.0;
     
-    protein += (f.protein_g || 0) * multiplier;
-    carbs += (f.carbs_g || 0) * multiplier;
-    calories += (f.calories_kcal || 0) * multiplier;
-    fat += (f.fat_g || 0) * multiplier;
+    protein += resolveMacro(ref.protein_g, (f.protein_g || 0) * multiplier);
+    carbs += resolveMacro(ref.carbs_g, (f.carbs_g || 0) * multiplier);
+    calories += resolveMacro(ref.calories_kcal, (f.calories_kcal || 0) * multiplier);
+    fat += resolveMacro(ref.fat_g, (f.fat_g || 0) * multiplier);
   }
 
   return { protein_g: protein, carbs_g: carbs, calories_kcal: calories, fat_g: fat };

@@ -15,6 +15,7 @@ const CATEGORY_AVERAGES: Record<string, { protein_g: number; carbs_g: number; fa
   gras_frit: { protein_g: 10, carbs_g: 20, fat_g: 20, calories_kcal: 350 },
   sucre: { protein_g: 0, carbs_g: 25, fat_g: 0, calories_kcal: 100 },
   alcool: { protein_g: 0, carbs_g: 3, fat_g: 0, calories_kcal: 120 },
+  condiment: { protein_g: 0, carbs_g: 1, fat_g: 10, calories_kcal: 90 },
   dessert_sante: { protein_g: 5, carbs_g: 15, fat_g: 5, calories_kcal: 120 },
 };
 
@@ -92,6 +93,15 @@ const KEYWORD_MAPPING: Record<string, FoodTag[]> = {
   'dessert': ['sucre'],
   'beigne': ['ultra_transforme', 'sucre'],
   'donut': ['ultra_transforme', 'sucre'],
+  
+  // Condiments
+  'mayo': ['condiment'],
+  'mayonnaise': ['condiment'],
+  'ketchup': ['condiment', 'sucre'],
+  'moutarde': ['condiment'],
+  'mustard': ['condiment'],
+  'vinaigrette': ['condiment'],
+  'dressing': ['condiment'],
   
   // Alcool
   'biere': ['alcool'],
@@ -220,6 +230,8 @@ export function createEstimatedFoodItem(
     fat_g?: number;
   }
 ): FoodItem {
+  const nameTags = detectTagsFromName(foodName);
+  const condimentTags = nameTags.includes('condiment') ? ['condiment'] : [];
   // Si OpenAI a fourni une catégorie, l'utiliser en priorité
   const openAITags = categoryToTags(openAICategory);
   const useOpenAICategory = openAITags.length > 0;
@@ -233,7 +245,7 @@ export function createEstimatedFoodItem(
     
     // Si OpenAI a fourni des valeurs nutritionnelles, les utiliser en priorité
     estimated = {
-      tags: openAITags,
+      tags: Array.from(new Set([...openAITags, ...condimentTags])),
       protein_g: openAINutrition?.protein_g !== undefined 
         ? Math.round(openAINutrition.protein_g) 
         : Math.round(baseMacros.protein_g),
@@ -269,7 +281,7 @@ export function createEstimatedFoodItem(
   let baseScore = 50; // Par défaut
   if (estimated.tags.includes('proteine_maigre') || estimated.tags.includes('legume')) {
     baseScore = 80;
-  } else if (estimated.tags.includes('ultra_transforme') || estimated.tags.includes('gras_frit')) {
+  } else if (estimated.tags.includes('ultra_transforme') || estimated.tags.includes('gras_frit') || estimated.tags.includes('condiment')) {
     baseScore = 20;
   } else if (estimated.tags.includes('sucre')) {
     baseScore = 15;
@@ -286,4 +298,3 @@ export function createEstimatedFoodItem(
 
   return tempItem;
 }
-

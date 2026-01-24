@@ -18,6 +18,11 @@ export type FoodItemRef = {
   portionGrams?: number; // Poids en grammes
   multiplier?: number; // Multiplicateur pour les macros (1.0 = portion moyenne)
   nutritionSource?: 'db' | 'off' | 'estimated' | 'custom'; // Source des données nutritionnelles
+  // Valeurs nutritionnelles personnalisées (totaux pour la portion actuelle)
+  calories_kcal?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
 };
 
 export type MealEntry = {

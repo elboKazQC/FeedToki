@@ -106,14 +106,18 @@ function convertQuantityToMultiplier(
   
   // Cuillères (tablespoon/teaspoon)
   if (quantityLower.includes('cuillère à soupe') || quantityLower.includes('cuillere à soupe') || 
-      quantityLower.includes('c. à soupe') || quantityLower.includes('càs') || quantityLower.includes('tbsp')) {
+      quantityLower.includes('cuillere a soupe') || quantityLower.includes('c. à soupe') ||
+      quantityLower.includes('c. a soupe') || quantityLower.includes('c a soupe') ||
+      quantityLower.includes('càs') || quantityLower.includes('tbsp')) {
     // 1 cuillère à soupe ≈ 15ml/15g
     const totalAmount = quantityNumber * 15;
     return totalAmount / defaultPortion.grams;
   }
   
   if (quantityLower.includes('cuillère à thé') || quantityLower.includes('cuillere à thé') || 
-      quantityLower.includes('c. à thé') || quantityLower.includes('càt') || quantityLower.includes('tsp')) {
+      quantityLower.includes('cuillere a the') || quantityLower.includes('c. à thé') ||
+      quantityLower.includes('c. a the') || quantityLower.includes('c a the') ||
+      quantityLower.includes('càt') || quantityLower.includes('tsp')) {
     // 1 cuillère à thé ≈ 5ml/5g
     const totalAmount = quantityNumber * 5;
     return totalAmount / defaultPortion.grams;
@@ -210,6 +214,19 @@ export default function AILoggerScreen() {
   // États pour la modification de quantité
   const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
   const [quantityInput, setQuantityInput] = useState<string>('');
+  const editingItem = editingQuantityIndex !== null ? detectedItems[editingQuantityIndex] : null;
+  const editingFoodItem = editingItem
+    ? editingItem.matchedItem || editingItem.offItem || editingItem.estimatedItem
+    : null;
+
+  const applyQuantityPreset = (value: string) => {
+    setQuantityInput(value);
+  };
+
+  const applyPortionPreset = (portion: number) => {
+    const label = portion <= 1 ? 'portion' : 'portions';
+    setQuantityInput(`${portion} ${label}`);
+  };
   
   // États pour vérification subscription
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
@@ -374,7 +391,6 @@ export default function AILoggerScreen() {
                 parsedItem.fat_g !== undefined
               )) {
                 logger.info('[AI Logger] Fusion des valeurs: OFF a des valeurs à 0, utilisation des valeurs IA');
-                // Créer un nouvel item avec les valeurs de l'IA mais garder les autres propriétés OFF (tags, points, etc.)
                 foodItem = {
                   ...offItem,
                   calories_kcal: parsedItem.calories_kcal !== undefined 
@@ -783,9 +799,8 @@ export default function AILoggerScreen() {
       visualRef: quantityInput,
     };
 
-    // Recalculer le FoodItemRef et les points
+    // Recalculer le FoodItemRef
     const newItemRef = createFoodItemRef(foodItem, newPortion);
-    const newPointsCost = Math.round(computeFoodPoints(foodItem) * Math.sqrt(newMultiplier));
 
     // Mettre à jour l'item
     const updatedItems = [...detectedItems];
@@ -793,7 +808,6 @@ export default function AILoggerScreen() {
       ...item,
       portion: newPortion,
       itemRef: newItemRef,
-      pointsCost: newPointsCost,
       quantity: quantityInput,
       quantityNumber: newQuantityNumber,
     };
@@ -939,11 +953,6 @@ export default function AILoggerScreen() {
       }
 
       // Créer le FoodItemRef
-      const itemRef = createFoodItemRef(foodItem, portion);
-
-      // Calculer le coût en points
-      const pointsCost = computeFoodPoints(foodItem) * Math.sqrt(portion.multiplier);
-
       // Calculer le multiplier depuis la quantité prédite par l'IA
       let finalPortion = portion;
       if (parsedItem.quantityNumber !== undefined && parsedItem.quantity) {
@@ -965,9 +974,7 @@ export default function AILoggerScreen() {
         };
       }
 
-      // Recalculer le FoodItemRef et les points avec la portion ajustée
       const finalItemRef = createFoodItemRef(foodItem, finalPortion);
-      const finalPointsCost = Math.round(computeFoodPoints(foodItem) * Math.sqrt(finalPortion.multiplier));
 
       // Remplacer l'item à l'index donné
       const updatedItems = [...detectedItems];
@@ -978,7 +985,6 @@ export default function AILoggerScreen() {
         offItem: undefined,
         portion: finalPortion,
         itemRef: finalItemRef,
-        pointsCost: finalPointsCost,
         source: match ? 'db' : 'estimated',
         quantity: parsedItem.quantity,
         quantityNumber: parsedItem.quantityNumber,
@@ -1149,7 +1155,6 @@ export default function AILoggerScreen() {
                         </Text>
                       </View>
                     </View>
-                    <Text style={styles.itemPoints}>{item.pointsCost} pts</Text>
                   </View>
 
                   {item.source === 'off' && item.offItem ? (
@@ -1225,7 +1230,7 @@ export default function AILoggerScreen() {
 
           <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
             <Text style={styles.confirmButtonText}>
-              Confirmer et enregistrer ({detectedItems.reduce((sum, item) => sum + item.pointsCost, 0)} pts)
+              Confirmer et enregistrer
             </Text>
           </TouchableOpacity>
         </View>
@@ -1256,6 +1261,23 @@ export default function AILoggerScreen() {
                 <Text style={styles.modalSubtitle}>
                   {detectedItems[editingQuantityIndex].originalName}
                 </Text>
+                {editingItem && (
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoText}>
+                      Multiplicateur actuel: x{editingItem.portion.multiplier.toFixed(2)}
+                    </Text>
+                    {editingFoodItem && (
+                      <Text style={styles.modalInfoTextMuted}>
+                        Base {Math.round(editingFoodItem.calories_kcal || 0)} kcal -> {Math.round((editingFoodItem.calories_kcal || 0) * editingItem.portion.multiplier)} kcal
+                      </Text>
+                    )}
+                  </View>
+                )}
+                {editingItem?.quantity && (
+                  <Text style={styles.modalInfoTextMuted}>
+                    Quantité détectée: "{editingItem.quantity}"
+                  </Text>
+                )}
                 <TextInput
                   style={styles.quantityInput}
                   placeholder="Ex: 200g, 2 portions, 1 tasse"
@@ -1263,6 +1285,37 @@ export default function AILoggerScreen() {
                   onChangeText={setQuantityInput}
                   autoFocus
                 />
+                <View style={styles.presetGroup}>
+                  <Text style={styles.presetTitle}>Portions rapides</Text>
+                  <View style={styles.presetRow}>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyPortionPreset(0.25)}>
+                      <Text style={styles.presetButtonText}>1/4</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyPortionPreset(0.5)}>
+                      <Text style={styles.presetButtonText}>1/2</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyPortionPreset(1)}>
+                      <Text style={styles.presetButtonText}>1</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyPortionPreset(2)}>
+                      <Text style={styles.presetButtonText}>2</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.presetGroup}>
+                  <Text style={styles.presetTitle}>Cuillères</Text>
+                  <View style={styles.presetRow}>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyQuantityPreset('1 c. à soupe')}>
+                      <Text style={styles.presetButtonText}>1 c. à soupe</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyQuantityPreset('2 c. à soupe')}>
+                      <Text style={styles.presetButtonText}>2 c. à soupe</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.presetButton} onPress={() => applyQuantityPreset('1 c. à thé')}>
+                      <Text style={styles.presetButtonText}>1 c. à thé</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
                 <Text style={styles.modalHint}>
                   Exemples: 200g, 1.5 portions, 2 toasts, 250ml
                 </Text>
@@ -1586,11 +1639,6 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     flex: 1,
   },
-  itemPoints: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fbbf24',
-  },
   itemInfo: {
     marginBottom: 12,
   },
@@ -1685,6 +1733,20 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginBottom: 16,
   },
+  modalInfoRow: {
+    marginBottom: 8,
+  },
+  modalInfoText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  modalInfoTextMuted: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginBottom: 8,
+  },
   quantityInput: {
     backgroundColor: '#111827',
     borderRadius: 12,
@@ -1699,6 +1761,34 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 12,
     marginBottom: 20,
+  },
+  presetGroup: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  presetTitle: {
+    color: '#cbd5f5',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  presetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  presetButton: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  presetButtonText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1786,5 +1876,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
-
 

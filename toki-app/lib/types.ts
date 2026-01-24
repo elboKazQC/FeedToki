@@ -86,11 +86,6 @@ export type UserDetailedStats = {
   customFoodsCount: number;
   aiLogsCount: number; // Nombre de logs avec context 'ai-logger'
 
-  // Points system (legacy - kept optional for compatibility)
-  currentPointsBalance?: number;
-  totalPointsEarned?: number;
-  lastClaimDate?: string;
-  
   // Calculated metrics
   mealsPerDay: number; // Moyenne de repas par jour actif
   daysSinceLastActivity: number; // Jours depuis dernière activité
@@ -129,9 +124,6 @@ export type GlobalKPIs = {
   mrr: number; // Monthly Recurring Revenue (en dollars)
   conversionRate: number; // % utilisateurs avec abonnement payant
 
-  // Legacy points metrics (optional)
-  averagePointsBalance?: number;
-  
   // Usage metrics
   totalCustomFoods: number;
   totalAiLogs: number;

@@ -181,8 +181,6 @@ export default function AdminKPIScreen() {
       currentStreak: kpi.stats.currentStreak,
       longestStreak: kpi.stats.longestStreak,
       lastActivityDate: kpi.stats.lastActivityDate,
-      currentPointsBalance: kpi.stats.currentPointsBalance,
-      totalPointsEarned: kpi.stats.totalPointsEarned,
       customFoodsCount: kpi.stats.customFoodsCount,
       aiLogsCount: kpi.stats.aiLogsCount,
       averageParsingTimeMs: kpi.stats.averageParsingTimeMs || 0,
@@ -403,9 +401,9 @@ export default function AdminKPIScreen() {
 
         {activeTab === 'usage' && (
           <View style={styles.tableView}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Usage et Points</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Usage</Text>
             <UserTable
-              data={[...filteredKPIs].sort((a, b) => b.stats.totalPointsEarned - a.stats.totalPointsEarned)}
+              data={[...filteredKPIs].sort((a, b) => b.stats.totalMeals - a.stats.totalMeals)}
             />
           </View>
         )}

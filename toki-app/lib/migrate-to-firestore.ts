@@ -13,7 +13,6 @@ const MIGRATION_FLAG_KEY = 'toki_firestore_migration_completed';
 export type MigrationResult = {
   success: boolean;
   entriesMigrated: number;
-  pointsMigrated: boolean;
   targetsMigrated: boolean;
   weightsMigrated: number;
   profileMigrated: boolean;
@@ -46,7 +45,6 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
   const result: MigrationResult = {
     success: false,
     entriesMigrated: 0,
-    pointsMigrated: false,
     targetsMigrated: false,
     weightsMigrated: 0,
     profileMigrated: false,
@@ -89,30 +87,7 @@ export async function migrateToFirestore(userId: string): Promise<MigrationResul
       console.error('Erreur migration entries:', e);
     }
 
-    // 2. Migrer les points
-    try {
-      const pointsKey = `feedtoki_points_${userId}_v2`;
-      const pointsRaw = await AsyncStorage.getItem(pointsKey);
-      if (pointsRaw) {
-        const pointsData = JSON.parse(pointsRaw);
-        const pointsRef = doc(getDb(), 'users', userId, 'points', 'current');
-        batch.set(pointsRef, pointsData);
-        result.pointsMigrated = true;
-      }
-
-      // Migrer aussi les points totaux
-      const totalPointsKey = `feedtoki_total_points_${userId}_v1`;
-      const totalPointsRaw = await AsyncStorage.getItem(totalPointsKey);
-      if (totalPointsRaw) {
-        const totalPoints = JSON.parse(totalPointsRaw);
-        const totalPointsRef = doc(getDb(), 'users', userId, 'points', 'total');
-        batch.set(totalPointsRef, { value: totalPoints });
-      }
-    } catch (e: any) {
-      console.error('Erreur migration points:', e);
-    }
-
-    // 3. Migrer les targets nutrition
+    // 2. Migrer les targets nutrition
     try {
       const targetsKey = `feedtoki_targets_${userId}_v1`;
       const targetsRaw = await AsyncStorage.getItem(targetsKey);
@@ -193,7 +168,6 @@ export async function autoMigrateIfNeeded(userId: string): Promise<void> {
     if (result.success) {
       console.log('[Migration] Données migrées avec succès:', {
         entries: result.entriesMigrated,
-        points: result.pointsMigrated,
         targets: result.targetsMigrated,
         weights: result.weightsMigrated,
         profile: result.profileMigrated,
@@ -226,7 +200,6 @@ export async function forceMigration(userId: string): Promise<MigrationResult> {
     if (result.success) {
       console.log('[Migration] ✅ Migration forcée réussie:', {
         entries: result.entriesMigrated,
-        points: result.pointsMigrated,
         targets: result.targetsMigrated,
         weights: result.weightsMigrated,
         profile: result.profileMigrated,
@@ -241,7 +214,6 @@ export async function forceMigration(userId: string): Promise<MigrationResult> {
     return {
       success: false,
       entriesMigrated: 0,
-      pointsMigrated: false,
       targetsMigrated: false,
       weightsMigrated: 0,
       profileMigrated: false,
@@ -249,5 +221,4 @@ export async function forceMigration(userId: string): Promise<MigrationResult> {
     };
   }
 }
-
 

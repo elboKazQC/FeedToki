@@ -12,8 +12,6 @@ export type AnalyticsEvent =
   | 'onboarding_completed'
   | 'target_updated'
   | 'food_item_added'
-  | 'points_spent'
-  | 'points_earned'
   | 'screen_view'
   | 'ai_parser_used'
   | 'barcode_scan_success'
@@ -99,7 +97,6 @@ export function trackMealLogged(params: {
   category: string;
   itemsCount: number;
   score?: number;
-  pointsCost?: number;
   hasAiParser?: boolean;
 }): void {
   trackEvent('meal_logged', {
@@ -107,7 +104,6 @@ export function trackMealLogged(params: {
     category: params.category,
     items_count: params.itemsCount,
     score: params.score,
-    points_cost: params.pointsCost,
     has_ai_parser: params.hasAiParser,
   });
 }
@@ -157,7 +153,7 @@ export function trackOnboardingCompleted(params: {
  * Tracker une mise à jour des objectifs
  */
 export function trackTargetUpdated(params: {
-  targetType: 'nutrition' | 'weight' | 'points';
+  targetType: 'nutrition' | 'weight';
   oldValue?: number;
   newValue?: number;
 }): void {

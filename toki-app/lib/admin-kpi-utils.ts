@@ -1,7 +1,7 @@
 // Utilitaires pour le système de KPI Admin
 // Permet de récupérer et calculer toutes les métriques utilisateurs
 
-import { collection, doc, getDoc, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db, FIREBASE_ENABLED, getDb } from './firebase-config';
 import { MealEntry, normalizeDate, computeStreak, DayFeed } from './stats';
 import { UserProfile, UserDetailedStats, GlobalKPIs, UserKPI, KPIFilter, SubscriptionStatus, SubscriptionTier, WeightGoal, ActivityLevel } from './types';
@@ -65,40 +65,7 @@ export async function fetchUserMeals(userId: string): Promise<MealEntry[]> {
   }
 }
 
-/**
- * Charger les points d'un utilisateur depuis Firestore
- */
-export async function fetchUserPoints(userId: string): Promise<{
-  balance: number;
-  lastClaimDate?: string;
-  totalPoints: number;
-}> {
-  if (!isFirebaseAvailable()) {
-    return { balance: 0, totalPoints: 0 };
-  }
-
-  try {
-    const currentRef = doc(getDb(), 'users', userId, 'points', 'current');
-    const totalRef = doc(getDb(), 'users', userId, 'points', 'total');
-    
-    const [currentDoc, totalDoc] = await Promise.all([
-      getDoc(currentRef),
-      getDoc(totalRef),
-    ]);
-
-    const currentData = currentDoc.data();
-    const totalData = totalDoc.data();
-
-    return {
-      balance: currentData?.balance || 0,
-      lastClaimDate: currentData?.lastClaimDate || undefined,
-      totalPoints: totalData?.totalPoints || 0,
-    };
-  } catch (error) {
-    console.error(`[Admin KPI] Erreur chargement points pour ${userId}:`, error);
-    return { balance: 0, totalPoints: 0 };
-  }
-}
+ 
 
 /**
  * Charger le nombre d'aliments personnalisés d'un utilisateur
@@ -123,7 +90,6 @@ export async function calculateUserStats(
   userId: string,
   profile: UserProfile,
   meals: MealEntry[],
-  points: { balance: number; lastClaimDate?: string; totalPoints: number },
   customFoodsCount: number
 ): Promise<UserDetailedStats> {
   const now = new Date();
@@ -236,10 +202,6 @@ export async function calculateUserStats(
     longestStreak: streakStats.longestStreakDays,
     lastActivityDate,
     
-    currentPointsBalance: points.balance,
-    totalPointsEarned: points.totalPoints,
-    lastClaimDate: points.lastClaimDate,
-    
     customFoodsCount,
     aiLogsCount,
     
@@ -262,13 +224,12 @@ export async function calculateUserStats(
  * Charger toutes les données nécessaires pour un utilisateur
  */
 export async function fetchUserKPI(userId: string, profile: UserProfile): Promise<UserKPI> {
-  const [meals, points, customFoodsCount] = await Promise.all([
+  const [meals, customFoodsCount] = await Promise.all([
     fetchUserMeals(userId),
-    fetchUserPoints(userId),
     fetchUserCustomFoodsCount(userId),
   ]);
 
-  const stats = await calculateUserStats(userId, profile, meals, points, customFoodsCount);
+  const stats = await calculateUserStats(userId, profile, meals, customFoodsCount);
 
   return {
     user: profile,
@@ -386,11 +347,6 @@ export async function calculateGlobalKPIs(
     : 0;
 
   // Métriques usage
-  const pointsList = userKPIs.map(kpi => kpi.stats.currentPointsBalance);
-  const averagePointsBalance = pointsList.length > 0
-    ? Math.round((pointsList.reduce((a, b) => a + b, 0) / pointsList.length) * 10) / 10
-    : 0;
-  
   const totalCustomFoods = userKPIs.reduce((sum, kpi) => sum + kpi.stats.customFoodsCount, 0);
   const totalAiLogs = userKPIs.reduce((sum, kpi) => sum + kpi.stats.aiLogsCount, 0);
 
@@ -481,7 +437,6 @@ export async function calculateGlobalKPIs(
     mrr: Math.round(mrr * 100) / 100,
     conversionRate: Math.round(conversionRate * 10) / 10,
     
-    averagePointsBalance,
     totalCustomFoods,
     totalAiLogs,
     

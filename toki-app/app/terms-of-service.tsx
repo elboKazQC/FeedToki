@@ -34,7 +34,7 @@ export default function TermsOfServiceScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text.primary }]}>2. Description du Service</Text>
           <Text style={[styles.text, { color: colors.text.secondary }]}>
-            FeedToki est une application de suivi nutritionnel gamifiée qui permet d'enregistrer vos repas, suivre vos objectifs nutritionnels, calculer un système de points, et visualiser vos statistiques.
+            FeedToki est une application de suivi nutritionnel gamifiee qui permet d'enregistrer vos repas, suivre vos objectifs nutritionnels, analyser vos apports, et visualiser vos statistiques.
           </Text>
         </View>
 

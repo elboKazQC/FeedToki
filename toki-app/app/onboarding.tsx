@@ -10,7 +10,6 @@ import { FIREBASE_ENABLED } from '../lib/firebase-config';
 import { useAuth } from '../lib/auth-context';
 import { updateUserProfile } from '../lib/firebase-auth';
 import { trackOnboardingCompleted } from '../lib/analytics';
-import { arePointsEnabled } from '../lib/points-toggle';
 
 const PROFILE_KEY = 'toki_user_profile_v1';
 
@@ -208,29 +207,16 @@ export default function OnboardingScreen() {
           <Text style={styles.emoji}>🐉</Text>
           <Text style={styles.title}>Bienvenue sur Toki!</Text>
           <Text style={styles.subtitle}>
-            {arePointsEnabled() ? (
-              <>Toki est ton ami dragon qui t&apos;aide à mieux manger via un système de <Text style={styles.bold}>points-budget</Text>.</>
-            ) : (
-              <>Toki est ton ami dragon qui t&apos;aide à mieux suivre tes repas et tes objectifs nutritionnels.</>
-            )}
+            Toki est ton ami dragon qui t&apos;aide à mieux suivre tes repas et tes objectifs nutritionnels.
           </Text>
-          
+
           <View style={styles.explainBox}>
-            <Text style={styles.explainTitle}>💡 Comment ça marche?</Text>
-            {arePointsEnabled() ? (
-              <>
-                <Text style={styles.explainText}>• Tu as un <Text style={styles.bold}>budget de points</Text> par jour</Text>
-                <Text style={styles.explainText}>• Les aliments sains coûtent <Text style={styles.bold}>0-1 point</Text> 🥗</Text>
-                <Text style={styles.explainText}>• Les cheats coûtent <Text style={styles.bold}>plus cher</Text> 🍕</Text>
-                <Text style={styles.explainText}>• <Text style={styles.bold}>Rien n&apos;est interdit</Text>, tu gères ton budget!</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.explainText}>• Enregistre tes repas pour suivre tes calories et macros</Text>
-                <Text style={styles.explainText}>• L&apos;analyse IA t&apos;aidera à identifier des améliorations simples</Text>
-                <Text style={styles.explainText}>• Rien n&apos;est interdit — garde le suivi pour progresser</Text>
-              </>
-            )}
+            <Text style={styles.explainTitle}>Comment ca marche?</Text>
+            <>
+              <Text style={styles.explainText}>- Enregistre tes repas pour suivre tes calories et macros</Text>
+              <Text style={styles.explainText}>- L'analyse IA t'aidera a identifier des ameliorations simples</Text>
+              <Text style={styles.explainText}>- Rien n'est interdit - garde le suivi pour progresser</Text>
+            </>
           </View>
 
           <Pressable style={styles.buttonPrimary} onPress={() => setStep(2)}>
@@ -247,7 +233,7 @@ export default function OnboardingScreen() {
         <View style={styles.content}>
           <Text style={styles.title}>Quel est ton objectif?</Text>
           <Text style={styles.subtitle}>
-            {arePointsEnabled() ? 'Ceci déterminera ton budget calorique et tes points quotidiens.' : 'Ceci déterminera ton budget calorique.'}
+            Ceci déterminera ton budget calorique.
           </Text>
 
           <View style={styles.optionsContainer}>
@@ -508,17 +494,6 @@ export default function OnboardingScreen() {
             </Text>
           </View>
 
-          <View style={[styles.summaryRow, styles.highlight]}>
-            <Text style={styles.summaryLabel}>💰 Points par jour:</Text>
-            <Text style={[styles.summaryValue, styles.bold]}>
-              {previewProfile.dailyPointsBudget ?? 0} pts
-            </Text>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Cap maximum:</Text>
-            <Text style={styles.summaryValue}>{previewProfile.maxPointsCap ?? 0} pts</Text>
-          </View>
         </View>
 
         <View style={styles.formulaBox}>
@@ -530,14 +505,13 @@ export default function OnboardingScreen() {
             Cette formule prend en compte ton <Text style={styles.bold}>poids</Text>, ta <Text style={styles.bold}>taille</Text>, ton <Text style={styles.bold}>genre</Text> et ton <Text style={styles.bold}>niveau d&apos;activité</Text> pour déterminer exactement combien de calories ton corps brûle chaque jour.
           </Text>
           <Text style={styles.formulaText}>
-            Ensuite, on ajuste selon ton objectif (perte de poids, maintenance) pour te donner un budget calorique personnalisé, puis on convertit ça en <Text style={styles.bold}>points</Text> pour que ce soit simple à suivre!
+            Ensuite, on ajuste selon ton objectif (perte de poids, maintenance) pour te donner un budget calorique personnalise.
           </Text>
         </View>
 
         <View style={styles.explainBox}>
           <Text style={styles.explainText}>
-            💡 Avec <Text style={styles.bold}>{previewProfile.dailyPointsBudget ?? 0} points/jour</Text>, 
-            tu peux manger sainement ET te permettre des petits plaisirs tout en atteignant ton objectif!
+            Garde le suivi pour ajuster tes repas au fil du temps.
           </Text>
         </View>
 

@@ -100,12 +100,11 @@ Calories: ${food.calories_kcal || 0} kcal
 Protéines: ${food.protein_g || 0}g
 Glucides: ${food.carbs_g || 0}g
 Lipides: ${food.fat_g || 0}g
-Points: ${food.points || 'N/A'}
 Créé par: ${food.userEmail || food.userId}`;
   };
 
   const copyFoodToClipboard = async (food: CustomFoodWithUser) => {
-    const foodCode = `{ id: '${food.id}', name: '${food.name}', tags: [${food.tags?.map(t => `'${t}'`).join(', ') || ''}], baseScore: ${food.baseScore || 50}, protein_g: ${food.protein_g || 0}, carbs_g: ${food.carbs_g || 0}, fat_g: ${food.fat_g || 0}, calories_kcal: ${food.calories_kcal || 0}, points: ${food.points || 0} },`;
+    const foodCode = `{ id: '${food.id}', name: '${food.name}', tags: [${food.tags?.map(t => `'${t}'`).join(', ') || ''}], baseScore: ${food.baseScore || 50}, protein_g: ${food.protein_g || 0}, carbs_g: ${food.carbs_g || 0}, fat_g: ${food.fat_g || 0}, calories_kcal: ${food.calories_kcal || 0} },`;
     
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       await navigator.clipboard.writeText(foodCode);
@@ -169,7 +168,7 @@ Créé par: ${food.userEmail || food.userId}`;
                     🔥 {food.calories_kcal || 0} cal · 💪 {food.protein_g || 0}g prot · 🍞 {food.carbs_g || 0}g gluc · 🧈 {food.fat_g || 0}g lip
                   </Text>
                   <Text style={[styles.foodDetail, { color: colors.icon }]}>
-                    📊 {food.points || 'N/A'} pts · 🏷️ {food.tags?.join(', ') || 'Aucun tag'}
+                    🏷️ {food.tags?.join(', ') || 'Aucun tag'}
                   </Text>
                   <Text style={[styles.foodUser, { color: colors.icon }]}>
                     👤 {food.userEmail || food.userId}
@@ -331,4 +330,3 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
-

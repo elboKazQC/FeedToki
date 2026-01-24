@@ -98,6 +98,21 @@ function extractQuantity(text: string, foodName: string): { quantity?: string; q
   return {};
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isNegated(part: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => {
+    const escaped = escapeRegex(keyword.toLowerCase());
+    const pattern = new RegExp(
+      `\\b(?:sans|pas de|pas d'|no|without)\\s+(?:la\\s+|le\\s+|les\\s+|du\\s+|de\\s+la\\s+|des\\s+)?${escaped}\\b`,
+      'i'
+    );
+    return pattern.test(part);
+  });
+}
+
 /**
  * Normaliser un nom d'aliment pour le dédoublonnage
  * Enlève accents, pluriels simples, et trim
@@ -214,6 +229,7 @@ export async function parseMealDescription(
       
       // Beurre et spreads
       { keywords: ['beurre', 'butter'], name: 'Toast au beurre' },
+      { keywords: ['confiture', 'jam', 'marmelade', 'gelée'], name: 'Confiture' },
       { keywords: ['peanut', 'arachide', 'peanut butter', 'beurre de peanut', 'beurre de cacahuète'], name: 'Toast au beurre de peanut' },
     ];
 
@@ -381,6 +397,9 @@ export async function parseMealDescription(
         );
         
         if (hasKeyword) {
+          if (isNegated(part, foodGroup.keywords)) {
+            continue;
+          }
           const normalizedKey = normalizeForDeduplication(foodGroup.name);
           
           // Ajouter si pas déjà présent

@@ -13,7 +13,6 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db, getDb } from './firebase-config';
 import { UserProfile } from './types';
-import { arePointsEnabled } from './points-toggle';
 
 export type AuthUser = User;
 
@@ -125,20 +124,13 @@ export async function signUp(email: string, password: string, displayName: strin
     await updateProfile(userCredential.user, { displayName });
     
     // Créer le profil par défaut dans Firestore D'ABORD
-    // Utiliser le calcul de points au lieu d'une valeur hardcodée
     const defaultWeeklyTarget = 10500; // Maintenance par défaut (~1500 cal/jour)
-    const defaultDailyPoints = Math.max(3, Math.round((defaultWeeklyTarget * 0.30 / 7) / 80)); // ~6 points
     
     const defaultProfile: UserProfile = {
       userId: userCredential.user.uid,
       displayName,
       email: userCredential.user.email || email,
       weeklyCalorieTarget: defaultWeeklyTarget,
-      // Only include points fields when the feature is enabled
-      ...(arePointsEnabled() ? {
-        dailyPointsBudget: defaultDailyPoints,
-        maxPointsCap: Math.min(defaultDailyPoints * 4, 12),
-      } : {}),
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     } as UserProfile;

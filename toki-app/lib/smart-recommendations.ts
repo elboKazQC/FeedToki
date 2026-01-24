@@ -8,7 +8,6 @@ export type SmartRecommendation = {
   item: FoodItem;
   reason: string;
   priority: number; // 1-5, higher = better match
-  pointsCost: number;
   suggestedGrams: number; // Portion suggérée en grammes
   suggestedVisualRef: string; // Référence visuelle
   portion: PortionReference; // Objet portion complet
@@ -16,12 +15,11 @@ export type SmartRecommendation = {
 
 /**
  * Get smart food suggestions filtered by taste preference (sweet or salty)
- * Takes into account: points, calories, protein, carbs, fat remaining
+ * Takes into account: calories, protein, carbs, fat remaining
  */
 export function getSmartRecommendationsByTaste(
   currentTotals: DailyNutritionTotals,
   targets: NutritionTargets,
-  availablePoints: number,
   tastePreference: 'sweet' | 'salty' | null,
   timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
 ): SmartRecommendation[] {
@@ -85,12 +83,7 @@ export function getSmartRecommendationsByTaste(
     let priority = 0;
     let reasons: string[] = [];
 
-    const estimatedCost = estimatePointsCost(item);
     
-    // Can't afford it
-    if (estimatedCost > availablePoints) {
-      return;
-    }
 
     // Priority boost for items that fit remaining budget perfectly
     if (itemCalories <= remaining.calories && itemCalories >= remaining.calories * 0.3) {
@@ -110,14 +103,6 @@ export function getSmartRecommendationsByTaste(
       reasons.push(`Dessert protéiné sain!`);
     }
 
-    // Free/low-cost items are always good
-    if (estimatedCost === 0) {
-      priority += 2;
-      reasons.push('Gratuit en points!');
-    } else if (estimatedCost <= availablePoints && estimatedCost <= 2) {
-      priority += 1;
-      reasons.push(`Seulement ${estimatedCost} point${estimatedCost > 1 ? 's' : ''}`);
-    }
 
     // Vegetables are always recommended (for salty)
     if (tastePreference === 'salty' && item.tags.includes('legume')) {
@@ -140,7 +125,7 @@ export function getSmartRecommendationsByTaste(
     }
 
     // Penalize ultra-processed (unless it's a real cheat)
-    if (item.tags.includes('ultra_transforme') && estimatedCost < 3) {
+    if (item.tags.includes('ultra_transforme')) {
       priority -= 1;
     }
 
@@ -156,7 +141,6 @@ export function getSmartRecommendationsByTaste(
         item,
         reason: reasons.join(' · '),
         priority,
-        pointsCost: estimatedCost,
         suggestedGrams: defaultPortion.grams,
         suggestedVisualRef: defaultPortion.visualRef,
         portion: defaultPortion,
@@ -164,14 +148,9 @@ export function getSmartRecommendationsByTaste(
     }
   });
 
-  // Sort by priority (highest first), then by points cost (lowest first)
+  // Sort by priority (highest first)
   return recommendations
-    .sort((a, b) => {
-      if (b.priority !== a.priority) {
-        return b.priority - a.priority;
-      }
-      return a.pointsCost - b.pointsCost;
-    })
+    .sort((a, b) => b.priority - a.priority)
     .slice(0, 8); // Return top 8 suggestions
 }
 
@@ -182,7 +161,6 @@ export function getSmartRecommendationsByTaste(
 export function getSmartRecommendations(
   currentTotals: DailyNutritionTotals,
   targets: NutritionTargets,
-  availablePoints: number,
   timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
 ): SmartRecommendation[] {
   // Calculate what's remaining
@@ -221,15 +199,6 @@ export function getSmartRecommendations(
       reasons.push(`Boost protéines (+${itemProtein}g)`);
     }
 
-    // Free/low-cost items are always good
-    const estimatedCost = estimatePointsCost(item);
-    if (estimatedCost === 0) {
-      priority += 2;
-      reasons.push('Gratuit en points!');
-    } else if (estimatedCost > availablePoints) {
-      // Can't afford it
-      return;
-    }
 
     // Vegetables are always recommended, boost at lunch and dinner
     if (item.tags.includes('legume')) {
@@ -274,7 +243,6 @@ export function getSmartRecommendations(
         item,
         reason: reasons.join(' · '),
         priority,
-        pointsCost: estimatedCost,
         suggestedGrams: defaultPortion.grams,
         suggestedVisualRef: defaultPortion.visualRef,
         portion: defaultPortion,
@@ -291,7 +259,6 @@ export function getSmartRecommendations(
         item: shake,
         reason: 'Shake de protéine quotidien recommandé',
         priority: 5,
-        pointsCost: estimatePointsCost(shake),
         suggestedGrams: defaultPortion.grams,
         suggestedVisualRef: defaultPortion.visualRef,
         portion: defaultPortion,
@@ -308,7 +275,6 @@ export function getSmartRecommendations(
         item,
         reason: 'Dessert santé si encore faim',
         priority: 3,
-        pointsCost: estimatePointsCost(item),
         suggestedGrams: defaultPortion.grams,
         suggestedVisualRef: defaultPortion.visualRef,
         portion: defaultPortion,
@@ -316,14 +282,9 @@ export function getSmartRecommendations(
     });
   }
 
-  // Sort by priority (highest first), then by points cost (lowest first)
+  // Sort by priority (highest first)
   return recommendations
-    .sort((a, b) => {
-      if (b.priority !== a.priority) {
-        return b.priority - a.priority;
-      }
-      return a.pointsCost - b.pointsCost;
-    })
+    .sort((a, b) => b.priority - a.priority)
     .slice(0, 8); // Return top 8 suggestions
 }
 
@@ -333,35 +294,12 @@ export function getSmartRecommendations(
 export function getBestRecommendation(
   currentTotals: DailyNutritionTotals,
   targets: NutritionTargets,
-  availablePoints: number,
   timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
 ): SmartRecommendation | null {
-  const recs = getSmartRecommendations(currentTotals, targets, availablePoints, timeOfDay);
+  const recs = getSmartRecommendations(currentTotals, targets, timeOfDay);
   return recs[0] || null;
 }
 
-/**
- * Estimate points cost for an item (simplified version)
- */
-function estimatePointsCost(item: FoodItem): number {
-  if (typeof item.points === 'number') return item.points;
-
-  const cal = item.calories_kcal || 150;
-
-  // Free items
-  if (item.tags.includes('proteine_maigre') || item.tags.includes('legume')) {
-    return 0;
-  }
-
-  let baseCost = cal / 100;
-
-  if (item.tags.includes('ultra_transforme')) baseCost *= 1.5;
-  if (item.tags.includes('gras_frit')) baseCost *= 1.3;
-  if (item.tags.includes('sucre') && cal > 100) baseCost *= 1.2;
-  if (item.tags.includes('grain_complet')) baseCost *= 0.8;
-
-  return Math.max(0, Math.round(baseCost));
-}
 
 /**
  * Get explanation of what user needs most right now
