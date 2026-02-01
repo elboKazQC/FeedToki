@@ -35,9 +35,9 @@ export async function extractBarcodeWithOpenAI(
 
     // Rate limiting par utilisateur dans Firestore (si userId fourni)
     if (userId && userId !== 'guest') {
-      const canUse = await checkUserAPILimit(userId);
-      if (!canUse) {
-        logger.warn('[OpenAI Parser] Limite quotidienne atteinte pour extraction code-barres');
+      const limitCheck = await checkUserAPILimit(userId);
+      if (!limitCheck.allowed) {
+        logger.warn('[OpenAI Parser] Extraction bloquée:', limitCheck.reason || 'Limite quotidienne atteinte');
         return null;
       }
     }
@@ -675,4 +675,3 @@ export async function parseMealPhotoWithOpenAI(
     };
   }
 }
-

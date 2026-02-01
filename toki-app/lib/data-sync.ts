@@ -14,6 +14,38 @@ import { syncCheatDaysFromFirestore, getCheatDays, setCheatDay } from './cheat-d
 
 const SYNC_FLAG_KEY = 'toki_last_sync_timestamp';
 
+function parseTimestampToMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'object') {
+    const maybeTimestamp = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
+    if (typeof maybeTimestamp.toDate === 'function') {
+      return maybeTimestamp.toDate().getTime();
+    }
+    if (typeof maybeTimestamp.seconds === 'number') {
+      return maybeTimestamp.seconds * 1000;
+    }
+    if (typeof maybeTimestamp._seconds === 'number') {
+      return maybeTimestamp._seconds * 1000;
+    }
+  }
+  return null;
+}
+
+function getMealUpdatedAtMillis(entry: MealEntry): number {
+  const updatedAtMs = parseTimestampToMillis(entry.updatedAt);
+  if (updatedAtMs !== null) return updatedAtMs;
+  const createdAtMs = parseTimestampToMillis(entry.createdAt);
+  return createdAtMs ?? 0;
+}
+
 /**
  * Vérifier si Firebase est disponible
  */
@@ -111,10 +143,17 @@ export async function loadMealsFromFirestore(userId: string): Promise<MealEntry[
     
     return snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
+      const updatedAtIso =
+        typeof data.updatedAt?.toDate === 'function'
+          ? data.updatedAt.toDate().toISOString()
+          : typeof data.updatedAt === 'string'
+            ? data.updatedAt
+            : undefined;
       return {
         ...data,
         id: docSnap.id,
-        createdAt: data.createdAt || data.updatedAt?.toDate().toISOString() || new Date().toISOString(),
+        updatedAt: updatedAtIso,
+        createdAt: data.createdAt || updatedAtIso || new Date().toISOString(),
       } as MealEntry;
     });
   } catch (error) {
@@ -274,7 +313,7 @@ export async function syncFromFirestore(userId: string): Promise<{
       });
     }
     
-    // Fusionner: créer un Map par ID, Firestore prend priorité (plus récent)
+    // Fusionner: créer un Map par ID, le plus récent gagne
     const mealsMap = new Map<string, MealEntry>();
     
     // D'abord ajouter les locaux
@@ -282,23 +321,34 @@ export async function syncFromFirestore(userId: string): Promise<{
       mealsMap.set(entry.id, entry);
     }
     
-    // Ensuite ajouter/remplacer par Firestore (priorité)
+    // Ensuite ajouter/remplacer par Firestore (priorité si plus récent)
     let replacedCount = 0;
     let addedCount = 0;
+    let keptLocalCount = 0;
     for (const meal of firestoreMeals) {
       const existing = mealsMap.get(meal.id);
       if (existing) {
-        replacedCount++;
-        if (__DEV__) {
-          console.log(`[Sync] 🔄 Remplacement repas "${meal.label || meal.id}": local=${existing.items?.length || 0} items, firestore=${meal.items?.length || 0} items`);
+        const localUpdatedAt = getMealUpdatedAtMillis(existing);
+        const remoteUpdatedAt = getMealUpdatedAtMillis(meal);
+        if (remoteUpdatedAt >= localUpdatedAt) {
+          replacedCount++;
+          if (__DEV__) {
+            console.log(`[Sync] 🔄 Remplacement repas "${meal.label || meal.id}": local=${existing.items?.length || 0} items, firestore=${meal.items?.length || 0} items`);
+          }
+          mealsMap.set(meal.id, meal);
+        } else {
+          keptLocalCount++;
+          if (__DEV__) {
+            console.log(`[Sync] Conservation repas local "${existing.label || existing.id}": local plus récent`);
+          }
         }
       } else {
         addedCount++;
         if (__DEV__) {
           console.log(`[Sync] ➕ Ajout repas depuis Firestore: "${meal.label || meal.id}" avec ${meal.items?.length || 0} items`);
         }
+        mealsMap.set(meal.id, meal);
       }
-      mealsMap.set(meal.id, meal);
     }
     
     const mergedMeals = Array.from(mealsMap.values());
@@ -308,7 +358,7 @@ export async function syncFromFirestore(userId: string): Promise<{
     if (mergedMeals.length > 0) {
       await AsyncStorage.setItem(entriesKey, JSON.stringify(mergedMeals));
       result.mealsMerged = mergedMeals.length;
-      console.log('[Sync] ✅ Repas fusionnés:', mergedMeals.length, '(local:', localEntries.length, ', firestore:', firestoreMeals.length, `, ajoutés: ${addedCount}, remplacés: ${replacedCount})`);
+      console.log('[Sync] ✅ Repas fusionnés:', mergedMeals.length, '(local:', localEntries.length, ', firestore:', firestoreMeals.length, `, ajoutés: ${addedCount}, remplacés: ${replacedCount}, locaux conservés: ${keptLocalCount})`);
     } else {
       console.log('[Sync] ℹ️ Aucun repas à fusionner');
     }
@@ -418,9 +468,7 @@ export function validateAndFixMealEntries(
 
   if (totalInvalidItems > 0 || totalFixedEntries > 0) {
     console.log(`[Sync Validation] ✅ Validation terminée: ${totalFixedEntries} entrée(s) corrigée(s), ${totalInvalidItems} item(s) invalide(s) retiré(s)`);
-  }
-
-  return validatedEntries;
+  }  return validatedEntries;
 }/**
  * Fonction factice pour compatibilité (système de points supprimé)
  */

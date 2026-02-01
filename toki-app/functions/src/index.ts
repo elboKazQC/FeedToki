@@ -21,6 +21,44 @@ if (!admin.apps.length) {
 // OU via Firebase Console > Functions > Configuration > Secrets
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || functions.config().stripe?.secret_key;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || functions.config().stripe?.webhook_secret;
+const WEBHOOK_DEBUG = process.env.STRIPE_WEBHOOK_DEBUG === 'true' || functions.config().stripe?.webhook_debug === 'true';
+
+const DEFAULT_SUCCESS_URL = 'https://feed-toki.firebaseapp.com/subscription?success=true';
+const DEFAULT_CANCEL_URL = 'https://feed-toki.firebaseapp.com/subscription?canceled=true';
+
+const CHECKOUT_REDIRECT_ALLOWED_HOSTS = new Set([
+  'feed-toki.firebaseapp.com',
+  'feed-toki.web.app',
+  'localhost',
+  '127.0.0.1',
+]);
+
+const CHECKOUT_REDIRECT_ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
+
+function sanitizeCheckoutRedirectUrl(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = new URL(trimmed);
+    if (!CHECKOUT_REDIRECT_ALLOWED_PROTOCOLS.has(parsed.protocol)) {
+      return fallback;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (!CHECKOUT_REDIRECT_ALLOWED_HOSTS.has(host)) {
+      return fallback;
+    }
+    return parsed.toString();
+  } catch {
+    return fallback;
+  }
+}
+
+function logWebhookDebug(...args: any[]): void {
+  if (WEBHOOK_DEBUG) {
+    console.log(...args);
+  }
+}
 
 /**
  * Décode un code-barres depuis une image base64 en utilisant Google Cloud Vision API
@@ -274,6 +312,18 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
     }
     
     // Créer la session Checkout
+    const requestedSuccessUrl = typeof data?.successUrl === 'string' ? data.successUrl : '';
+    const requestedCancelUrl = typeof data?.cancelUrl === 'string' ? data.cancelUrl : '';
+    const successUrl = sanitizeCheckoutRedirectUrl(requestedSuccessUrl, DEFAULT_SUCCESS_URL);
+    const cancelUrl = sanitizeCheckoutRedirectUrl(requestedCancelUrl, DEFAULT_CANCEL_URL);
+
+    if (requestedSuccessUrl && successUrl === DEFAULT_SUCCESS_URL) {
+      console.warn('[createCheckoutSession] successUrl rejetée, fallback par défaut');
+    }
+    if (requestedCancelUrl && cancelUrl === DEFAULT_CANCEL_URL) {
+      console.warn('[createCheckoutSession] cancelUrl rejetée, fallback par défaut');
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer_email: context.auth.token.email,
       payment_method_types: ['card'],
@@ -284,8 +334,8 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         },
       ],
       mode: 'subscription',
-      success_url: `${data.successUrl || 'https://feed-toki.firebaseapp.com/subscription?success=true'}`,
-      cancel_url: `${data.cancelUrl || 'https://feed-toki.firebaseapp.com/subscription?canceled=true'}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
         userId: userId,
       },
@@ -333,68 +383,66 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
   console.log('[handleStripeWebhook] Route:', req.route?.path || 'N/A');
   
   // Logs détaillés des headers
-  console.log('[handleStripeWebhook] 📋 Headers complets:', JSON.stringify(req.headers, null, 2));
+  logWebhookDebug('[handleStripeWebhook] 📋 Headers complets:', JSON.stringify(req.headers, null, 2));
   console.log('[handleStripeWebhook] Content-Type:', req.headers['content-type']);
   console.log('[handleStripeWebhook] Content-Length:', req.headers['content-length']);
   console.log('[handleStripeWebhook] Stripe-Signature header présent:', !!req.headers['stripe-signature']);
   const stripeSignatureHeader = req.headers['stripe-signature'];
   if (stripeSignatureHeader) {
     const sigStr = Array.isArray(stripeSignatureHeader) ? stripeSignatureHeader[0] : stripeSignatureHeader;
-    console.log('[handleStripeWebhook] Stripe-Signature (premiers 50 chars):', sigStr.substring(0, 50));
+    logWebhookDebug('[handleStripeWebhook] Stripe-Signature length:', sigStr.length);
   }
   
   // Logs détaillés du body
-  console.log('[handleStripeWebhook] 📦 Body Analysis:');
-  console.log('[handleStripeWebhook] req.body type:', typeof req.body);
-  console.log('[handleStripeWebhook] req.body is Buffer:', Buffer.isBuffer(req.body));
-  console.log('[handleStripeWebhook] req.body is String:', typeof req.body === 'string');
-  console.log('[handleStripeWebhook] req.body is Object:', typeof req.body === 'object' && !Buffer.isBuffer(req.body));
-  console.log('[handleStripeWebhook] req.body constructor:', req.body?.constructor?.name || 'N/A');
+  logWebhookDebug('[handleStripeWebhook] 📦 Body Analysis:');
+  logWebhookDebug('[handleStripeWebhook] req.body type:', typeof req.body);
+  logWebhookDebug('[handleStripeWebhook] req.body is Buffer:', Buffer.isBuffer(req.body));
+  logWebhookDebug('[handleStripeWebhook] req.body is String:', typeof req.body === 'string');
+  logWebhookDebug('[handleStripeWebhook] req.body is Object:', typeof req.body === 'object' && !Buffer.isBuffer(req.body));
+  logWebhookDebug('[handleStripeWebhook] req.body constructor:', req.body?.constructor?.name || 'N/A');
   
   // Vérifier req.rawBody (propriété Firebase Functions)
   const rawBodyValue = (req as any).rawBody;
-  console.log('[handleStripeWebhook] 🔍 Vérification req.rawBody (Firebase Functions):');
-  console.log('[handleStripeWebhook] req.rawBody présent:', !!rawBodyValue);
-  console.log('[handleStripeWebhook] req.rawBody type:', typeof rawBodyValue);
-  console.log('[handleStripeWebhook] req.rawBody is Buffer:', Buffer.isBuffer(rawBodyValue));
-  console.log('[handleStripeWebhook] req.rawBody is String:', typeof rawBodyValue === 'string');
+  logWebhookDebug('[handleStripeWebhook] 🔍 Vérification req.rawBody (Firebase Functions):');
+  logWebhookDebug('[handleStripeWebhook] req.rawBody présent:', !!rawBodyValue);
+  logWebhookDebug('[handleStripeWebhook] req.rawBody type:', typeof rawBodyValue);
+  logWebhookDebug('[handleStripeWebhook] req.rawBody is Buffer:', Buffer.isBuffer(rawBodyValue));
+  logWebhookDebug('[handleStripeWebhook] req.rawBody is String:', typeof rawBodyValue === 'string');
   
   // Taille du body
   if (Buffer.isBuffer(req.body)) {
-    console.log('[handleStripeWebhook] req.body length (Buffer):', req.body.length, 'bytes');
-    console.log('[handleStripeWebhook] req.body (premiers 200 chars):', req.body.toString('utf8').substring(0, 200));
+    logWebhookDebug('[handleStripeWebhook] req.body length (Buffer):', req.body.length, 'bytes');
+    logWebhookDebug('[handleStripeWebhook] req.body (premiers 200 chars):', req.body.toString('utf8').substring(0, 200));
   } else if (typeof req.body === 'string') {
-    console.log('[handleStripeWebhook] req.body length (String):', req.body.length, 'chars');
-    console.log('[handleStripeWebhook] req.body (premiers 200 chars):', req.body.substring(0, 200));
+    logWebhookDebug('[handleStripeWebhook] req.body length (String):', req.body.length, 'chars');
+    logWebhookDebug('[handleStripeWebhook] req.body (premiers 200 chars):', req.body.substring(0, 200));
   } else {
-    console.log('[handleStripeWebhook] req.body length (JSON):', JSON.stringify(req.body).length, 'chars');
-    console.log('[handleStripeWebhook] req.body keys:', req.body ? Object.keys(req.body) : 'null');
-    console.log('[handleStripeWebhook] req.body (premiers 200 chars):', JSON.stringify(req.body).substring(0, 200));
+    logWebhookDebug('[handleStripeWebhook] req.body length (JSON):', JSON.stringify(req.body).length, 'chars');
+    logWebhookDebug('[handleStripeWebhook] req.body keys:', req.body ? Object.keys(req.body) : 'null');
+    logWebhookDebug('[handleStripeWebhook] req.body (premiers 200 chars):', JSON.stringify(req.body).substring(0, 200));
   }
   
   // Taille du rawBody si disponible
   if (rawBodyValue) {
     if (Buffer.isBuffer(rawBodyValue)) {
-      console.log('[handleStripeWebhook] req.rawBody length (Buffer):', rawBodyValue.length, 'bytes');
-      console.log('[handleStripeWebhook] req.rawBody (premiers 200 chars):', rawBodyValue.toString('utf8').substring(0, 200));
+      logWebhookDebug('[handleStripeWebhook] req.rawBody length (Buffer):', rawBodyValue.length, 'bytes');
+      logWebhookDebug('[handleStripeWebhook] req.rawBody (premiers 200 chars):', rawBodyValue.toString('utf8').substring(0, 200));
     } else if (typeof rawBodyValue === 'string') {
-      console.log('[handleStripeWebhook] req.rawBody length (String):', rawBodyValue.length, 'chars');
-      console.log('[handleStripeWebhook] req.rawBody (premiers 200 chars):', rawBodyValue.substring(0, 200));
+      logWebhookDebug('[handleStripeWebhook] req.rawBody length (String):', rawBodyValue.length, 'chars');
+      logWebhookDebug('[handleStripeWebhook] req.rawBody (premiers 200 chars):', rawBodyValue.substring(0, 200));
     }
   }
   
   // Vérification des clés Stripe
-  console.log('[handleStripeWebhook] 🔑 Vérification clés Stripe:');
-  console.log('[handleStripeWebhook] STRIPE_WEBHOOK_SECRET présent:', !!STRIPE_WEBHOOK_SECRET);
+  logWebhookDebug('[handleStripeWebhook] 🔑 Vérification clés Stripe:');
+  logWebhookDebug('[handleStripeWebhook] STRIPE_WEBHOOK_SECRET présent:', !!STRIPE_WEBHOOK_SECRET);
   if (STRIPE_WEBHOOK_SECRET) {
-    console.log('[handleStripeWebhook] STRIPE_WEBHOOK_SECRET (premiers 10 chars):', STRIPE_WEBHOOK_SECRET.substring(0, 10) + '...');
-    console.log('[handleStripeWebhook] STRIPE_WEBHOOK_SECRET longueur:', STRIPE_WEBHOOK_SECRET.length);
+    logWebhookDebug('[handleStripeWebhook] STRIPE_WEBHOOK_SECRET longueur:', STRIPE_WEBHOOK_SECRET.length);
   }
-  console.log('[handleStripeWebhook] STRIPE_SECRET_KEY présent:', !!STRIPE_SECRET_KEY);
+  logWebhookDebug('[handleStripeWebhook] STRIPE_SECRET_KEY présent:', !!STRIPE_SECRET_KEY);
   if (STRIPE_SECRET_KEY) {
-    console.log('[handleStripeWebhook] STRIPE_SECRET_KEY (premiers 10 chars):', STRIPE_SECRET_KEY.substring(0, 10) + '...');
-    console.log('[handleStripeWebhook] STRIPE_SECRET_KEY longueur:', STRIPE_SECRET_KEY.length);
-    console.log('[handleStripeWebhook] STRIPE_SECRET_KEY mode:', STRIPE_SECRET_KEY.startsWith('sk_test_') ? 'TEST' : STRIPE_SECRET_KEY.startsWith('sk_live_') ? 'PRODUCTION' : 'INCONNU');
+    logWebhookDebug('[handleStripeWebhook] STRIPE_SECRET_KEY longueur:', STRIPE_SECRET_KEY.length);
+    logWebhookDebug('[handleStripeWebhook] STRIPE_SECRET_KEY mode:', STRIPE_SECRET_KEY.startsWith('sk_test_') ? 'TEST' : STRIPE_SECRET_KEY.startsWith('sk_live_') ? 'PRODUCTION' : 'INCONNU');
   }
   
   if (!STRIPE_WEBHOOK_SECRET) {
@@ -418,50 +466,49 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
   const stripe = require('stripe')(STRIPE_SECRET_KEY);
   const sigHeader = req.headers['stripe-signature'];
   const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
-  console.log('[handleStripeWebhook] 🔐 Signature Stripe:');
-  console.log('[handleStripeWebhook] Signature présente:', sig ? 'OUI' : 'NON');
+  logWebhookDebug('[handleStripeWebhook] 🔐 Signature Stripe:');
+  logWebhookDebug('[handleStripeWebhook] Signature présente:', sig ? 'OUI' : 'NON');
   if (sig) {
-    console.log('[handleStripeWebhook] Signature longueur:', sig.length);
-    console.log('[handleStripeWebhook] Signature (premiers 50 chars):', sig.substring(0, 50));
+    logWebhookDebug('[handleStripeWebhook] Signature longueur:', sig.length);
   }
 
   let event;
   try {
-    console.log('[handleStripeWebhook] 🔐 DÉBUT Vérification signature webhook...');
+    logWebhookDebug('[handleStripeWebhook] 🔐 DÉBUT Vérification signature webhook...');
     
     // Utiliser req.rawBody si disponible (Firebase Functions), sinon convertir req.body en Buffer/String
     let rawBody: Buffer | string;
     const rawBodyValue = (req as any).rawBody;
     
     if (rawBodyValue) {
-      console.log('[handleStripeWebhook] ✅ Utilisation req.rawBody (Firebase Functions)');
+      logWebhookDebug('[handleStripeWebhook] ✅ Utilisation req.rawBody (Firebase Functions)');
       rawBody = rawBodyValue;
     } else if (Buffer.isBuffer(req.body)) {
-      console.log('[handleStripeWebhook] ✅ req.body est déjà un Buffer');
+      logWebhookDebug('[handleStripeWebhook] ✅ req.body est déjà un Buffer');
       rawBody = req.body;
     } else if (typeof req.body === 'string') {
-      console.log('[handleStripeWebhook] ✅ req.body est une String');
+      logWebhookDebug('[handleStripeWebhook] ✅ req.body est une String');
       rawBody = req.body;
     } else {
       // Convertir l'objet JSON en string pour la vérification de signature
-      console.log('[handleStripeWebhook] ⚠️ req.body est un objet, conversion en string...');
+      logWebhookDebug('[handleStripeWebhook] ⚠️ req.body est un objet, conversion en string...');
       rawBody = JSON.stringify(req.body);
-      console.log('[handleStripeWebhook] ⚠️ ATTENTION: La vérification de signature peut échouer si le body a été modifié par le parsing JSON');
+      logWebhookDebug('[handleStripeWebhook] ⚠️ ATTENTION: La vérification de signature peut échouer si le body a été modifié par le parsing JSON');
     }
     
-    console.log('[handleStripeWebhook] Body passé à constructEvent:');
-    console.log('[handleStripeWebhook] - Type:', typeof rawBody);
-    console.log('[handleStripeWebhook] - Is Buffer:', Buffer.isBuffer(rawBody));
-    console.log('[handleStripeWebhook] - Is String:', typeof rawBody === 'string');
+    logWebhookDebug('[handleStripeWebhook] Body passé à constructEvent:');
+    logWebhookDebug('[handleStripeWebhook] - Type:', typeof rawBody);
+    logWebhookDebug('[handleStripeWebhook] - Is Buffer:', Buffer.isBuffer(rawBody));
+    logWebhookDebug('[handleStripeWebhook] - Is String:', typeof rawBody === 'string');
     if (Buffer.isBuffer(rawBody)) {
-      console.log('[handleStripeWebhook] - Buffer length:', rawBody.length);
-      console.log('[handleStripeWebhook] - Buffer (premiers 100 bytes):', rawBody.toString('utf8').substring(0, 100));
+      logWebhookDebug('[handleStripeWebhook] - Buffer length:', rawBody.length);
+      logWebhookDebug('[handleStripeWebhook] - Buffer (premiers 100 bytes):', rawBody.toString('utf8').substring(0, 100));
     } else if (typeof rawBody === 'string') {
-      console.log('[handleStripeWebhook] - String length:', rawBody.length);
-      console.log('[handleStripeWebhook] - String (premiers 100 chars):', rawBody.substring(0, 100));
+      logWebhookDebug('[handleStripeWebhook] - String length:', rawBody.length);
+      logWebhookDebug('[handleStripeWebhook] - String (premiers 100 chars):', rawBody.substring(0, 100));
     }
-    console.log('[handleStripeWebhook] Signature passée:', sig ? 'OUI' : 'NON');
-    console.log('[handleStripeWebhook] Secret utilisé (premiers 10 chars):', STRIPE_WEBHOOK_SECRET.substring(0, 10) + '...');
+    logWebhookDebug('[handleStripeWebhook] Signature passée:', sig ? 'OUI' : 'NON');
+    logWebhookDebug('[handleStripeWebhook] Secret utilisé longueur:', STRIPE_WEBHOOK_SECRET.length);
     
     // Utiliser rawBody pour la vérification de signature
     event = stripe.webhooks.constructEvent(rawBody, sig, STRIPE_WEBHOOK_SECRET);
@@ -479,24 +526,24 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
     console.error('[handleStripeWebhook] Erreur message:', err.message);
     console.error('[handleStripeWebhook] Erreur code:', err.code);
     console.error('[handleStripeWebhook] Erreur stack complète:', err.stack);
-    console.error('[handleStripeWebhook] Body au moment de l\'erreur:');
-    console.error('[handleStripeWebhook] req.body - Type:', typeof req.body);
-    console.error('[handleStripeWebhook] req.body - Is Buffer:', Buffer.isBuffer(req.body));
-    console.error('[handleStripeWebhook] req.body - Constructor:', req.body?.constructor?.name);
+    logWebhookDebug('[handleStripeWebhook] Body au moment de l\'erreur:');
+    logWebhookDebug('[handleStripeWebhook] req.body - Type:', typeof req.body);
+    logWebhookDebug('[handleStripeWebhook] req.body - Is Buffer:', Buffer.isBuffer(req.body));
+    logWebhookDebug('[handleStripeWebhook] req.body - Constructor:', req.body?.constructor?.name);
     const rawBodyValue = (req as any).rawBody;
-    console.error('[handleStripeWebhook] req.rawBody présent:', !!rawBodyValue);
-    console.error('[handleStripeWebhook] req.rawBody - Type:', typeof rawBodyValue);
-    console.error('[handleStripeWebhook] req.rawBody - Is Buffer:', Buffer.isBuffer(rawBodyValue));
+    logWebhookDebug('[handleStripeWebhook] req.rawBody présent:', !!rawBodyValue);
+    logWebhookDebug('[handleStripeWebhook] req.rawBody - Type:', typeof rawBodyValue);
+    logWebhookDebug('[handleStripeWebhook] req.rawBody - Is Buffer:', Buffer.isBuffer(rawBodyValue));
     if (Buffer.isBuffer(req.body)) {
-      console.error('[handleStripeWebhook] req.body - Buffer length:', req.body.length);
+      logWebhookDebug('[handleStripeWebhook] req.body - Buffer length:', req.body.length);
     } else {
-      console.error('[handleStripeWebhook] req.body - Value:', JSON.stringify(req.body).substring(0, 500));
+      logWebhookDebug('[handleStripeWebhook] req.body - Value:', JSON.stringify(req.body).substring(0, 500));
     }
     if (rawBodyValue) {
       if (Buffer.isBuffer(rawBodyValue)) {
-        console.error('[handleStripeWebhook] req.rawBody - Buffer length:', rawBodyValue.length);
+        logWebhookDebug('[handleStripeWebhook] req.rawBody - Buffer length:', rawBodyValue.length);
       } else {
-        console.error('[handleStripeWebhook] req.rawBody - String length:', rawBodyValue.length);
+        logWebhookDebug('[handleStripeWebhook] req.rawBody - String length:', rawBodyValue.length);
       }
     }
     console.error('[handleStripeWebhook] Status code: 400');
@@ -506,7 +553,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
 
   try {
     console.log('[handleStripeWebhook] 🔄 DÉBUT Traitement événement...');
-    console.log('[handleStripeWebhook] Événement complet (JSON):', JSON.stringify(event, null, 2));
+    logWebhookDebug('[handleStripeWebhook] Événement complet (JSON):', JSON.stringify(event, null, 2));
     console.log('[handleStripeWebhook] Événement type:', event.type);
     console.log('[handleStripeWebhook] Événement ID:', event.id);
     
@@ -515,21 +562,21 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         console.log('[handleStripeWebhook] 📦 Événement: checkout.session.completed');
         console.log('[handleStripeWebhook] Request ID:', requestId);
         const session = event.data.object;
-        console.log('[handleStripeWebhook] Session complète:', JSON.stringify(session, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Session complète:', JSON.stringify(session, null, 2));
         console.log('[handleStripeWebhook] Session ID:', session.id);
         console.log('[handleStripeWebhook] Session mode:', session.mode);
         console.log('[handleStripeWebhook] Session payment_status:', session.payment_status);
-        console.log('[handleStripeWebhook] Session customer_email:', session.customer_email);
-        console.log('[handleStripeWebhook] Session metadata:', JSON.stringify(session.metadata, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Session customer_email:', session.customer_email);
+        logWebhookDebug('[handleStripeWebhook] Session metadata:', JSON.stringify(session.metadata, null, 2));
         console.log('[handleStripeWebhook] Session subscription:', session.subscription);
-        console.log('[handleStripeWebhook] Session customer:', session.customer);
+        logWebhookDebug('[handleStripeWebhook] Session customer:', session.customer);
         
         const userId = session.metadata?.userId;
         console.log('[handleStripeWebhook] UserId extrait:', userId);
         
         if (!userId) {
           console.error('[handleStripeWebhook] ❌ userId manquant dans metadata');
-          console.error('[handleStripeWebhook] Metadata complet:', session.metadata);
+          logWebhookDebug('[handleStripeWebhook] Metadata complet:', session.metadata);
           break;
         }
 
@@ -540,7 +587,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         if (!subscriptionId) {
           console.error('[handleStripeWebhook] ❌❌❌ subscriptionId manquant dans session ❌❌❌');
           console.error('[handleStripeWebhook] Request ID:', requestId);
-          console.error('[handleStripeWebhook] Session complète:', JSON.stringify(session, null, 2));
+          logWebhookDebug('[handleStripeWebhook] Session complète:', JSON.stringify(session, null, 2));
           console.error('[handleStripeWebhook] ⚠️ Arrêt du traitement - subscriptionId requis');
           break;
         }
@@ -551,13 +598,13 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         try {
           subscription = await stripe.subscriptions.retrieve(subscriptionId);
           console.log('[handleStripeWebhook] ✅✅✅ Subscription récupérée depuis Stripe avec succès!');
-          console.log('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
+          logWebhookDebug('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
           console.log('[handleStripeWebhook] Subscription ID:', subscription.id);
           console.log('[handleStripeWebhook] Subscription status:', subscription.status);
-          console.log('[handleStripeWebhook] Subscription customer:', subscription.customer);
+          logWebhookDebug('[handleStripeWebhook] Subscription customer:', subscription.customer);
           console.log('[handleStripeWebhook] Subscription current_period_start:', subscription.current_period_start);
           console.log('[handleStripeWebhook] Subscription current_period_end:', subscription.current_period_end);
-          console.log('[handleStripeWebhook] Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
+          logWebhookDebug('[handleStripeWebhook] Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
         } catch (stripeError: any) {
           console.error('[handleStripeWebhook] ❌❌❌ ERREUR Récupération subscription depuis Stripe ❌❌❌');
           console.error('[handleStripeWebhook] Request ID:', requestId);
@@ -587,13 +634,13 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           },
         };
         
-        console.log('[handleStripeWebhook] Données subscription préparées:', JSON.stringify(subscriptionData, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Données subscription préparées:', JSON.stringify(subscriptionData, null, 2));
         console.log('[handleStripeWebhook] Subscription tier:', subscriptionData.subscription.tier);
         console.log('[handleStripeWebhook] Subscription status:', subscriptionData.subscription.status);
         console.log('[handleStripeWebhook] Subscription startDate:', subscriptionData.subscription.subscriptionStartDate);
         console.log('[handleStripeWebhook] Subscription endDate:', subscriptionData.subscription.subscriptionEndDate);
-        console.log('[handleStripeWebhook] Subscription stripeCustomerId:', subscriptionData.subscription.stripeCustomerId);
-        console.log('[handleStripeWebhook] Subscription stripeSubscriptionId:', subscriptionData.subscription.stripeSubscriptionId);
+        logWebhookDebug('[handleStripeWebhook] Subscription stripeCustomerId:', subscriptionData.subscription.stripeCustomerId);
+        logWebhookDebug('[handleStripeWebhook] Subscription stripeSubscriptionId:', subscriptionData.subscription.stripeSubscriptionId);
         
         // Vérifier si le document existe, sinon créer avec userId
         console.log('[handleStripeWebhook] 🔍 VÉRIFICATION Existence document utilisateur dans Firestore...');
@@ -605,10 +652,10 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           console.log('[handleStripeWebhook] Document existe:', userDoc.exists);
           if (userDoc.exists) {
             const currentData = userDoc.data();
-            console.log('[handleStripeWebhook] Document actuel (complet):', JSON.stringify(currentData, null, 2));
+            logWebhookDebug('[handleStripeWebhook] Document actuel (complet):', JSON.stringify(currentData, null, 2));
             console.log('[handleStripeWebhook] Clés présentes dans document:', Object.keys(currentData || {}));
             if (currentData?.subscription) {
-              console.log('[handleStripeWebhook] Subscription existante:', JSON.stringify(currentData.subscription, null, 2));
+              logWebhookDebug('[handleStripeWebhook] Subscription existante:', JSON.stringify(currentData.subscription, null, 2));
             } else {
               console.log('[handleStripeWebhook] ⚠️ Aucune subscription existante dans le document');
             }
@@ -638,7 +685,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         
         console.log('[handleStripeWebhook] 📝 Données finales à écrire dans Firestore:');
         console.log('[handleStripeWebhook] Document existe avant écriture:', userDoc.exists);
-        console.log('[handleStripeWebhook] Données complètes:', JSON.stringify(finalData, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Données complètes:', JSON.stringify(finalData, null, 2));
         console.log('[handleStripeWebhook] 🔧 ÉCRITURE Firestore avec set(..., { merge: true })...');
         console.log('[handleStripeWebhook] Chemin Firestore:', `users/${userId}`);
         
@@ -650,7 +697,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           console.error('[handleStripeWebhook] ❌❌❌ ERREUR Écriture Firestore ❌❌❌');
           console.error('[handleStripeWebhook] Request ID:', requestId);
           console.error('[handleStripeWebhook] UserId:', userId);
-          console.error('[handleStripeWebhook] Données tentées:', JSON.stringify(finalData, null, 2));
+          logWebhookDebug('[handleStripeWebhook] Données tentées:', JSON.stringify(finalData, null, 2));
           console.error('[handleStripeWebhook] Erreur type:', writeError?.constructor?.name || typeof writeError);
           console.error('[handleStripeWebhook] Erreur message:', writeError.message);
           console.error('[handleStripeWebhook] Erreur code:', writeError.code);
@@ -667,25 +714,25 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           console.log('[handleStripeWebhook] Document après écriture existe:', verifyDoc.exists);
           if (verifyDoc.exists) {
             const verifyData = verifyDoc.data();
-            console.log('[handleStripeWebhook] Document après écriture (complet):', JSON.stringify(verifyData, null, 2));
+            logWebhookDebug('[handleStripeWebhook] Document après écriture (complet):', JSON.stringify(verifyData, null, 2));
             console.log('[handleStripeWebhook] Clés présentes après écriture:', Object.keys(verifyData || {}));
             
             // Vérifier spécifiquement la subscription
             if (verifyData?.subscription) {
               console.log('[handleStripeWebhook] ✅✅✅ SUBSCRIPTION TROUVÉE DANS LE DOCUMENT! ✅✅✅');
-              console.log('[handleStripeWebhook] Subscription complète:', JSON.stringify(verifyData.subscription, null, 2));
+              logWebhookDebug('[handleStripeWebhook] Subscription complète:', JSON.stringify(verifyData.subscription, null, 2));
               console.log('[handleStripeWebhook] Subscription tier:', verifyData.subscription.tier);
               console.log('[handleStripeWebhook] Subscription status:', verifyData.subscription.status);
               console.log('[handleStripeWebhook] Subscription startDate:', verifyData.subscription.subscriptionStartDate);
               console.log('[handleStripeWebhook] Subscription endDate:', verifyData.subscription.subscriptionEndDate);
-              console.log('[handleStripeWebhook] Subscription stripeCustomerId:', verifyData.subscription.stripeCustomerId);
-              console.log('[handleStripeWebhook] Subscription stripeSubscriptionId:', verifyData.subscription.stripeSubscriptionId);
+              logWebhookDebug('[handleStripeWebhook] Subscription stripeCustomerId:', verifyData.subscription.stripeCustomerId);
+              logWebhookDebug('[handleStripeWebhook] Subscription stripeSubscriptionId:', verifyData.subscription.stripeSubscriptionId);
             } else {
               console.error('[handleStripeWebhook] ❌❌❌ SUBSCRIPTION NON TROUVÉE DANS LE DOCUMENT! ❌❌❌');
               console.error('[handleStripeWebhook] Request ID:', requestId);
               console.error('[handleStripeWebhook] UserId:', userId);
               console.error('[handleStripeWebhook] Clés présentes:', Object.keys(verifyData || {}));
-              console.error('[handleStripeWebhook] Document complet:', JSON.stringify(verifyData, null, 2));
+              logWebhookDebug('[handleStripeWebhook] Document complet:', JSON.stringify(verifyData, null, 2));
             }
           } else {
             console.error('[handleStripeWebhook] ❌❌❌ DOCUMENT N\'EXISTE TOUJOURS PAS APRÈS ÉCRITURE! ❌❌❌');
@@ -713,13 +760,13 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         console.log('[handleStripeWebhook] 📦 Événement: customer.subscription.created');
         console.log('[handleStripeWebhook] Request ID:', requestId);
         const subscription = event.data.object;
-        console.log('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
         console.log('[handleStripeWebhook] Subscription ID:', subscription.id);
         console.log('[handleStripeWebhook] Subscription status:', subscription.status);
-        console.log('[handleStripeWebhook] Subscription customer:', subscription.customer);
+        logWebhookDebug('[handleStripeWebhook] Subscription customer:', subscription.customer);
         console.log('[handleStripeWebhook] Subscription current_period_start:', subscription.current_period_start);
         console.log('[handleStripeWebhook] Subscription current_period_end:', subscription.current_period_end);
-        console.log('[handleStripeWebhook] Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
         
         // Essayer d'obtenir userId depuis metadata ou depuis Firestore via customerId
         let userId = subscription.metadata?.userId;
@@ -728,7 +775,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         
         if (!userId) {
           console.log('[handleStripeWebhook] ⚠️ userId non trouvé dans metadata, recherche par customerId dans Firestore...');
-          console.log('[handleStripeWebhook] Customer ID à rechercher:', subscription.customer);
+          logWebhookDebug('[handleStripeWebhook] Customer ID à rechercher:', subscription.customer);
           console.log('[handleStripeWebhook] Requête Firestore: collection("users").where("subscription.stripeCustomerId", "==", customerId)');
           
           let usersSnapshot;
@@ -746,11 +793,11 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
               userId = usersSnapshot.docs[0].id;
               console.log('[handleStripeWebhook] ✅✅✅ Utilisateur trouvé par customerId!');
               console.log('[handleStripeWebhook] UserId trouvé:', userId);
-              console.log('[handleStripeWebhook] Document utilisateur:', JSON.stringify(usersSnapshot.docs[0].data(), null, 2));
+              logWebhookDebug('[handleStripeWebhook] Document utilisateur:', JSON.stringify(usersSnapshot.docs[0].data(), null, 2));
             } else {
               console.error('[handleStripeWebhook] ❌❌❌ Utilisateur non trouvé pour customer ❌❌❌');
               console.error('[handleStripeWebhook] Request ID:', requestId);
-              console.error('[handleStripeWebhook] Customer ID:', subscription.customer);
+              logWebhookDebug('[handleStripeWebhook] Customer ID:', subscription.customer);
               console.error('[handleStripeWebhook] ⚠️ Impossible de créer l\'abonnement sans userId');
               console.error('[handleStripeWebhook] ⚠️ Arrêt du traitement');
               break;
@@ -758,7 +805,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           } catch (searchError: any) {
             console.error('[handleStripeWebhook] ❌❌❌ ERREUR Recherche utilisateur par customerId ❌❌❌');
             console.error('[handleStripeWebhook] Request ID:', requestId);
-            console.error('[handleStripeWebhook] Customer ID:', subscription.customer);
+            logWebhookDebug('[handleStripeWebhook] Customer ID:', subscription.customer);
             console.error('[handleStripeWebhook] Erreur type:', searchError?.constructor?.name || typeof searchError);
             console.error('[handleStripeWebhook] Erreur message:', searchError.message);
             console.error('[handleStripeWebhook] Erreur code:', searchError.code);
@@ -787,7 +834,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           },
         };
         
-        console.log('[handleStripeWebhook] Données subscription préparées:', JSON.stringify(subscriptionData, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Données subscription préparées:', JSON.stringify(subscriptionData, null, 2));
         console.log('[handleStripeWebhook] Subscription tier:', subscriptionData.subscription.tier);
         console.log('[handleStripeWebhook] Subscription status:', subscriptionData.subscription.status);
         console.log('[handleStripeWebhook] Subscription startDate:', subscriptionData.subscription.subscriptionStartDate);
@@ -801,7 +848,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
           console.log('[handleStripeWebhook] Document existe:', userDoc.exists);
           if (userDoc.exists) {
             const currentData = userDoc.data();
-            console.log('[handleStripeWebhook] Document actuel:', JSON.stringify(currentData, null, 2));
+            logWebhookDebug('[handleStripeWebhook] Document actuel:', JSON.stringify(currentData, null, 2));
           }
         } catch (getError: any) {
           console.error('[handleStripeWebhook] ❌❌❌ ERREUR Firestore get() ❌❌❌');
@@ -820,7 +867,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
               ...subscriptionData,
             };
         
-        console.log('[handleStripeWebhook] 📝 Données finales à écrire:', JSON.stringify(finalData, null, 2));
+        logWebhookDebug('[handleStripeWebhook] 📝 Données finales à écrire:', JSON.stringify(finalData, null, 2));
         console.log('[handleStripeWebhook] 🔧 ÉCRITURE Firestore avec set(..., { merge: true })...');
         
         try {
@@ -843,7 +890,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
             const verifyData = verifyDoc.data();
             if (verifyData?.subscription) {
               console.log('[handleStripeWebhook] ✅✅✅ SUBSCRIPTION TROUVÉE DANS LE DOCUMENT! ✅✅✅');
-              console.log('[handleStripeWebhook] Subscription:', JSON.stringify(verifyData.subscription, null, 2));
+              logWebhookDebug('[handleStripeWebhook] Subscription:', JSON.stringify(verifyData.subscription, null, 2));
             } else {
               console.error('[handleStripeWebhook] ❌❌❌ SUBSCRIPTION NON TROUVÉE DANS LE DOCUMENT! ❌❌❌');
             }
@@ -861,11 +908,11 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         console.log('[handleStripeWebhook] 📦 Événement: customer.subscription.updated');
         console.log('[handleStripeWebhook] Request ID:', requestId);
         const subscription = event.data.object;
-        console.log('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
         console.log('[handleStripeWebhook] Subscription ID:', subscription.id);
         console.log('[handleStripeWebhook] Subscription status:', subscription.status);
         const customerId = subscription.customer;
-        console.log('[handleStripeWebhook] Customer ID:', customerId);
+        logWebhookDebug('[handleStripeWebhook] Customer ID:', customerId);
         
         console.log('[handleStripeWebhook] 🔍 RECHERCHE Utilisateur par customerId...');
         let usersSnapshot;
@@ -890,20 +937,20 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         if (usersSnapshot.empty) {
           console.error('[handleStripeWebhook] ❌❌❌ Utilisateur non trouvé pour customer ❌❌❌');
           console.error('[handleStripeWebhook] Request ID:', requestId);
-          console.error('[handleStripeWebhook] Customer ID:', customerId);
+          logWebhookDebug('[handleStripeWebhook] Customer ID:', customerId);
           break;
         }
 
         const userDoc = usersSnapshot.docs[0];
         console.log('[handleStripeWebhook] ✅ Utilisateur trouvé:', userDoc.id);
-        console.log('[handleStripeWebhook] Document utilisateur:', JSON.stringify(userDoc.data(), null, 2));
+        logWebhookDebug('[handleStripeWebhook] Document utilisateur:', JSON.stringify(userDoc.data(), null, 2));
         
         const subscriptionData = {
           status: subscription.status === 'active' ? 'active' : 'past_due',
           subscriptionEndDate: new Date(subscription.current_period_end * 1000).toISOString(),
         };
         
-        console.log('[handleStripeWebhook] 📝 Données à mettre à jour:', JSON.stringify(subscriptionData, null, 2));
+        logWebhookDebug('[handleStripeWebhook] 📝 Données à mettre à jour:', JSON.stringify(subscriptionData, null, 2));
         console.log('[handleStripeWebhook] 🔧 MISE À JOUR Firestore avec update()...');
         
         try {
@@ -931,9 +978,9 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         console.log('[handleStripeWebhook] 📦 Événement: customer.subscription.deleted');
         console.log('[handleStripeWebhook] Request ID:', requestId);
         const subscription = event.data.object;
-        console.log('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Subscription complète:', JSON.stringify(subscription, null, 2));
         const customerId = subscription.customer;
-        console.log('[handleStripeWebhook] Customer ID:', customerId);
+        logWebhookDebug('[handleStripeWebhook] Customer ID:', customerId);
         
         console.log('[handleStripeWebhook] 🔍 RECHERCHE Utilisateur par customerId...');
         let usersSnapshot;
@@ -958,7 +1005,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
         if (usersSnapshot.empty) {
           console.error('[handleStripeWebhook] ❌❌❌ Utilisateur non trouvé pour customer ❌❌❌');
           console.error('[handleStripeWebhook] Request ID:', requestId);
-          console.error('[handleStripeWebhook] Customer ID:', customerId);
+          logWebhookDebug('[handleStripeWebhook] Customer ID:', customerId);
           break;
         }
 
@@ -990,14 +1037,14 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
       default:
         console.log(`[handleStripeWebhook] ⚠️ Événement non géré: ${event.type}`);
         console.log('[handleStripeWebhook] Request ID:', requestId);
-        console.log('[handleStripeWebhook] Événement complet:', JSON.stringify(event, null, 2));
+        logWebhookDebug('[handleStripeWebhook] Événement complet:', JSON.stringify(event, null, 2));
     }
 
     console.log('[handleStripeWebhook] ✅✅✅ Traitement événement terminé avec succès ✅✅✅');
     console.log('[handleStripeWebhook] Request ID:', requestId);
     console.log('[handleStripeWebhook] 📤 ENVOI Réponse HTTP 200...');
     const responseBody = { received: true, requestId: requestId };
-    console.log('[handleStripeWebhook] Response body:', JSON.stringify(responseBody, null, 2));
+    logWebhookDebug('[handleStripeWebhook] Response body:', JSON.stringify(responseBody, null, 2));
     res.json(responseBody);
     console.log('[handleStripeWebhook] ✅ Réponse HTTP envoyée avec succès');
     console.log('[handleStripeWebhook] Status code: 200');
@@ -1009,7 +1056,7 @@ export const handleStripeWebhook = functions.https.onRequest(async (req: functio
     console.error('[handleStripeWebhook] Erreur code:', error.code);
     console.error('[handleStripeWebhook] Erreur name:', error.name);
     console.error('[handleStripeWebhook] Erreur stack complète:', error.stack);
-    console.error('[handleStripeWebhook] Erreur complète (JSON):', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    logWebhookDebug('[handleStripeWebhook] Erreur complète (JSON):', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     console.error('[handleStripeWebhook] 📤 ENVOI Réponse HTTP 500...');
     console.error('[handleStripeWebhook] Status code: 500');
     res.status(500).send('Erreur traitement webhook');
